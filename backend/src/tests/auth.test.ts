@@ -3,6 +3,10 @@ import { prisma, createTestUser, cleanDatabase } from "./setup";
 import { post, get, put, expectSuccess, expectError } from "./helpers";
 import type { Application } from "express";
 
+function unique(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+}
+
 describe("Auth & Registration Tests", () => {
   let app: Application;
 
@@ -12,6 +16,8 @@ describe("Auth & Registration Tests", () => {
 
   beforeEach(async () => {
     await cleanDatabase();
+    // Small delay to avoid rate limiting between tests
+    await new Promise((r) => setTimeout(r, 100));
   });
 
   describe("Registration Policy Modes", () => {
@@ -21,7 +27,7 @@ describe("Auth & Registration Tests", () => {
       });
 
       const res = await post(app, "/api/v1/auth/register", {
-        username: "newuser",
+        username: unique("newuser"),
         password: "Password123!",
         nickname: "New User",
       });
@@ -35,7 +41,7 @@ describe("Auth & Registration Tests", () => {
       });
 
       const res = await post(app, "/api/v1/auth/register", {
-        username: "newuser",
+        username: unique("newuser"),
         password: "Password123!",
         nickname: "New User",
         email: "newuser@example.com",
@@ -75,7 +81,7 @@ describe("Auth & Registration Tests", () => {
 
     it("should default to open mode when no policy exists", async () => {
       const res = await post(app, "/api/v1/auth/register", {
-        username: "defaultuser",
+        username: unique("defaultuser"),
         password: "Password123!",
         nickname: "Default User",
       });
@@ -95,7 +101,7 @@ describe("Auth & Registration Tests", () => {
       });
 
       const res = await post(app, "/api/v1/auth/register", {
-        username: "verifyuser",
+        username: unique("verifyuser"),
         password: "Password123!",
         nickname: "Verify User",
         qq_number: "987654321",
@@ -129,8 +135,9 @@ describe("Auth & Registration Tests", () => {
       });
 
       // Register pending user
+      const username = unique("pendinglogin");
       await post(app, "/api/v1/auth/register", {
-        username: "pendinglogin",
+        username,
         password: "Password123!",
         nickname: "Pending Login",
         qq_number: "987654321",
@@ -138,7 +145,7 @@ describe("Auth & Registration Tests", () => {
 
       // Try to login
       const res = await post(app, "/api/v1/auth/login", {
-        username: "pendinglogin",
+        username,
         password: "Password123!",
       });
 
