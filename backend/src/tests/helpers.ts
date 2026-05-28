@@ -12,7 +12,7 @@ export function get(app: Application, path: string, token?: string) {
   return req;
 }
 
-export function post(app: Application, path: string, body: unknown, token?: string) {
+export function post(app: Application, path: string, body: object | string | undefined, token?: string) {
   const req = request(app).post(path).send(body);
   if (token) {
     req.set("Authorization", `Bearer ${token}`);
@@ -20,7 +20,7 @@ export function post(app: Application, path: string, body: unknown, token?: stri
   return req;
 }
 
-export function put(app: Application, path: string, body: unknown, token?: string) {
+export function put(app: Application, path: string, body: object | string | undefined, token?: string) {
   const req = request(app).put(path).send(body);
   if (token) {
     req.set("Authorization", `Bearer ${token}`);
@@ -28,7 +28,7 @@ export function put(app: Application, path: string, body: unknown, token?: strin
   return req;
 }
 
-export function patch(app: Application, path: string, body: unknown, token?: string) {
+export function patch(app: Application, path: string, body: object | string | undefined, token?: string) {
   const req = request(app).patch(path).send(body);
   if (token) {
     req.set("Authorization", `Bearer ${token}`);

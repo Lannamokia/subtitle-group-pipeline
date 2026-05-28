@@ -177,7 +177,7 @@ export function sanitizeFilename(filename: string): string {
 export async function uploadFile(
   uploaderId: string,
   data: UploadFileInput
-): Promise<unknown> {
+) {
   // Validate project exists
   const project = await prisma.project.findUnique({
     where: { id: data.project_id },
@@ -242,13 +242,17 @@ export async function uploadFile(
   };
 }
 
+export async function createFile(uploaderId: string, data: UploadFileInput) {
+  return uploadFile(uploaderId, data);
+}
+
 // ============ Replace File (explicit replace) ============
 
 export async function replaceFile(
   fileId: string,
   uploaderId: string,
   data: ReplaceFileInput
-): Promise<unknown> {
+) {
   const file = await prisma.fileEntity.findUnique({
     where: { id: fileId },
     include: {
@@ -903,10 +907,6 @@ export async function batchArchiveUnits(projectId: string) {
 }
 
 // ============ Cleanup Expired Links ============
-
-export async function createFile(uploaderId: string, data: UploadFileInput) {
-  return uploadFile(uploaderId, data);
-}
 
 export async function cleanupExpiredLinks(): Promise<number> {
   const result = await prisma.downloadLink.updateMany({
