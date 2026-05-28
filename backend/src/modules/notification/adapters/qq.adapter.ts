@@ -50,11 +50,11 @@ async function sendNoneBotRequest(
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const data = await response.json().catch(() => null);
+    const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
 
     return {
       success: true,
-      messageId: data?.message_id || `qq-${Date.now()}`,
+      messageId: (data?.message_id as string) || `qq-${Date.now()}`,
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

@@ -45,7 +45,7 @@ export async function getAnnouncement(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await announcementService.getAnnouncementById(req.params.id);
+    const result = await announcementService.getAnnouncementById(req.params.id as string);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -59,7 +59,7 @@ export async function updateAnnouncement(
 ): Promise<void> {
   try {
     const result = await announcementService.updateAnnouncement(
-      req.params.id,
+      req.params.id as string,
       req.user!.id,
       req.user!.role,
       req.body
@@ -77,7 +77,7 @@ export async function deleteAnnouncement(
 ): Promise<void> {
   try {
     const result = await announcementService.deleteAnnouncement(
-      req.params.id,
+      req.params.id as string,
       req.user!.id,
       req.user!.role
     );

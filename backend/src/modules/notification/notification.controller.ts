@@ -43,7 +43,7 @@ export async function markAsRead(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await notificationService.markAsRead(req.user!.id, req.params.id);
+    const result = await notificationService.markAsRead(req.user!.id, req.params.id as string);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -69,7 +69,7 @@ export async function dismissNotification(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await notificationService.dismissNotification(req.user!.id, req.params.id);
+    const result = await notificationService.dismissNotification(req.user!.id, req.params.id as string);
     successResponse(res, result);
   } catch (error) {
     next(error);

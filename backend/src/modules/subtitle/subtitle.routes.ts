@@ -112,7 +112,6 @@ router.get(
 
 // Legacy merge job routes
 router.get("/merge-jobs", validateQuery(mergeJobQuerySchema), controller.getMergeJobs);
-router.post("/merge-jobs", authenticate, validateBody(createMergeJobSchema), controller.createMergeJobLegacy as unknown as Router);
 router.patch(
   "/merge-jobs/:id/status",
   authenticate,
