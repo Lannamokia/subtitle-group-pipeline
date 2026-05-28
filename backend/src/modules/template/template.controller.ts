@@ -1,14 +1,15 @@
 import { Request, Response, NextFunction } from "express";
 import { successResponse } from "../../utils/response";
+import { AuthenticatedRequest } from "../../middleware/auth";
 import * as templateService from "./template.service";
 
 export async function createTemplate(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await templateService.createTemplate(req.body);
+    const result = await templateService.createTemplate(req.body, req.user?.id);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -21,7 +22,9 @@ export async function getTemplates(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await templateService.getTemplates(req.query as unknown as Parameters<typeof templateService.getTemplates>[0]);
+    const result = await templateService.getTemplates(
+      req.query as unknown as Parameters<typeof templateService.getTemplates>[0]
+    );
     successResponse(res, result.templates, 200, result.meta);
   } catch (error) {
     next(error);
@@ -42,12 +45,16 @@ export async function getTemplate(
 }
 
 export async function updateTemplate(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await templateService.updateTemplate(req.params.id, req.body);
+    const result = await templateService.updateTemplate(
+      req.params.id,
+      req.body,
+      req.user?.id
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -55,12 +62,31 @@ export async function updateTemplate(
 }
 
 export async function deleteTemplate(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await templateService.deleteTemplate(req.params.id);
+    const result = await templateService.deleteTemplate(
+      req.params.id,
+      req.user?.id
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function setDefaultTemplate(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await templateService.setDefaultTemplate(
+      req.params.id,
+      req.user?.id
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);

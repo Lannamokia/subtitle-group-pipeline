@@ -9,7 +9,9 @@ export const createStorageBackendSchema = z.object({
   quota_bytes: z.number().int().min(0).optional().nullable(),
 });
 
-export const updateStorageBackendSchema = createStorageBackendSchema.partial();
+export const updateStorageBackendSchema = createStorageBackendSchema.partial().extend({
+  is_active: z.boolean().optional(),
+});
 
 export const storageQuerySchema = z.object({
   page: z.string().optional().transform(Number).default("1"),

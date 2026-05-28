@@ -9,7 +9,15 @@ export async function createAnnouncement(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await announcementService.createAnnouncement(req.user!.id, req.body);
+    const data = req.body;
+    let result;
+
+    if (data.type === "global" || !data.type) {
+      result = await announcementService.createGlobalAnnouncement(req.user!.id, data);
+    } else {
+      result = await announcementService.createProjectAnnouncement(req.user!.id, data);
+    }
+
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -22,7 +30,9 @@ export async function getAnnouncements(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await announcementService.getAnnouncements(req.query as unknown as Parameters<typeof announcementService.getAnnouncements>[0]);
+    const result = await announcementService.getAnnouncements(
+      req.query as unknown as Parameters<typeof announcementService.getAnnouncements>[0]
+    );
     successResponse(res, result.announcements, 200, result.meta);
   } catch (error) {
     next(error);
@@ -43,12 +53,17 @@ export async function getAnnouncement(
 }
 
 export async function updateAnnouncement(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await announcementService.updateAnnouncement(req.params.id, req.body);
+    const result = await announcementService.updateAnnouncement(
+      req.params.id,
+      req.user!.id,
+      req.user!.role,
+      req.body
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -56,12 +71,35 @@ export async function updateAnnouncement(
 }
 
 export async function deleteAnnouncement(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await announcementService.deleteAnnouncement(req.params.id);
+    const result = await announcementService.deleteAnnouncement(
+      req.params.id,
+      req.user!.id,
+      req.user!.role
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function pinAnnouncement(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const pinned = req.body.pinned ?? true;
+    const result = await announcementService.pinAnnouncement(
+      req.params.id,
+      req.user!.id,
+      req.user!.role,
+      pinned
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);

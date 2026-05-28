@@ -15,8 +15,34 @@ const idParamSchema = z.object({ id: z.string().uuid("Invalid template ID") });
 
 router.get("/", validateQuery(templateQuerySchema), controller.getTemplates);
 router.get("/:id", validateParams(idParamSchema), controller.getTemplate);
-router.post("/", authenticate, requireRole("super_admin", "admin"), validateBody(createTemplateSchema), controller.createTemplate);
-router.patch("/:id", authenticate, requireRole("super_admin", "admin"), validateParams(idParamSchema), validateBody(updateTemplateSchema), controller.updateTemplate);
-router.delete("/:id", authenticate, requireRole("super_admin", "admin"), validateParams(idParamSchema), controller.deleteTemplate);
+router.post(
+  "/",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateBody(createTemplateSchema),
+  controller.createTemplate
+);
+router.patch(
+  "/:id",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateParams(idParamSchema),
+  validateBody(updateTemplateSchema),
+  controller.updateTemplate
+);
+router.delete(
+  "/:id",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateParams(idParamSchema),
+  controller.deleteTemplate
+);
+router.post(
+  "/:id/set-default",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateParams(idParamSchema),
+  controller.setDefaultTemplate
+);
 
 export default router;

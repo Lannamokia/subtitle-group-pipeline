@@ -35,6 +35,7 @@ enum ProjectStatus {
   completed
   archived
   cancelled
+  deleted
 }
 
 enum ProjectType {
@@ -103,8 +104,12 @@ enum StorageType {
 enum NotificationType {
   task_assigned
   task_completed
+  task_reassigned
+  task_cancelled
+  task_reset
   review_requested
-  review_completed
+  review_approved
+  review_rejected
   claim_expired
   project_update
   mention
@@ -115,18 +120,27 @@ enum NotificationType {
   file_uploaded
   conflict_detected
   announcement
+  task_overdue
+  downstream_reset
 }
 
 enum NotificationChannel {
-  in_app
+  in_site
   email
-  webhook
+  qq
 }
 
 enum NotificationStatus {
   unread
   read
   dismissed
+}
+
+enum DeliveryStatus {
+  pending
+  sent
+  delivered
+  failed
 }
 
 enum WikiStatus {
@@ -164,17 +178,40 @@ enum TimelineEventType {
   project_resumed
   project_completed
   project_archived
+  project_unarchived
+  project_deleted
+  project_restored
   task_created
+  task_claimed
+  task_assigned
   task_started
+  task_submitted
+  task_approved
+  task_rejected
+  task_reset
+  task_cancelled
+  task_returned
   task_completed
-  task_blocked
+  task_overdue
+  task_frozen
   member_joined
   member_left
+  member_added
+  member_removed
+  join_request_created
+  join_request_approved
+  join_request_rejected
   file_uploaded
   review_submitted
+  review_approved
+  review_rejected
   conflict_detected
   conflict_resolved
   milestone_reached
+  wiki_updated
+  wiki_approved
+  wiki_rejected
+  announcement
   custom
 }
 
@@ -222,6 +259,7 @@ model User {
   created_announcements Announcement[] @relation("AnnouncementCreator")
   download_links       DownloadLink[]
   recycle_bin_items    RecycleBinRecord[]
+  notification_preferences NotificationPreference?
 
   @@index([username])
   @@index([email])
@@ -292,12 +330,13 @@ model ProjectTemplate {
   name                 String
   description          String?
   project_type         ProjectType @default(anime)
-  roles                String // JSON: array of { role, required, description }
+  roles                String // JSON: array of { role, enabled, slotCount, assignmentStrategy, maxSegmentLength }
   upload_policy        String // JSON: { allowedTypes, maxSize, requireApproval }
   notification_policy  String // JSON: { channels, events }
   ass_policy           String // JSON: { format, styleRules, timingRules }
   product_config       String // JSON: { resolutions, codecs, containers }
   delivery_checklist   String // JSON: array of checklist items
+  release_task_type    String   @default("torrent") // torrent, torrent+cloud_drive, cloud_drive, other
   is_default           Boolean  @default(false)
   created_at           DateTime @default(now())
   updated_at           DateTime @updatedAt
@@ -363,6 +402,7 @@ model ProjectUnit {
 
   project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
   tasks   Task[]
+  claims  TranslationClaim[]
 
   @@unique([project_id, season_number, unit_number])
   @@index([project_id])
@@ -373,7 +413,7 @@ model ProjectMember {
   id         String   @id @default(uuid())
   project_id String
   user_id    String
-  role       TaskRole @default(translator)
+  role       TaskRole @default(translation)
   is_lead    Boolean  @default(false)
   joined_at  DateTime @default(now())
   left_at    DateTime?
@@ -421,7 +461,10 @@ model Task {
   blocked_by      String?    // JSON: array of task IDs
   due_date        DateTime?
   started_at      DateTime?
+  submitted_at    DateTime?
   completed_at    DateTime?
+  cancelled_at    DateTime?
+  frozen_at       DateTime?
   created_at      DateTime   @default(now())
   updated_at      DateTime   @updatedAt
 
@@ -464,37 +507,46 @@ model TaskDependency {
 model TranslationClaim {
   id            String      @id @default(uuid())
   task_id       String
+  unit_id       String?     // direct link to project unit for easier querying
   user_id       String
-  segment_start Int         // line number or timestamp start
-  segment_end   Int         // line number or timestamp end
+  segment_start Int         // timestamp in seconds (start time)
+  segment_end   Int         // timestamp in seconds (end time)
   status        ClaimStatus @default(pending)
   claimed_at    DateTime    @default(now())
   submitted_at  DateTime?
   approved_at   DateTime?
   expires_at    DateTime?
 
-  task Task @relation(fields: [task_id], references: [id], onDelete: Cascade)
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  task         Task                    @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  user         User                    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  unit         ProjectUnit?            @relation(fields: [unit_id], references: [id], onDelete: SetNull)
+  submissions  TranslationSubmission[]
 
   @@index([task_id])
+  @@index([unit_id])
   @@index([user_id])
   @@index([status])
   @@index([expires_at])
 }
 
 model TranslationSubmission {
-  id          String   @id @default(uuid())
-  task_id     String
-  user_id     String
-  content     String   // the translated content
-  line_count  Int?
-  submitted_at DateTime @default(now())
+  id               String   @id @default(uuid())
+  task_id          String
+  user_id          String
+  claim_id         String?  // link to the claim this submission is for
+  file_version_id  String?  // link to uploaded ASS file in version chain
+  content          String   // the translated content (inline text or ASS content)
+  line_count       Int?
+  submitted_at     DateTime @default(now())
 
-  task Task @relation(fields: [task_id], references: [id], onDelete: Cascade)
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  task  Task              @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  user  User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  claim TranslationClaim? @relation(fields: [claim_id], references: [id], onDelete: SetNull)
 
   @@index([task_id])
   @@index([user_id])
+  @@index([claim_id])
+  @@index([file_version_id])
 }
 
 // ==================== MERGE & CONFLICT TABLES ====================
@@ -594,6 +646,7 @@ model FileEntity {
   storage_backend_id String?
   checksum        String?
   metadata        String?   // JSON: extra metadata
+  tags            String?   // JSON: array of tags e.g. ["sensitive"]
   is_deleted      Boolean   @default(false)
   deleted_at      DateTime?
   deleted_by      String?
@@ -701,10 +754,13 @@ model NotificationDelivery {
   id                String              @id @default(uuid())
   notification_id   String
   channel           NotificationChannel
-  status            String              @default("pending") // pending, sent, failed
+  status            DeliveryStatus      @default(pending)
   external_id       String?             // e.g., email message ID
   error_message     String?
+  retry_count       Int                 @default(0)
   sent_at           DateTime?
+  delivered_at      DateTime?
+  failed_at         DateTime?
   created_at        DateTime            @default(now())
 
   notification Notification @relation(fields: [notification_id], references: [id], onDelete: Cascade)
@@ -712,6 +768,34 @@ model NotificationDelivery {
   @@index([notification_id])
   @@index([channel])
   @@index([status])
+}
+
+model NotificationPreference {
+  id                    String   @id @default(uuid())
+  user_id               String   @unique
+  email_enabled         Boolean  @default(true)
+  qq_enabled            Boolean  @default(true)
+  in_site_enabled       Boolean  @default(true)
+  email_escalation_min  Int      @default(30)    // minutes before escalating to email
+  qq_escalation_min     Int      @default(120)   // minutes before escalating to QQ
+  task_assigned         Boolean  @default(true)
+  task_completed        Boolean  @default(true)
+  task_reassigned       Boolean  @default(true)
+  review_requested      Boolean  @default(true)
+  review_approved       Boolean  @default(true)
+  review_rejected       Boolean  @default(true)
+  join_approved         Boolean  @default(true)
+  file_uploaded         Boolean  @default(true)
+  mention               Boolean  @default(true)
+  task_overdue          Boolean  @default(true)
+  conflict_detected     Boolean  @default(true)
+  downstream_reset      Boolean  @default(true)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
 }
 
 // ==================== ANNOUNCEMENT TABLES ====================
@@ -918,4 +1002,5 @@ model RecycleBinRecord {
   @@index([resource_type])
   @@index([resource_id])
   @@index([expires_at])
-  @@index([restored_at]
+  @@index([restored_at])
+}

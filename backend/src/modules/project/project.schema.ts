@@ -9,6 +9,16 @@ export const createProjectSchema = z.object({
   storage_backend_id: z.string().uuid().optional().nullable(),
 });
 
+export const createProjectFromTemplateSchema = z.object({
+  name: z.string().min(1, "Project name is required").max(200),
+  description: z.string().max(5000).optional().nullable(),
+  template_id: z.string().uuid("Template ID is required"),
+  storage_backend_id: z.string().uuid().optional().nullable(),
+  season_count: z.number().int().min(1).default(1),
+  units_per_season: z.number().int().min(1).default(12),
+  episode_length: z.number().int().min(1).optional().nullable(), // in seconds
+});
+
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).optional().nullable(),
@@ -21,8 +31,14 @@ export const projectQuerySchema = z.object({
   pageSize: z.string().optional().transform(Number).default("20"),
   status: z.nativeEnum(ProjectStatus).optional(),
   project_type: z.nativeEnum(ProjectType).optional(),
+  supervisor_id: z.string().uuid().optional(),
   search: z.string().optional(),
   include_archived: z
+    .string()
+    .optional()
+    .transform((v) => v === "true")
+    .default("false"),
+  include_deleted: z
     .string()
     .optional()
     .transform((v) => v === "true")
@@ -54,10 +70,16 @@ export const joinRequestSchema = z.object({
   message: z.string().max(1000).optional().nullable(),
 });
 
+export const updateJoinRequestSchema = z.object({
+  approved: z.boolean(),
+});
+
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+export type CreateProjectFromTemplateInput = z.infer<typeof createProjectFromTemplateSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type ProjectQueryInput = z.infer<typeof projectQuerySchema>;
 export type AddMemberInput = z.infer<typeof addMemberSchema>;
 export type UpdateMemberInput = z.infer<typeof updateMemberSchema>;
 export type CreateUnitInput = z.infer<typeof createUnitSchema>;
 export type JoinRequestInput = z.infer<typeof joinRequestSchema>;
+export type UpdateJoinRequestInput = z.infer<typeof updateJoinRequestSchema>;

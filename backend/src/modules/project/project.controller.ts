@@ -16,13 +16,29 @@ export async function createProject(
   }
 }
 
+export async function createProjectFromTemplate(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.createProjectFromTemplate(req.user!.id, req.body);
+    successResponse(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getProjects(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.getProjects(req.query as unknown as Parameters<typeof projectService.getProjects>[0], req.user!.id);
+    const result = await projectService.getProjects(
+      req.query as unknown as Parameters<typeof projectService.getProjects>[0],
+      req.user?.id
+    );
     successResponse(res, result.projects, 200, result.meta);
   } catch (error) {
     next(error);
@@ -43,25 +59,12 @@ export async function getProject(
 }
 
 export async function updateProject(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.updateProject(req.params.id, req.body);
-    successResponse(res, result);
-  } catch (error) {
-    next(error);
-  }
-}
-
-export async function deleteProject(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  try {
-    const result = await projectService.deleteProject(req.params.id);
+    const result = await projectService.updateProject(req.params.id, req.body, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -69,12 +72,64 @@ export async function deleteProject(
 }
 
 export async function archiveProject(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.archiveProject(req.params.id, req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function unarchiveProject(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.unarchiveProject(req.params.id, req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function softDeleteProject(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.softDeleteProject(req.params.id, req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function restoreProject(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.restoreProject(req.params.id, req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getProjectMembers(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.archiveProject(req.params.id);
+    const result = await projectService.getProjectMembers(req.params.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -82,12 +137,12 @@ export async function archiveProject(
 }
 
 export async function addMember(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.addMember(req.params.id, req.body);
+    const result = await projectService.addMember(req.params.id, req.body, req.user?.id);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -95,12 +150,12 @@ export async function addMember(
 }
 
 export async function removeMember(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.removeMember(req.params.id, req.params.userId);
+    const result = await projectService.removeMember(req.params.id, req.params.userId, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -121,12 +176,12 @@ export async function updateMember(
 }
 
 export async function createUnit(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.createUnit(req.params.id, req.body);
+    const result = await projectService.createUnit(req.params.id, req.body, req.user?.id);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -155,8 +210,21 @@ export async function respondJoinRequest(
     const result = await projectService.respondToJoinRequest(
       req.params.requestId,
       req.user!.id,
-      req.body.approved
+      req.body
     );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getJoinRequests(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.getJoinRequests(req.params.id);
     successResponse(res, result);
   } catch (error) {
     next(error);

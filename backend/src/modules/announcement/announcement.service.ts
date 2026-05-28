@@ -6,13 +6,74 @@ import type {
   AnnouncementQueryInput,
 } from "./announcement.schema";
 
-export async function createAnnouncement(
+export async function createGlobalAnnouncement(
   creatorId: string,
   data: CreateAnnouncementInput
 ) {
+  if (data.type !== "global") {
+    throw new AppError("Use createProjectAnnouncement for project announcements", "BAD_REQUEST", 400);
+  }
+
   const announcement = await prisma.announcement.create({
     data: {
-      type: data.type,
+      type: "global",
+      title: data.title,
+      content: data.content,
+      is_pinned: data.is_pinned,
+      expires_at: data.expires_at ? new Date(data.expires_at) : null,
+      created_by: creatorId,
+    },
+    include: {
+      creator: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+        },
+      },
+    },
+  });
+
+  return announcement;
+}
+
+export async function createProjectAnnouncement(
+  creatorId: string,
+  data: CreateAnnouncementInput
+) {
+  if (data.type !== "project") {
+    throw new AppError("Announcement type must be 'project'", "BAD_REQUEST", 400);
+  }
+
+  if (!data.project_id) {
+    throw new AppError("project_id is required for project announcements", "BAD_REQUEST", 400);
+  }
+
+  // Verify creator is a member of the project
+  const membership = await prisma.projectMember.findUnique({
+    where: {
+      project_id_user_id: {
+        project_id: data.project_id,
+        user_id: creatorId,
+      },
+    },
+  });
+
+  const creator = await prisma.user.findUnique({
+    where: { id: creatorId },
+    select: { role: true },
+  });
+
+  const isSupervisor = membership?.is_lead || membership?.role === "supervisor";
+  const isAdmin = creator?.role === "super_admin" || creator?.role === "group_admin";
+
+  if (!isSupervisor && !isAdmin) {
+    throw new AppError("Only project supervisors or admins can create project announcements", "FORBIDDEN", 403);
+  }
+
+  const announcement = await prisma.announcement.create({
+    data: {
+      type: "project",
       project_id: data.project_id,
       title: data.title,
       content: data.content,
@@ -40,7 +101,7 @@ export async function createAnnouncement(
   return announcement;
 }
 
-export async function getAnnouncements(query: AnnouncementQueryInput) {
+export async function getAnnouncements(query: AnnouncementQueryInput, userId?: string) {
   const page = query.page || 1;
   const pageSize = query.pageSize || 20;
   const skip = (page - 1) * pageSize;
@@ -54,8 +115,17 @@ export async function getAnnouncements(query: AnnouncementQueryInput) {
   if (query.type) {
     where.type = query.type;
   }
+
   if (query.project_id) {
     where.project_id = query.project_id;
+  }
+
+  // For non-admin users, filter out expired announcements
+  if (!query.include_inactive) {
+    where.OR = [
+      { expires_at: null },
+      { expires_at: { gt: new Date() } },
+    ];
   }
 
   const [announcements, total] = await Promise.all([
@@ -126,8 +196,26 @@ export async function getAnnouncementById(announcementId: string) {
 
 export async function updateAnnouncement(
   announcementId: string,
+  userId: string,
+  userRole: string,
   data: UpdateAnnouncementInput
 ) {
+  const existing = await prisma.announcement.findUnique({
+    where: { id: announcementId },
+  });
+
+  if (!existing) {
+    throw new AppError("Announcement not found", "NOT_FOUND", 404);
+  }
+
+  // Check permissions
+  const isOwner = existing.created_by === userId;
+  const isAdmin = userRole === "super_admin" || userRole === "group_admin";
+
+  if (!isOwner && !isAdmin) {
+    throw new AppError("You can only edit your own announcements", "FORBIDDEN", 403);
+  }
+
   const updateData: Record<string, unknown> = {};
 
   if (data.title !== undefined) updateData.title = data.title;
@@ -149,16 +237,79 @@ export async function updateAnnouncement(
           nickname: true,
         },
       },
+      project: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
     },
   });
 
   return announcement;
 }
 
-export async function deleteAnnouncement(announcementId: string) {
+export async function deleteAnnouncement(
+  announcementId: string,
+  userId: string,
+  userRole: string
+) {
+  const existing = await prisma.announcement.findUnique({
+    where: { id: announcementId },
+  });
+
+  if (!existing) {
+    throw new AppError("Announcement not found", "NOT_FOUND", 404);
+  }
+
+  const isOwner = existing.created_by === userId;
+  const isAdmin = userRole === "super_admin" || userRole === "group_admin";
+
+  if (!isOwner && !isAdmin) {
+    throw new AppError("You can only delete your own announcements", "FORBIDDEN", 403);
+  }
+
   await prisma.announcement.delete({
     where: { id: announcementId },
   });
 
   return { success: true };
+}
+
+export async function pinAnnouncement(
+  announcementId: string,
+  userId: string,
+  userRole: string,
+  pinned: boolean
+) {
+  const existing = await prisma.announcement.findUnique({
+    where: { id: announcementId },
+  });
+
+  if (!existing) {
+    throw new AppError("Announcement not found", "NOT_FOUND", 404);
+  }
+
+  const isOwner = existing.created_by === userId;
+  const isAdmin = userRole === "super_admin" || userRole === "group_admin";
+
+  if (!isOwner && !isAdmin) {
+    throw new AppError("You can only pin your own announcements", "FORBIDDEN", 403);
+  }
+
+  const announcement = await prisma.announcement.update({
+    where: { id: announcementId },
+    data: { is_pinned: pinned },
+    include: {
+      creator: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+        },
+      },
+    },
+  });
+
+  return announcement;
 }

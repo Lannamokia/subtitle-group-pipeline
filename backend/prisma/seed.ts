@@ -22,7 +22,55 @@ async function main(): Promise<void> {
   });
   console.log(`Created super admin: ${admin.username} (id: ${admin.id})`);
 
-  // 2. Create default registration policy
+  // 2. Create group_admin user
+  const groupAdminPassword = await hashPassword("groupadmin123");
+  const groupAdmin = await prisma.user.upsert({
+    where: { username: "groupadmin" },
+    update: {},
+    create: {
+      username: "groupadmin",
+      password_hash: groupAdminPassword,
+      nickname: "Group Admin",
+      email: "groupadmin@example.com",
+      role: UserRole.group_admin,
+      status: "active",
+    },
+  });
+  console.log(`Created group admin: ${groupAdmin.username} (id: ${groupAdmin.id})`);
+
+  // 3. Create supervisor user
+  const supervisorPassword = await hashPassword("supervisor123");
+  const supervisor = await prisma.user.upsert({
+    where: { username: "supervisor" },
+    update: {},
+    create: {
+      username: "supervisor",
+      password_hash: supervisorPassword,
+      nickname: "Supervisor",
+      email: "supervisor@example.com",
+      role: UserRole.supervisor,
+      status: "active",
+    },
+  });
+  console.log(`Created supervisor: ${supervisor.username} (id: ${supervisor.id})`);
+
+  // 4. Create member user
+  const memberPassword = await hashPassword("member123");
+  const member = await prisma.user.upsert({
+    where: { username: "member" },
+    update: {},
+    create: {
+      username: "member",
+      password_hash: memberPassword,
+      nickname: "Member",
+      email: "member@example.com",
+      role: UserRole.member,
+      status: "active",
+    },
+  });
+  console.log(`Created member: ${member.username} (id: ${member.id})`);
+
+  // 5. Create default registration policy
   const regPolicy = await prisma.registrationPolicy.upsert({
     where: { id: "default" },
     update: {},
@@ -36,7 +84,7 @@ async function main(): Promise<void> {
   });
   console.log(`Created registration policy: ${regPolicy.mode}`);
 
-  // 3. Create default data retention settings
+  // 6. Create default data retention settings
   const retention = await prisma.dataRetentionSettings.upsert({
     where: { id: "default" },
     update: {},
@@ -52,7 +100,7 @@ async function main(): Promise<void> {
   });
   console.log(`Created data retention settings (archive after ${retention.auto_archive_days} days)`);
 
-  // 4. Create sample project template (standard anime template)
+  // 7. Create sample project template (standard anime template)
   const animeTemplate = await prisma.projectTemplate.upsert({
     where: { id: "default-anime" },
     update: {},
@@ -62,14 +110,13 @@ async function main(): Promise<void> {
       description: "Default template for anime subtitle projects with standard roles and workflows.",
       project_type: ProjectType.anime,
       roles: JSON.stringify([
-        { role: "translator", required: true, description: "Translates Japanese to target language" },
-        { role: "editor", required: true, description: "Edits translation for natural flow and accuracy" },
-        { role: "timer", required: true, description: "Times subtitles to match audio/video" },
-        { role: "typesetter", required: false, description: "Styles and positions subtitles" },
-        { role: "qc", required: true, description: "Quality control - final review before release" },
-        { role: "encoder", required: false, description: "Encodes final video with subtitles" },
-        { role: "distro", required: false, description: "Distributes finished releases" },
-        { role: "project_manager", required: true, description: "Manages project timeline and team" },
+        { role: "source", required: true, description: "Sources raw video/audio/subtitle materials" },
+        { role: "timing", required: true, description: "Times subtitles to match audio/video" },
+        { role: "translation", required: true, description: "Translates source language to target language" },
+        { role: "post_production", required: false, description: "Styles and positions subtitles (typesetting)" },
+        { role: "encoding", required: false, description: "Encodes final video with subtitles" },
+        { role: "release", required: false, description: "Distributes finished releases" },
+        { role: "supervisor", required: true, description: "Manages project timeline and quality" },
       ]),
       upload_policy: JSON.stringify({
         allowedTypes: [
@@ -145,7 +192,7 @@ async function main(): Promise<void> {
   });
   console.log(`Created project template: ${animeTemplate.name}`);
 
-  // 5. Create default local storage backend
+  // 8. Create default local storage backend
   const storageBackend = await prisma.storageBackend.upsert({
     where: { id: "default-local" },
     update: {},
@@ -165,8 +212,10 @@ async function main(): Promise<void> {
 
   console.log("\nSeed completed successfully!");
   console.log("\nLogin credentials:");
-  console.log("  Username: admin");
-  console.log("  Password: admin123");
+  console.log("  Username: admin        Password: admin123       Role: super_admin");
+  console.log("  Username: groupadmin   Password: groupadmin123  Role: group_admin");
+  console.log("  Username: supervisor   Password: supervisor123  Role: supervisor");
+  console.log("  Username: member       Password: member123      Role: member");
 }
 
 main()

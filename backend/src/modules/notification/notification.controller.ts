@@ -9,8 +9,29 @@ export async function getNotifications(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await notificationService.getNotifications(req.user!.id, req.query as unknown as Parameters<typeof notificationService.getNotifications>[1]);
-    successResponse(res, { notifications: result.notifications, unreadCount: result.unreadCount }, 200, result.meta);
+    const result = await notificationService.getNotifications(
+      req.user!.id,
+      req.query as unknown as Parameters<typeof notificationService.getNotifications>[1]
+    );
+    successResponse(
+      res,
+      { notifications: result.notifications, unreadCount: result.unreadCount },
+      200,
+      result.meta
+    );
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getUnreadCount(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await notificationService.getUnreadCount(req.user!.id);
+    successResponse(res, result);
   } catch (error) {
     next(error);
   }
@@ -22,7 +43,20 @@ export async function markAsRead(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await notificationService.markAsRead(req.user!.id, req.body);
+    const result = await notificationService.markAsRead(req.user!.id, req.params.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function markAllAsRead(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await notificationService.markAllAsRead(req.user!.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -42,13 +76,26 @@ export async function dismissNotification(
   }
 }
 
-export async function getUnreadCount(
+export async function getPreferences(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await notificationService.getUnreadCount(req.user!.id);
+    const result = await notificationService.getNotificationPreferences(req.user!.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updatePreferences(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await notificationService.updateNotificationPreferences(req.user!.id, req.body);
     successResponse(res, result);
   } catch (error) {
     next(error);

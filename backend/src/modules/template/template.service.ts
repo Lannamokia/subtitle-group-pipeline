@@ -1,12 +1,28 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
+import * as auditService from "../audit/audit.service";
 import type {
   CreateTemplateInput,
   UpdateTemplateInput,
   TemplateQueryInput,
 } from "./template.schema";
 
-export async function createTemplate(data: CreateTemplateInput) {
+export async function createTemplate(
+  data: CreateTemplateInput,
+  actorId?: string
+) {
+  // Validate roles JSON
+  let roles: unknown;
+  try {
+    roles = JSON.parse(data.roles);
+  } catch {
+    throw new AppError("Invalid roles JSON", "VALIDATION_ERROR", 400);
+  }
+  if (!Array.isArray(roles)) {
+    throw new AppError("Roles must be an array", "VALIDATION_ERROR", 400);
+  }
+
+  // If setting as default, unset other defaults for this project type
   if (data.is_default) {
     await prisma.projectTemplate.updateMany({
       where: { project_type: data.project_type },
@@ -25,8 +41,17 @@ export async function createTemplate(data: CreateTemplateInput) {
       ass_policy: data.ass_policy,
       product_config: data.product_config,
       delivery_checklist: data.delivery_checklist,
+      release_task_type: data.release_task_type,
       is_default: data.is_default,
     },
+  });
+
+  await auditService.log({
+    user_id: actorId,
+    action: "template.create",
+    resource_type: "template",
+    resource_id: template.id,
+    new_value: template,
   });
 
   return template;
@@ -45,8 +70,8 @@ export async function getTemplates(query: TemplateQueryInput) {
 
   if (query.search) {
     where.OR = [
-      { name: { contains: query.search, mode: "insensitive" } },
-      { description: { contains: query.search, mode: "insensitive" } },
+      { name: { contains: query.search } },
+      { description: { contains: query.search } },
     ];
   }
 
@@ -85,11 +110,37 @@ export async function getTemplateById(templateId: string) {
 
 export async function updateTemplate(
   templateId: string,
-  data: UpdateTemplateInput
+  data: UpdateTemplateInput,
+  actorId?: string
 ) {
+  const existing = await prisma.projectTemplate.findUnique({
+    where: { id: templateId },
+  });
+
+  if (!existing) {
+    throw new AppError("Template not found", "NOT_FOUND", 404);
+  }
+
+  // Validate roles JSON if provided
+  if (data.roles !== undefined) {
+    let roles: unknown;
+    try {
+      roles = JSON.parse(data.roles);
+    } catch {
+      throw new AppError("Invalid roles JSON", "VALIDATION_ERROR", 400);
+    }
+    if (!Array.isArray(roles)) {
+      throw new AppError("Roles must be an array", "VALIDATION_ERROR", 400);
+    }
+  }
+
+  // If setting as default, unset other defaults for this project type
   if (data.is_default && data.project_type) {
     await prisma.projectTemplate.updateMany({
-      where: { project_type: data.project_type },
+      where: {
+        project_type: data.project_type,
+        id: { not: templateId },
+      },
       data: { is_default: false },
     });
   }
@@ -106,17 +157,98 @@ export async function updateTemplate(
       ass_policy: data.ass_policy,
       product_config: data.product_config,
       delivery_checklist: data.delivery_checklist,
+      release_task_type: data.release_task_type,
       is_default: data.is_default,
     },
+  });
+
+  await auditService.log({
+    user_id: actorId,
+    action: "template.update",
+    resource_type: "template",
+    resource_id: templateId,
+    old_value: existing,
+    new_value: template,
   });
 
   return template;
 }
 
-export async function deleteTemplate(templateId: string) {
+export async function deleteTemplate(
+  templateId: string,
+  actorId?: string
+) {
+  const existing = await prisma.projectTemplate.findUnique({
+    where: { id: templateId },
+    include: {
+      projects: {
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+
+  if (!existing) {
+    throw new AppError("Template not found", "NOT_FOUND", 404);
+  }
+
+  // Hard delete if unused, otherwise prevent deletion
+  if (existing.projects.length > 0) {
+    throw new AppError(
+      "Cannot delete template that is in use by projects. Template modifications do not affect existing projects.",
+      "CONFLICT",
+      409
+    );
+  }
+
   await prisma.projectTemplate.delete({
     where: { id: templateId },
   });
 
+  await auditService.log({
+    user_id: actorId,
+    action: "template.delete",
+    resource_type: "template",
+    resource_id: templateId,
+    old_value: existing,
+  });
+
   return { success: true };
+}
+
+export async function setDefaultTemplate(
+  templateId: string,
+  actorId?: string
+) {
+  const template = await prisma.projectTemplate.findUnique({
+    where: { id: templateId },
+  });
+
+  if (!template) {
+    throw new AppError("Template not found", "NOT_FOUND", 404);
+  }
+
+  // Unset other defaults for this project type
+  await prisma.projectTemplate.updateMany({
+    where: {
+      project_type: template.project_type,
+      id: { not: templateId },
+    },
+    data: { is_default: false },
+  });
+
+  const updated = await prisma.projectTemplate.update({
+    where: { id: templateId },
+    data: { is_default: true },
+  });
+
+  await auditService.log({
+    user_id: actorId,
+    action: "template.set_default",
+    resource_type: "template",
+    resource_id: templateId,
+    new_value: updated,
+  });
+
+  return updated;
 }

@@ -14,15 +14,30 @@ export const fileQuerySchema = z.object({
     .default("false"),
 });
 
-export const createFileSchema = z.object({
+export const uploadFileSchema = z.object({
   project_id: z.string().uuid("Invalid project ID"),
   name: z.string().min(1, "File name is required").max(500),
   file_type: z.nativeEnum(FileType),
   mime_type: z.string().min(1, "MIME type is required"),
   size_bytes: z.number().int().min(0),
   storage_path: z.string().min(1, "Storage path is required"),
+  storage_backend_id: z.string().uuid().optional().nullable(),
   checksum: z.string().optional().nullable(),
   metadata: z.string().optional().nullable(), // JSON string
+  tags: z.string().optional().nullable(), // JSON string array
+  change_summary: z.string().max(1000).optional().nullable(),
+});
+
+export const replaceFileSchema = z.object({
+  name: z.string().min(1, "File name is required").max(500).optional(),
+  mime_type: z.string().min(1, "MIME type is required"),
+  size_bytes: z.number().int().min(0),
+  storage_path: z.string().min(1, "Storage path is required"),
+  storage_backend_id: z.string().uuid().optional().nullable(),
+  checksum: z.string().optional().nullable(),
+  metadata: z.string().optional().nullable(),
+  tags: z.string().optional().nullable(),
+  change_summary: z.string().max(1000).optional().nullable(),
 });
 
 export const createVersionSchema = z.object({
@@ -30,6 +45,10 @@ export const createVersionSchema = z.object({
   size_bytes: z.number().int().min(0),
   checksum: z.string().optional().nullable(),
   change_summary: z.string().max(1000).optional().nullable(),
+});
+
+export const approveVersionSchema = z.object({
+  approved: z.boolean().default(true),
 });
 
 export const createLinkSchema = z.object({
@@ -48,8 +67,15 @@ export const updateUploadPolicySchema = z.object({
   extension_whitelist: z.string().optional().nullable(), // JSON string
 });
 
+export const downloadLinkQuerySchema = z.object({
+  ttl: z.string().optional().transform(Number).default("300"),
+});
+
 export type FileQueryInput = z.infer<typeof fileQuerySchema>;
-export type CreateFileInput = z.infer<typeof createFileSchema>;
+export type UploadFileInput = z.infer<typeof uploadFileSchema>;
+export type ReplaceFileInput = z.infer<typeof replaceFileSchema>;
 export type CreateVersionInput = z.infer<typeof createVersionSchema>;
+export type ApproveVersionInput = z.infer<typeof approveVersionSchema>;
 export type CreateLinkInput = z.infer<typeof createLinkSchema>;
 export type UpdateUploadPolicyInput = z.infer<typeof updateUploadPolicySchema>;
+export type DownloadLinkQueryInput = z.infer<typeof downloadLinkQuerySchema>;

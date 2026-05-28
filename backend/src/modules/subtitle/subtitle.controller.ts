@@ -2,29 +2,127 @@ import { Request, Response, NextFunction } from "express";
 import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as subtitleService from "./subtitle.service";
+import type {
+  CreateTranslationClaimInput,
+  SubmitTranslationInput,
+  CreateUnitMergeJobInput,
+  ResolveConflictInput,
+  ReviewInput,
+} from "./subtitle.schema";
 
-// Merge Jobs
-export async function createMergeJob(
-  req: Request,
+// ==================== TRANSLATION CLAIMS ====================
+
+export async function createTranslationClaim(
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.createMergeJob(req.body);
+    const { projectId, unitId } = req.params;
+    const userId = req.user!.id;
+    const data = req.body as CreateTranslationClaimInput;
+
+    const result = await subtitleService.createTranslationClaim(unitId, userId, data);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
   }
 }
 
-export async function getMergeJobs(
+export async function releaseTranslationClaim(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { claimId } = req.params;
+    const userId = req.user!.id;
+
+    const result = await subtitleService.releaseTranslationClaim(claimId, userId);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getTranslationClaims(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getMergeJobs(req.query as unknown as Parameters<typeof subtitleService.getMergeJobs>[0]);
-    successResponse(res, result.jobs, 200, result.meta);
+    const { unitId } = req.params;
+
+    const result = await subtitleService.getTranslationClaims(unitId);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getTranslationClaimById(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { claimId } = req.params;
+
+    const result = await subtitleService.getTranslationClaimById(claimId);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== TRANSLATION SUBMISSIONS ====================
+
+export async function submitTranslation(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { taskId } = req.params;
+    const userId = req.user!.id;
+    const data = req.body as SubmitTranslationInput;
+
+    const result = await subtitleService.submitTranslation(taskId, userId, data);
+    successResponse(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getSubmissionsByTask(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { taskId } = req.params;
+
+    const result = await subtitleService.getSubmissionsByTask(taskId);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== MERGE JOBS ====================
+
+export async function createMergeJob(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { unitId } = req.params;
+    const userId = req.user!.id;
+    const data = req.body as CreateUnitMergeJobInput;
+
+    const result = await subtitleService.createMergeJob(unitId, data.claim_ids, userId);
+    successResponse(res, result, 201);
   } catch (error) {
     next(error);
   }
@@ -36,8 +134,39 @@ export async function getMergeJob(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getMergeJobById(req.params.id);
+    const { jobId } = req.params;
+
+    const result = await subtitleService.getMergeJobStatus(jobId);
     successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getMergeConflicts(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { jobId } = req.params;
+
+    const result = await subtitleService.getMergeConflicts(jobId);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Legacy merge job endpoints
+export async function getMergeJobs(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await subtitleService.getMergeJobs(req.query as unknown as Parameters<typeof subtitleService.getMergeJobs>[0]);
+    successResponse(res, result.jobs, 200, result.meta);
   } catch (error) {
     next(error);
   }
@@ -61,7 +190,8 @@ export async function updateMergeJobStatus(
   }
 }
 
-// Conflicts
+// ==================== CONFLICTS ====================
+
 export async function getConflicts(
   req: Request,
   res: Response,
@@ -88,27 +218,78 @@ export async function getConflict(
   }
 }
 
-export async function resolveConflict(
-  req: AuthenticatedRequest,
+export async function getConflictDetail(
+  req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.resolveConflict(req.params.id, req.user!.id, req.body);
+    const result = await subtitleService.getConflictDetail(req.params.conflictId);
     successResponse(res, result);
   } catch (error) {
     next(error);
   }
 }
 
-// Reviews
+export async function resolveConflict(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await subtitleService.resolveConflict(
+      req.params.conflictId,
+      req.user!.id,
+      req.user!.role,
+      req.body as ResolveConflictInput
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== VERSION COMPARISON ====================
+
+export async function compareVersions(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { fileId, otherFileId } = req.params;
+
+    const result = await subtitleService.compareVersions(fileId, otherFileId);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getTimelineVisualization(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { fileId } = req.params;
+
+    const result = await subtitleService.getTimelineVisualization(fileId);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== REVIEWS ====================
+
 export async function createReview(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.createReview(req.user!.id, req.body);
+    const result = await subtitleService.createReview(req.user!.id, req.body as ReviewInput);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);

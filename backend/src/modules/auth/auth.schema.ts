@@ -16,7 +16,6 @@ export const registerSchema = z.object({
   nickname: z.string().max(50).optional(),
   email: z.string().email("Invalid email address").optional().nullable(),
   qq_number: z.string().max(20).optional().nullable(),
-  verification_code: z.string().optional().nullable(),
 });
 
 export const loginSchema = z.object({
@@ -43,8 +42,20 @@ export const updateProfileSchema = z.object({
   avatar_url: z.string().url("Invalid URL").optional().nullable(),
 });
 
+export const verifyQQSchema = z.object({
+  code: z.string().min(1, "Verification code is required"),
+  qq_number: z.string().optional(),
+  qq_group: z.string().optional(),
+});
+
+export const requestPasswordResetSchema = z.object({
+  username: z.string().min(1, "Username is required"),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type VerifyQQInput = z.infer<typeof verifyQQSchema>;
+export type RequestPasswordResetInput = z.infer<typeof requestPasswordResetSchema>;

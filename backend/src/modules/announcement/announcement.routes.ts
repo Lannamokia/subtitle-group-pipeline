@@ -15,8 +15,31 @@ const idParamSchema = z.object({ id: z.string().uuid("Invalid announcement ID") 
 
 router.get("/", validateQuery(announcementQuerySchema), controller.getAnnouncements);
 router.get("/:id", validateParams(idParamSchema), controller.getAnnouncement);
-router.post("/", authenticate, requireRole("super_admin", "admin", "moderator"), validateBody(createAnnouncementSchema), controller.createAnnouncement);
-router.patch("/:id", authenticate, requireRole("super_admin", "admin", "moderator"), validateParams(idParamSchema), validateBody(updateAnnouncementSchema), controller.updateAnnouncement);
-router.delete("/:id", authenticate, requireRole("super_admin", "admin", "moderator"), validateParams(idParamSchema), controller.deleteAnnouncement);
+router.post(
+  "/",
+  authenticate,
+  requireRole("super_admin", "group_admin", "supervisor"),
+  validateBody(createAnnouncementSchema),
+  controller.createAnnouncement
+);
+router.put(
+  "/:id",
+  authenticate,
+  validateParams(idParamSchema),
+  validateBody(updateAnnouncementSchema),
+  controller.updateAnnouncement
+);
+router.delete(
+  "/:id",
+  authenticate,
+  validateParams(idParamSchema),
+  controller.deleteAnnouncement
+);
+router.post(
+  "/:id/pin",
+  authenticate,
+  validateParams(idParamSchema),
+  controller.pinAnnouncement
+);
 
 export default router;

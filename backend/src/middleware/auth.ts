@@ -42,8 +42,8 @@ export async function authenticate(
       return;
     }
 
-    if (user.status === "suspended" || user.status === "inactive") {
-      errorResponse(res, "Account is inactive or suspended", "FORBIDDEN", 403);
+    if (user.status === "disabled" || user.status === "pending_verification") {
+      errorResponse(res, "Account is disabled or pending verification", "FORBIDDEN", 403);
       return;
     }
 

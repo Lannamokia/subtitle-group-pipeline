@@ -28,6 +28,27 @@ export const createNotificationSchema = z.object({
   actor_id: z.string().uuid().optional().nullable(),
 });
 
+export const updatePreferencesSchema = z.object({
+  email_enabled: z.boolean().optional(),
+  qq_enabled: z.boolean().optional(),
+  in_site_enabled: z.boolean().optional(),
+  email_escalation_min: z.number().int().min(1).max(10080).optional(),
+  qq_escalation_min: z.number().int().min(1).max(10080).optional(),
+  task_assigned: z.boolean().optional(),
+  task_completed: z.boolean().optional(),
+  task_reassigned: z.boolean().optional(),
+  review_requested: z.boolean().optional(),
+  review_approved: z.boolean().optional(),
+  review_rejected: z.boolean().optional(),
+  join_approved: z.boolean().optional(),
+  file_uploaded: z.boolean().optional(),
+  mention: z.boolean().optional(),
+  task_overdue: z.boolean().optional(),
+  conflict_detected: z.boolean().optional(),
+  downstream_reset: z.boolean().optional(),
+});
+
 export type NotificationQueryInput = z.infer<typeof notificationQuerySchema>;
 export type MarkReadInput = z.infer<typeof markReadSchema>;
 export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
+export type UpdatePreferencesInput = z.infer<typeof updatePreferencesSchema>;

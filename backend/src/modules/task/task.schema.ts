@@ -14,10 +14,13 @@ export const createTaskSchema = z.object({
 export const updateTaskSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).optional().nullable(),
-  status: z.nativeEnum(TaskStatus).optional(),
   role: z.nativeEnum(TaskRole).optional(),
   assignee_id: z.string().uuid().optional().nullable(),
   due_date: z.string().datetime().optional().nullable(),
+});
+
+export const updateTaskDeadlineSchema = z.object({
+  due_date: z.string().datetime("Invalid date format"),
 });
 
 export const taskQuerySchema = z.object({
@@ -31,8 +34,8 @@ export const taskQuerySchema = z.object({
 });
 
 export const claimSegmentSchema = z.object({
-  segment_start: z.number().int().min(1),
-  segment_end: z.number().int().min(1),
+  segment_start: z.number().int().min(0),
+  segment_end: z.number().int().min(0),
 });
 
 export const submitTranslationSchema = z.object({
@@ -45,9 +48,22 @@ export const createDependencySchema = z.object({
   dependency_type: z.string().default("finish_to_start"),
 });
 
+export const reviewTaskSchema = z.object({
+  approved: z.boolean(),
+  comments: z.string().optional().nullable(),
+  line_comments: z.string().optional().nullable(), // JSON string
+});
+
+export const resetTaskSchema = z.object({
+  reason: z.string().optional().nullable(),
+});
+
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+export type UpdateTaskDeadlineInput = z.infer<typeof updateTaskDeadlineSchema>;
 export type TaskQueryInput = z.infer<typeof taskQuerySchema>;
 export type ClaimSegmentInput = z.infer<typeof claimSegmentSchema>;
 export type SubmitTranslationInput = z.infer<typeof submitTranslationSchema>;
 export type CreateDependencyInput = z.infer<typeof createDependencySchema>;
+export type ReviewTaskInput = z.infer<typeof reviewTaskSchema>;
+export type ResetTaskInput = z.infer<typeof resetTaskSchema>;
