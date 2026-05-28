@@ -1,0 +1,385 @@
+// ========== Auth Types ==========
+
+export type UserRole = 'super_admin' | 'group_admin' | 'supervisor' | 'member';
+
+export type UserStatus = 'active' | 'pending_verification' | 'disabled';
+
+export type RegistrationMode = 'disabled' | 'open' | 'qq_verification';
+
+export interface User {
+  id: string;
+  username: string;
+  qq?: string;
+  avatar?: string;
+  role: UserRole;
+  status: UserStatus;
+  tags?: RoleTag[];
+  createdAt: string;
+}
+
+export interface RoleTag {
+  id: string;
+  name: string;
+  status: 'pending' | 'granted' | 'rejected';
+  roleType: TaskRole;
+}
+
+export interface LoginCredentials {
+  username: string;
+  password: string;
+}
+
+export interface RegisterData {
+  username: string;
+  password: string;
+  confirmPassword: string;
+  qq: string;
+  tags: TaskRole[];
+}
+
+export interface VerificationStatus {
+  qqGroup: string;
+  command: string;
+  verified: boolean;
+}
+
+// ========== Project Types ==========
+
+export type ProjectStatus = 'active' | 'completed' | 'archived' | 'deleted';
+
+export type ProjectType = 'anime' | 'movie' | 'collection';
+
+export interface Project {
+  id: string;
+  name: string;
+  type: ProjectType;
+  status: ProjectStatus;
+  season: number;
+  episodes: number;
+  tags: string[];
+  supervisorId: string;
+  supervisor: User;
+  members: ProjectMember[];
+  progress: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectMember {
+  user: User;
+  role: TaskRole;
+  joinedAt: string;
+}
+
+export interface ProjectUnit {
+  id: string;
+  projectId: string;
+  season: number;
+  episode: number;
+  episodeLength: number;
+  status: ProjectStatus;
+  progress: number;
+}
+
+// ========== Task Types ==========
+
+export type TaskRole = 'source' | 'timing' | 'translation' | 'post_production' | 'encoding' | 'release' | 'supervisor';
+
+export type TaskStatus =
+  | 'pending_publish'
+  | 'claimable'
+  | 'assigned'
+  | 'in_progress'
+  | 'submitted'
+  | 'review_approved'
+  | 'review_rejected'
+  | 'completed'
+  | 'overdue'
+  | 'frozen';
+
+export interface Task {
+  id: string;
+  name: string;
+  projectId: string;
+  project?: Project;
+  unitId?: string;
+  role: TaskRole;
+  status: TaskStatus;
+  assigneeId?: string;
+  assignee?: User;
+  deadline?: string;
+  description?: string;
+  dependencies: string[];
+  createdAt: string;
+  updatedAt: string;
+  fileCount?: number;
+}
+
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  user: User;
+  content: string;
+  fileVersionId?: string;
+  lineNumber?: number;
+  mentions: string[];
+  createdAt: string;
+}
+
+export interface Review {
+  id: string;
+  taskId: string;
+  reviewer: User;
+  status: 'pending' | 'approved' | 'rejected';
+  comment?: string;
+  snapshot?: ReviewSnapshot;
+  createdAt: string;
+}
+
+export interface ReviewSnapshot {
+  versionId: string;
+  hash: string;
+  metadata: Record<string, unknown>;
+}
+
+// ========== File Types ==========
+
+export type FileType = 'video' | 'subtitle' | 'font' | 'project_package' | 'other';
+
+export type StorageType = 'local' | 's3';
+
+export type VersionPointer = 'current' | 'latest' | 'latest_approved';
+
+export interface FileEntity {
+  id: string;
+  name: string;
+  type: FileType;
+  projectId: string;
+  taskId?: string;
+  uploader: User;
+  size: number;
+  hash?: string;
+  storageType: StorageType;
+  isSensitive: boolean;
+  tags: string[];
+  currentVersionId?: string;
+  latestVersionId?: string;
+  latestApprovedVersionId?: string;
+  versionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FileVersion {
+  id: string;
+  fileId: string;
+  versionNumber: number;
+  uploader: User;
+  size: number;
+  hash?: string;
+  storagePath: string;
+  isApproved: boolean;
+  createdAt: string;
+}
+
+export interface LinkAsset {
+  id: string;
+  projectId: string;
+  name: string;
+  url: string;
+  extractCode?: string;
+  description?: string;
+  createdBy: User;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DownloadLink {
+  id: string;
+  fileVersionId: string;
+  url: string;
+  expiresAt: string;
+}
+
+// ========== Notification Types ==========
+
+export type NotificationType = 'task' | 'review' | 'file' | 'system' | 'mention';
+
+export type NotificationChannel = 'in_site' | 'email' | 'qq';
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  content: string;
+  isRead: boolean;
+  channels: NotificationChannel[];
+  relatedId?: string;
+  relatedType?: string;
+  createdAt: string;
+}
+
+export interface NotificationPreference {
+  inSite: boolean;
+  email: boolean;
+  qq: boolean;
+  escalationEnabled: boolean;
+  escalationInterval: number;
+  subscribedTypes: NotificationType[];
+}
+
+// ========== Template Types ==========
+
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  type: ProjectType;
+  description?: string;
+  roles: TemplateRoleConfig[];
+  uploadPolicy: UploadPolicy;
+  notificationPolicy: NotificationPolicy;
+  assPolicy: AssPolicy;
+  productConfig: ProductConfig;
+  deliveryChecklist: DeliveryItem[];
+  useCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TemplateRoleConfig {
+  role: TaskRole;
+  enabled: boolean;
+  slotCount: number;
+  assignmentStrategy: 'manual' | 'open_claim';
+  maxSegmentLength?: number;
+}
+
+export interface UploadPolicy {
+  allowedTypes: Record<TaskRole, FileType[]>;
+}
+
+export interface NotificationPolicy {
+  events: Record<string, NotificationChannel[]>;
+}
+
+export interface AssPolicy {
+  mergeRule: string;
+  dedupThreshold: number;
+}
+
+export interface ProductConfig {
+  resolution: string;
+  bitrate: string;
+  encoder: string;
+  containerFormat: string;
+  namingRule: string;
+}
+
+export interface DeliveryItem {
+  id: string;
+  name: string;
+  role: TaskRole;
+  required: boolean;
+}
+
+// ========== Wiki Types ==========
+
+export type WikiBlockType = 'markdown' | 'table';
+
+export type WikiStatus = 'draft' | 'pending' | 'approved';
+
+export interface WikiDocument {
+  id: string;
+  projectId: string;
+  title: string;
+  blocks: WikiBlock[];
+  status: WikiStatus;
+  pendingContent?: string;
+  updatedBy: User;
+  updatedAt: string;
+}
+
+export interface WikiBlock {
+  id: string;
+  type: WikiBlockType;
+  content: string;
+  data?: Record<string, unknown>;
+}
+
+// ========== Timeline Types ==========
+
+export type TimelineEventType = 'task_status' | 'file_upload' | 'review' | 'member_join' | 'system';
+
+export interface TimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  projectId?: string;
+  projectName?: string;
+  description: string;
+  user?: User;
+  createdAt: string;
+}
+
+// ========== Dedup Types ==========
+
+export interface SubtitleConflict {
+  id: string;
+  mergeJobId: string;
+  startTime: number;
+  endTime: number;
+  conflictType: 'exact_duplicate' | 'text_conflict' | 'overlap';
+  translations: ConflictTranslation[];
+  resolution?: ConflictResolution;
+}
+
+export interface ConflictTranslation {
+  translatorId: string;
+  translatorName: string;
+  text: string;
+  style: string;
+}
+
+export interface ConflictResolution {
+  keepTranslationId?: string;
+  mergedText?: string;
+  status: 'pending' | 'resolved' | 'deferred';
+}
+
+// ========== Announcement Types ==========
+
+export interface Announcement {
+  id: string;
+  type: 'global' | 'project';
+  projectId?: string;
+  title: string;
+  content: string;
+  createdBy: User;
+  createdAt: string;
+  expiresAt?: string;
+}
+
+// ========== Admin Types ==========
+
+export interface RegistrationSettings {
+  mode: RegistrationMode;
+  qqGroup?: string;
+  codeLength: number;
+}
+
+export interface DataRetentionSettings {
+  archiveCleanupDays: number;
+  recycleBinDays: number;
+  downloadLinkTtl: number;
+  linkCleanupInterval: number;
+}
+
+// ========== Workload Types ==========
+
+export interface WorkloadItem {
+  user: User;
+  tasks: {
+    role: TaskRole;
+    status: TaskStatus;
+    count: number;
+  }[];
+}

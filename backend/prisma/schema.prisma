@@ -1,0 +1,921 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ENUMS ====================
+
+enum UserRole {
+  super_admin
+  group_admin
+  supervisor
+  member
+}
+
+enum UserStatus {
+  active
+  pending_verification
+  disabled
+}
+
+enum RegistrationMode {
+  disabled
+  open
+  qq_verification
+}
+
+enum ProjectStatus {
+  draft
+  active
+  paused
+  completed
+  archived
+  cancelled
+}
+
+enum ProjectType {
+  anime
+  movie
+  ova
+  special
+  music_video
+  other
+}
+
+enum TaskRole {
+  source
+  timing
+  translation
+  post_production
+  encoding
+  release
+  supervisor
+}
+
+enum TaskStatus {
+  pending_publish
+  claimable
+  assigned
+  in_progress
+  submitted
+  review_approved
+  review_rejected
+  completed
+  overdue
+  frozen
+}
+
+enum ClaimStatus {
+  pending
+  active
+  submitted
+  approved
+  rejected
+  abandoned
+  expired
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+  needs_revision
+}
+
+enum FileType {
+  video
+  subtitle
+  font
+  project_package
+  other
+}
+
+enum StorageType {
+  local
+  s3
+  s3_compatible
+}
+
+enum NotificationType {
+  task_assigned
+  task_completed
+  review_requested
+  review_completed
+  claim_expired
+  project_update
+  mention
+  system
+  join_request
+  join_approved
+  join_rejected
+  file_uploaded
+  conflict_detected
+  announcement
+}
+
+enum NotificationChannel {
+  in_app
+  email
+  webhook
+}
+
+enum NotificationStatus {
+  unread
+  read
+  dismissed
+}
+
+enum WikiStatus {
+  draft
+  pending
+  approved
+  archived
+}
+
+enum ConflictType {
+  merge_conflict
+  format_mismatch
+  timing_conflict
+  duplicate_entry
+  content_mismatch
+}
+
+enum ResolutionStatus {
+  unresolved
+  resolved_auto
+  resolved_manual
+  ignored
+}
+
+enum AnnouncementType {
+  global
+  project
+  system
+}
+
+enum TimelineEventType {
+  project_created
+  project_started
+  project_paused
+  project_resumed
+  project_completed
+  project_archived
+  task_created
+  task_started
+  task_completed
+  task_blocked
+  member_joined
+  member_left
+  file_uploaded
+  review_submitted
+  conflict_detected
+  conflict_resolved
+  milestone_reached
+  custom
+}
+
+enum BackendType {
+  local
+  s3
+  s3_compatible
+}
+
+// ==================== CORE TABLES ====================
+
+model User {
+  id              String     @id @default(uuid())
+  username        String     @unique
+  nickname        String?
+  email           String?    @unique
+  password_hash   String
+  avatar_url      String?
+  role            UserRole   @default(member)
+  status          UserStatus @default(active)
+  qq_number       String?
+  bio             String?
+  last_login_at   DateTime?
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+  deleted_at      DateTime?
+
+  // Relations
+  owned_projects       Project[]       @relation("ProjectOwner")
+  project_memberships  ProjectMember[]
+  join_requests        JoinRequest[]
+  tasks                Task[]          @relation("TaskAssignee")
+  created_tasks        Task[]          @relation("TaskCreator")
+  claims               TranslationClaim[]
+  submissions          TranslationSubmission[]
+  reviews_given        Review[]        @relation("ReviewReviewer")
+  reviews_requested    Review[]        @relation("ReviewRequester")
+  file_uploads         FileEntity[]
+  notifications        Notification[]
+  comments             Comment[]
+  wiki_documents       WikiDocument[]
+  timeline_events      TimelineEvent[]
+  audit_logs           AuditLog[]
+  tag_applications     TagApplication[]
+  created_announcements Announcement[] @relation("AnnouncementCreator")
+  download_links       DownloadLink[]
+  recycle_bin_items    RecycleBinRecord[]
+
+  @@index([username])
+  @@index([email])
+  @@index([status])
+  @@index([role])
+  @@index([created_at])
+}
+
+model RegistrationPolicy {
+  id              String           @id @default(uuid())
+  mode            RegistrationMode @default(open)
+  require_qq      Boolean          @default(false)
+  qq_group_number String?
+  welcome_message String?
+  auto_approve    Boolean          @default(true)
+  created_at      DateTime         @default(now())
+  updated_at      DateTime         @updatedAt
+  updated_by      String?
+}
+
+model VerificationChallenge {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  qq_number     String
+  expires_at    DateTime
+  used_at       DateTime?
+  used_by       String?
+  created_at    DateTime  @default(now())
+
+  @@index([code])
+  @@index([qq_number])
+  @@index([expires_at])
+}
+
+model RoleTag {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  color       String   @default("#3b82f6")
+  created_at  DateTime @default(now())
+
+  applications TagApplication[]
+}
+
+model TagApplication {
+  id         String    @id @default(uuid())
+  user_id    String
+  tag_id     String
+  reason     String?
+  approved   Boolean   @default(false)
+  approved_by String?
+  approved_at DateTime?
+  created_at DateTime  @default(now())
+
+  user User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  tag  RoleTag @relation(fields: [tag_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, tag_id])
+  @@index([user_id])
+  @@index([tag_id])
+  @@index([approved])
+}
+
+// ==================== PROJECT TABLES ====================
+
+model ProjectTemplate {
+  id                   String   @id @default(uuid())
+  name                 String
+  description          String?
+  project_type         ProjectType @default(anime)
+  roles                String // JSON: array of { role, required, description }
+  upload_policy        String // JSON: { allowedTypes, maxSize, requireApproval }
+  notification_policy  String // JSON: { channels, events }
+  ass_policy           String // JSON: { format, styleRules, timingRules }
+  product_config       String // JSON: { resolutions, codecs, containers }
+  delivery_checklist   String // JSON: array of checklist items
+  is_default           Boolean  @default(false)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  projects Project[]
+
+  @@index([is_default])
+}
+
+model Project {
+  id                String        @id @default(uuid())
+  name              String
+  description       String?
+  project_type      ProjectType   @default(anime)
+  status            ProjectStatus @default(draft)
+  owner_id          String
+  template_id       String?
+  storage_backend_id String?
+  current_season    Int           @default(1)
+  is_archived       Boolean       @default(false)
+  archived_at       DateTime?
+  deleted_at        DateTime?
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @updatedAt
+
+  // Relations
+  owner           User             @relation("ProjectOwner", fields: [owner_id], references: [id])
+  template        ProjectTemplate? @relation(fields: [template_id], references: [id])
+  storage_backend StorageBackend?  @relation(fields: [storage_backend_id], references: [id])
+  units           ProjectUnit[]
+  members         ProjectMember[]
+  join_requests   JoinRequest[]
+  tasks           Task[]
+  files           FileEntity[]
+  link_history    LinkHistory[]
+  reviews         Review[]
+  notifications   Notification[]
+  announcements   Announcement[]
+  wiki_documents  WikiDocument[]
+  timeline_events TimelineEvent[]
+  download_links  DownloadLink[]
+  audit_logs      AuditLog[]
+
+  @@index([status])
+  @@index([owner_id])
+  @@index([project_type])
+  @@index([is_archived])
+  @@index([deleted_at])
+  @@index([created_at])
+}
+
+model ProjectUnit {
+  id             String   @id @default(uuid())
+  project_id     String
+  season_number  Int      @default(1)
+  unit_number    Int
+  title          String?
+  episode_length Int?     // in seconds
+  air_date       DateTime?
+  description    String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@unique([project_id, season_number, unit_number])
+  @@index([project_id])
+  @@index([season_number])
+}
+
+model ProjectMember {
+  id         String   @id @default(uuid())
+  project_id String
+  user_id    String
+  role       TaskRole @default(translator)
+  is_lead    Boolean  @default(false)
+  joined_at  DateTime @default(now())
+  left_at    DateTime?
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([project_id, user_id])
+  @@index([project_id])
+  @@index([user_id])
+  @@index([role])
+}
+
+model JoinRequest {
+  id         String    @id @default(uuid())
+  project_id String
+  user_id    String
+  role       TaskRole
+  message    String?
+  approved   Boolean?
+  approved_by String?
+  approved_at DateTime?
+  created_at DateTime  @default(now())
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@index([user_id])
+  @@index([approved])
+}
+
+// ==================== TASK TABLES ====================
+
+model Task {
+  id              String     @id @default(uuid())
+  project_id      String
+  unit_id         String?
+  title           String
+  description     String?
+  role            TaskRole
+  status          TaskStatus @default(pending_publish)
+  assignee_id     String?
+  creator_id      String
+  blocked_by      String?    // JSON: array of task IDs
+  due_date        DateTime?
+  started_at      DateTime?
+  completed_at    DateTime?
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+
+  // Relations
+  project      Project               @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  unit         ProjectUnit?          @relation(fields: [unit_id], references: [id])
+  assignee     User?                 @relation("TaskAssignee", fields: [assignee_id], references: [id])
+  creator      User                  @relation("TaskCreator", fields: [creator_id], references: [id])
+  dependencies TaskDependency[]      @relation("TaskDependencies")
+  dependents   TaskDependency[]      @relation("TaskDependents")
+  claims       TranslationClaim[]
+  submissions  TranslationSubmission[]
+  reviews      Review[]
+  notifications Notification[]
+
+  @@index([project_id])
+  @@index([unit_id])
+  @@index([assignee_id])
+  @@index([status])
+  @@index([role])
+  @@index([due_date])
+}
+
+model TaskDependency {
+  id             String @id @default(uuid())
+  task_id        String
+  depends_on_id  String
+  dependency_type String @default("finish_to_start") // finish_to_start, start_to_start, finish_to_finish
+
+  task       Task @relation("TaskDependencies", fields: [task_id], references: [id], onDelete: Cascade)
+  depends_on Task @relation("TaskDependents", fields: [depends_on_id], references: [id], onDelete: Cascade)
+
+  @@unique([task_id, depends_on_id])
+  @@index([task_id])
+  @@index([depends_on_id])
+}
+
+// ==================== TRANSLATION TABLES ====================
+
+model TranslationClaim {
+  id            String      @id @default(uuid())
+  task_id       String
+  user_id       String
+  segment_start Int         // line number or timestamp start
+  segment_end   Int         // line number or timestamp end
+  status        ClaimStatus @default(pending)
+  claimed_at    DateTime    @default(now())
+  submitted_at  DateTime?
+  approved_at   DateTime?
+  expires_at    DateTime?
+
+  task Task @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([task_id])
+  @@index([user_id])
+  @@index([status])
+  @@index([expires_at])
+}
+
+model TranslationSubmission {
+  id          String   @id @default(uuid())
+  task_id     String
+  user_id     String
+  content     String   // the translated content
+  line_count  Int?
+  submitted_at DateTime @default(now())
+
+  task Task @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([task_id])
+  @@index([user_id])
+}
+
+// ==================== MERGE & CONFLICT TABLES ====================
+
+model MergeJob {
+  id            String    @id @default(uuid())
+  project_id    String
+  unit_id       String?
+  status        String    @default("pending") // pending, running, completed, failed
+  input_files   String    // JSON: array of file IDs
+  output_file_id String?
+  log           String?
+  started_at    DateTime?
+  completed_at  DateTime?
+  created_at    DateTime  @default(now())
+
+  @@index([project_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+model SubtitleConflict {
+  id              String           @id @default(uuid())
+  project_id      String
+  unit_id         String?
+  conflict_type   ConflictType
+  description     String?
+  affected_lines  String?          // JSON: array of line numbers
+  file_a_id       String
+  file_b_id       String
+  resolution      ResolutionStatus @default(unresolved)
+  resolved_by     String?
+  resolved_at     DateTime?
+  resolution_note String?
+  created_at      DateTime         @default(now())
+
+  @@index([project_id])
+  @@index([conflict_type])
+  @@index([resolution])
+  @@index([created_at])
+}
+
+// ==================== REVIEW TABLES ====================
+
+model Review {
+  id                String       @id @default(uuid())
+  project_id        String
+  task_id           String?
+  file_version_id   String?
+  reviewer_id       String
+  requester_id      String?
+  status            ReviewStatus @default(pending)
+  comments          String?      // general comments
+  line_comments     String?      // JSON: array of { line, comment, severity }
+  submitted_at      DateTime     @default(now())
+  completed_at      DateTime?
+
+  project  Project         @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  reviewer User            @relation("ReviewReviewer", fields: [reviewer_id], references: [id])
+  requester User?          @relation("ReviewRequester", fields: [requester_id], references: [id])
+  task     Task?           @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  snapshots ReviewSnapshot[]
+
+  @@index([project_id])
+  @@index([task_id])
+  @@index([reviewer_id])
+  @@index([status])
+  @@index([submitted_at])
+}
+
+model ReviewSnapshot {
+  id            String   @id @default(uuid())
+  review_id     String
+  file_id       String
+  version_number Int
+  content       String   // snapshot of the file content at review time
+  created_at    DateTime @default(now())
+
+  review Review @relation(fields: [review_id], references: [id], onDelete: Cascade)
+
+  @@index([review_id])
+  @@index([file_id])
+}
+
+// ==================== FILE TABLES ====================
+
+model FileEntity {
+  id              String    @id @default(uuid())
+  project_id      String
+  uploader_id     String
+  name            String
+  original_name   String
+  file_type       FileType
+  mime_type       String
+  size_bytes      Int
+  storage_path    String
+  storage_backend_id String?
+  checksum        String?
+  metadata        String?   // JSON: extra metadata
+  is_deleted      Boolean   @default(false)
+  deleted_at      DateTime?
+  deleted_by      String?
+  created_at      DateTime  @default(now())
+
+  project       Project        @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  uploader      User           @relation(fields: [uploader_id], references: [id])
+  versions      FileVersion[]
+  link_history  LinkHistory[]
+  comments      Comment[]
+
+  @@index([project_id])
+  @@index([uploader_id])
+  @@index([file_type])
+  @@index([is_deleted])
+  @@index([created_at])
+}
+
+model FileVersion {
+  id              String   @id @default(uuid())
+  file_id         String
+  version_number  Int
+  storage_path    String
+  size_bytes      Int
+  checksum        String?
+  change_summary  String?
+  is_current      Boolean  @default(false)
+  is_latest       Boolean  @default(true)
+  is_latest_approved Boolean @default(false)
+  approved_by     String?
+  approved_at     DateTime?
+  created_at      DateTime @default(now())
+
+  file FileEntity @relation(fields: [file_id], references: [id], onDelete: Cascade)
+
+  @@unique([file_id, version_number])
+  @@index([file_id])
+  @@index([is_current])
+  @@index([is_latest_approved])
+  @@index([created_at])
+}
+
+model LinkHistory {
+  id          String   @id @default(uuid())
+  project_id  String
+  file_id     String?
+  url         String
+  link_type   String   // e.g., "baidu_pan", "google_drive", "mega"
+  description String?
+  expires_at  DateTime?
+  created_by  String
+  created_at  DateTime @default(now())
+
+  project Project    @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  file    FileEntity? @relation(fields: [file_id], references: [id])
+
+  @@index([project_id])
+  @@index([file_id])
+  @@index([link_type])
+}
+
+model UploadPolicy {
+  id              String   @id @default(uuid())
+  project_id      String?  // null = global default
+  allowed_types   String   // JSON: array of mime types
+  max_size_bytes  Int      @default(104857600) // 100MB
+  require_approval Boolean @default(false)
+  extension_whitelist String? // JSON: array of extensions
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@index([project_id])
+}
+
+// ==================== NOTIFICATION TABLES ====================
+
+model Notification {
+  id            String              @id @default(uuid())
+  user_id       String
+  type          NotificationType
+  title         String
+  content       String?
+  project_id    String?
+  task_id       String?
+  actor_id      String?             // who triggered the notification
+  status        NotificationStatus  @default(unread)
+  channels      String              // JSON: array of channels delivered
+  created_at    DateTime            @default(now())
+  read_at       DateTime?
+
+  user    User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [project_id], references: [id])
+  task    Task?    @relation(fields: [task_id], references: [id])
+
+  deliveries NotificationDelivery[]
+
+  @@index([user_id])
+  @@index([status])
+  @@index([type])
+  @@index([project_id])
+  @@index([created_at])
+}
+
+model NotificationDelivery {
+  id                String              @id @default(uuid())
+  notification_id   String
+  channel           NotificationChannel
+  status            String              @default("pending") // pending, sent, failed
+  external_id       String?             // e.g., email message ID
+  error_message     String?
+  sent_at           DateTime?
+  created_at        DateTime            @default(now())
+
+  notification Notification @relation(fields: [notification_id], references: [id], onDelete: Cascade)
+
+  @@index([notification_id])
+  @@index([channel])
+  @@index([status])
+}
+
+// ==================== ANNOUNCEMENT TABLES ====================
+
+model Announcement {
+  id          String           @id @default(uuid())
+  type        AnnouncementType @default(global)
+  project_id  String?
+  title       String
+  content     String
+  is_pinned   Boolean          @default(false)
+  is_active   Boolean          @default(true)
+  created_by  String
+  expires_at  DateTime?
+  created_at  DateTime         @default(now())
+  updated_at  DateTime         @updatedAt
+
+  project  Project? @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  creator  User     @relation("AnnouncementCreator", fields: [created_by], references: [id])
+
+  @@index([type])
+  @@index([project_id])
+  @@index([is_active])
+  @@index([is_pinned])
+  @@index([created_at])
+}
+
+// ==================== WIKI TABLES ====================
+
+model WikiDocument {
+  id              String     @id @default(uuid())
+  project_id      String?
+  title           String
+  slug            String
+  content         String     // current approved content
+  pending_content String?    // content pending approval
+  status          WikiStatus @default(draft)
+  created_by      String
+  approved_by     String?
+  approved_at     DateTime?
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+
+  project  Project? @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  creator  User     @relation(fields: [created_by], references: [id])
+  comments Comment[]
+
+  @@unique([project_id, slug])
+  @@index([project_id])
+  @@index([status])
+  @@index([slug])
+}
+
+// ==================== COMMENT TABLES ====================
+
+model Comment {
+  id              String    @id @default(uuid())
+  user_id         String
+  content         String
+  file_version_id String?
+  wiki_id         String?
+  line_number     Int?      // for ASS line-level comments
+  parent_id       String?   // for threaded replies
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+  deleted_at      DateTime?
+
+  user     User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  file     FileEntity?   @relation(fields: [file_version_id], references: [id])
+  wiki     WikiDocument? @relation(fields: [wiki_id], references: [id])
+  parent   Comment?      @relation("CommentReplies", fields: [parent_id], references: [id])
+  replies  Comment[]     @relation("CommentReplies")
+
+  @@index([user_id])
+  @@index([file_version_id])
+  @@index([wiki_id])
+  @@index([parent_id])
+  @@index([line_number])
+  @@index([created_at])
+}
+
+// ==================== TIMELINE TABLES ====================
+
+model TimelineEvent {
+  id          String             @id @default(uuid())
+  project_id  String
+  event_type  TimelineEventType
+  title       String
+  description String?
+  actor_id    String?
+  metadata    String?            // JSON: extra event data
+  occurred_at DateTime           @default(now())
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actor_id], references: [id])
+
+  @@index([project_id])
+  @@index([event_type])
+  @@index([occurred_at])
+}
+
+// ==================== DOWNLOAD TABLES ====================
+
+model DownloadLink {
+  id            String    @id @default(uuid())
+  project_id    String
+  file_id       String?
+  created_by    String
+  token         String    @unique
+  expires_at    DateTime
+  max_downloads Int?
+  download_count Int      @default(0)
+  is_active     Boolean   @default(true)
+  created_at    DateTime  @default(now())
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [created_by], references: [id])
+
+  @@index([token])
+  @@index([project_id])
+  @@index([expires_at])
+  @@index([is_active])
+}
+
+// ==================== STORAGE TABLES ====================
+
+model StorageBackend {
+  id                String      @id @default(uuid())
+  name              String
+  backend_type      BackendType
+  config            String      // JSON: { endpoint, region, bucket, credentials, etc. }
+  is_default        Boolean     @default(false)
+  is_active         Boolean     @default(true)
+  quota_bytes       Int?        // null = unlimited
+  used_bytes        Int         @default(0)
+  file_count        Int         @default(0)
+  last_health_check DateTime?
+  health_status     String?     // healthy, degraded, unavailable
+  created_at        DateTime    @default(now())
+  updated_at        DateTime    @updatedAt
+
+  projects Project[]
+
+  @@index([is_default])
+  @@index([is_active])
+  @@index([backend_type])
+}
+
+// ==================== AUDIT TABLES ====================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  user_id     String?
+  project_id  String?
+  action      String   // e.g., "file.upload", "task.create", "user.login"
+  resource_type String // e.g., "file", "task", "user"
+  resource_id String?
+  old_value   String?  // JSON: previous state
+  new_value   String?  // JSON: new state
+  ip_address  String?
+  user_agent  String?
+  created_at  DateTime @default(now())
+
+  user    User?    @relation(fields: [user_id], references: [id])
+  project Project? @relation(fields: [project_id], references: [id])
+
+  @@index([user_id])
+  @@index([project_id])
+  @@index([action])
+  @@index([resource_type])
+  @@index([created_at])
+}
+
+// ==================== DATA RETENTION ====================
+
+model DataRetentionSettings {
+  id                     String   @id @default(uuid())
+  auto_archive_days      Int      @default(90)    // archive completed projects after N days
+  auto_delete_days       Int?     @default(365)   // delete archived projects after N days (null = never)
+  recycle_bin_days       Int      @default(30)    // keep deleted items in recycle bin
+  audit_log_retention_days Int    @default(365)   // keep audit logs
+  notification_retention_days Int @default(30)     // keep old notifications
+  max_file_versions      Int      @default(10)    // max versions to keep per file
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+}
+
+// ==================== RECYCLE BIN ====================
+
+model RecycleBinRecord {
+  id              String   @id @default(uuid())
+  user_id         String
+  resource_type   String   // e.g., "file", "project", "task"
+  resource_id     String
+  resource_data   String   // JSON: snapshot of the deleted resource
+  deleted_at      DateTime @default(now())
+  expires_at      DateTime // when this record will be permanently deleted
+  restored_at     DateTime?
+  restored_by     String?
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([resource_type])
+  @@index([resource_id])
+  @@index([expires_at])
+  @@index([restored_at]
