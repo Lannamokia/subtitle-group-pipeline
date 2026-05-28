@@ -116,10 +116,10 @@ const templateFormSchema = z.object({
   description: z.string().optional(),
   roles: z.array(roleConfigSchema),
   uploadPolicy: z.object({
-    allowedTypes: z.record(z.string(), z.array(z.string())),
+    allowedTypes: z.record(z.array(z.string())),
   }),
   notificationPolicy: z.object({
-    events: z.record(z.string(), z.array(z.string())),
+    events: z.record(z.array(z.string())),
   }),
   assPolicy: z.object({
     mergeRule: z.string(),

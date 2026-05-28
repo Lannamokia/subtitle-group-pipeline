@@ -15,6 +15,7 @@ import { mockTimelineEvents, mockUsers } from "@/lib/mockData";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { User } from "@/types";
 
 interface TimelineEventProps {
   event: TimelineEventType;
@@ -244,7 +245,7 @@ export function GlobalTimelinePage() {
       projectId: i % 2 === 0 ? "p1" : "p2",
       projectName: i % 2 === 0 ? "夏日重现" : "进击的巨人 最终季",
       description: `示例动态事件 ${i + 1}`,
-      user: mockUsers[i % mockUsers.length],
+      user: mockUsers[i % mockUsers.length] as User,
       createdAt: new Date(Date.now() - (i + 1) * 3600000).toISOString(),
     })),
   ]);

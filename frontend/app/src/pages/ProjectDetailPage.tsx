@@ -36,7 +36,6 @@ import { TaskCard } from "@/components/TaskCard";
 import { FileListItem } from "@/components/FileListItem";
 import { TimelineEventItem } from "@/components/TimelineEvent";
 import { toast } from "sonner";
-import { mockAnnouncements } from "@/lib/mockData";
 import type {
   Project,
   Task,
@@ -65,7 +64,6 @@ import {
   Upload,
   Download,
   CheckCircle,
-  XCircle,
   Play,
   UserCheck,
   RotateCcw,
@@ -73,8 +71,6 @@ import {
   Filter,
   Search,
   Clock,
-  FileText,
-  Eye,
   Check,
   X,
   Megaphone,
@@ -83,6 +79,8 @@ import {
   Table,
   GripVertical,
   Trash2,
+  FileText,
+  Eye,
 } from "lucide-react";
 
 type ProjectTab = "tasks" | "files" | "wiki" | "members" | "settings" | "activity" | "dedup" | "announcements";
@@ -113,7 +111,7 @@ export function ProjectDetailPage() {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [wiki, setWiki] = useState<WikiDocument | null>(null);
   const [conflicts, setConflicts] = useState<SubtitleConflict[]>([]);
-  const [projectAnnouncements, setProjectAnnouncements] = useState<import("@/types").Announcement[]>([]);
+  const [, setProjectAnnouncements] = useState<import("@/types").Announcement[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchProject = useCallback(async () => {
@@ -945,9 +943,7 @@ function WikiNavItem({ children, active }: { children: React.ReactNode; active?:
 /* ---------- Project Announcements Tab ---------- */
 
 function ProjectAnnouncementsTab({ projectId }: { projectId: string }) {
-  const [announcements, setAnnouncements] = useState<import("@/types").Announcement[]>(() =>
-    mockAnnouncements.filter((a: import("@/types").Announcement) => a.projectId === projectId)
-  );
+  const [announcements, setAnnouncements] = useState<import("@/types").Announcement[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
@@ -961,7 +957,7 @@ function ProjectAnnouncementsTab({ projectId }: { projectId: string }) {
         title: newTitle.trim(),
         content: newContent.trim(),
       });
-      setAnnouncements((prev: import("@/types").Announcement[]) => [res.data, ...prev]);
+      setAnnouncements((prev) => [res.data as import("@/types").Announcement, ...prev]);
       setNewTitle("");
       setNewContent("");
       setIsCreating(false);
@@ -1010,7 +1006,7 @@ function ProjectAnnouncementsTab({ projectId }: { projectId: string }) {
 
       {announcements.length > 0 ? (
         <div className="space-y-3">
-          {announcements.map((announcement: import("@/types").Announcement) => (
+          {announcements.map((announcement) => (
             <Card key={announcement.id}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">

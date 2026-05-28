@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { prisma } from "./config/database";
+import { registerAllJobs, scheduler } from "./jobs";
 
 const PORT = env.PORT;
 
@@ -18,9 +19,17 @@ async function startServer(): Promise<void> {
       console.log(`API prefix: ${env.API_PREFIX}`);
     });
 
+    // Register and start background jobs
+    registerAllJobs();
+    scheduler.start();
+
     // Graceful shutdown
     const shutdown = async (signal: string): Promise<void> => {
       console.log(`\n${signal} received. Shutting down gracefully...`);
+
+      // Stop all background jobs first
+      await scheduler.stopGracefully();
+
       server.close(async () => {
         await prisma.$disconnect();
         console.log("Database connection closed");

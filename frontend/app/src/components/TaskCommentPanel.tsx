@@ -159,7 +159,7 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
     // Extract mentions from comment text
     const mentionPattern = /@(\S+)/g;
     const mentions: string[] = [];
-    let match: RegExpExecArray | null;
+    let match: RegExpExecArray | null = null;
     while ((match = mentionPattern.exec(newComment)) !== null) {
       const username = match[1];
       const mentionedUser = mockUsers.find((u) => u.username === username);
