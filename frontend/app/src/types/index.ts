@@ -14,6 +14,7 @@ export interface User {
   role: UserRole;
   status: UserStatus;
   tags?: RoleTag[];
+  token?: string;
   createdAt: string;
 }
 
@@ -364,6 +365,7 @@ export interface RegistrationSettings {
   mode: RegistrationMode;
   qqGroup?: string;
   codeLength: number;
+  roleTagEnabled: boolean;
 }
 
 export interface DataRetentionSettings {
@@ -371,6 +373,100 @@ export interface DataRetentionSettings {
   recycleBinDays: number;
   downloadLinkTtl: number;
   linkCleanupInterval: number;
+}
+
+// ========== Role Tag Types ==========
+
+export interface RoleTagDefinition {
+  id: string;
+  name: string;
+  roleType: TaskRole;
+  description?: string;
+  createdAt: string;
+}
+
+export interface RoleTagApplication {
+  id: string;
+  userId: string;
+  user: User;
+  tagId: string;
+  tag: RoleTagDefinition;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: User;
+  reviewComment?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserRoleTagStatus {
+  tag: RoleTagDefinition;
+  status: 'pending' | 'granted' | 'rejected' | 'not_applied';
+}
+
+// ========== Storage Types ==========
+
+export interface StorageBackend {
+  id: string;
+  name: string;
+  type: StorageType;
+  endpoint: string;
+  bucket?: string;
+  rootPath?: string;
+  region?: string;
+  accessKey?: string;
+  secretKey?: string;
+  quotaBytes: number;
+  usedBytes: number;
+  isDefault: boolean;
+  isEnabled: boolean;
+  projectCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StorageBackendInput {
+  name: string;
+  type: StorageType;
+  endpoint: string;
+  bucket?: string;
+  rootPath?: string;
+  region?: string;
+  accessKey?: string;
+  secretKey?: string;
+  quotaBytes: number;
+  isDefault: boolean;
+  isEnabled: boolean;
+}
+
+// ========== API Response Types ==========
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface LoginResponse {
+  user: User;
+  token: string;
+}
+
+export interface RegisterResponse {
+  status: 'active' | 'pending_verification';
+  user?: User;
+  token?: string;
+  verification?: {
+    qqGroup: string;
+    command: string;
+  };
 }
 
 // ========== Workload Types ==========

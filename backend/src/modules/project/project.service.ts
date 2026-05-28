@@ -153,15 +153,16 @@ export async function createProjectFromTemplate(
   });
 
   // Create project units for each season
-  const units: Array<{ id: string; season_number: number; unit_number: number }> = [];
+  const units: Array<{ id: string; season_number: number; unit_number: number; title: string | null }> = [];
   for (let season = 1; season <= data.season_count; season++) {
     for (let unitNum = 1; unitNum <= data.units_per_season; unitNum++) {
+      const unitTitle = season === 1 ? `Episode ${unitNum}` : `Season ${season} Episode ${unitNum}`;
       const unit = await prisma.projectUnit.create({
         data: {
           project_id: project.id,
           season_number: season,
           unit_number: unitNum,
-          title: season === 1 ? `Episode ${unitNum}` : `Season ${season} Episode ${unitNum}`,
+          title: unitTitle,
           episode_length: data.episode_length,
         },
       });
@@ -195,8 +196,8 @@ export async function createProjectFromTemplate(
           data: {
             project_id: project.id,
             unit_id: unit.id,
-            title: `${role.replace("_", " ")} - ${unit.title}${slotCount > 1 ? ` (${slot + 1})` : ""}`,
-            description: `Task for ${role} on ${unit.title}`,
+            title: `${role.replace("_", " ")} - ${unit.title || `S${unit.season_number}E${unit.unit_number}`}${slotCount > 1 ? ` (${slot + 1})` : ""}`,
+            description: `Task for ${role} on ${unit.title || `S${unit.season_number}E${unit.unit_number}`}`,
             role,
             status: initialStatus,
             creator_id: ownerId,

@@ -858,8 +858,7 @@ export async function cancelTask(
 
   if (
     task.status === "completed" ||
-    task.status === "frozen" ||
-    task.status === "cancelled"
+    task.status === "frozen"
   ) {
     throw new AppError(
       `Task cannot be cancelled. Current status: ${task.status}`,

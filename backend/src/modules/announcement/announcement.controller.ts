@@ -95,7 +95,7 @@ export async function pinAnnouncement(
   try {
     const pinned = req.body.pinned ?? true;
     const result = await announcementService.pinAnnouncement(
-      req.params.id,
+      req.params.id as string,
       req.user!.id,
       req.user!.role,
       pinned

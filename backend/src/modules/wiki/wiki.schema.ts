@@ -7,12 +7,12 @@ export const createWikiSchema = z.object({
   slug: z.string().min(1, "Slug is required").max(200).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
   content: z.string().min(1, "Content is required"),
   status: z.nativeEnum(WikiStatus).default(WikiStatus.draft),
+  require_approval: z.boolean().default(false),
 });
 
 export const updateWikiSchema = z.object({
   title: z.string().min(1).max(500).optional(),
   content: z.string().optional(),
-  pending_content: z.string().optional().nullable(),
   status: z.nativeEnum(WikiStatus).optional(),
 });
 
@@ -26,6 +26,7 @@ export const wikiQuerySchema = z.object({
 
 export const approveWikiSchema = z.object({
   approved: z.boolean(),
+  rejection_reason: z.string().optional().nullable(),
 });
 
 export const createCommentSchema = z.object({

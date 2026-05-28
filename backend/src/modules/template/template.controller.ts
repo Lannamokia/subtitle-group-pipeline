@@ -3,6 +3,11 @@ import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as templateService from "./template.service";
 
+function getParam(req: Request, name: string): string {
+  const val = req.params[name];
+  return Array.isArray(val) ? val[0] : val;
+}
+
 export async function createTemplate(
   req: AuthenticatedRequest,
   res: Response,
@@ -37,7 +42,7 @@ export async function getTemplate(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await templateService.getTemplateById(req.params.id);
+    const result = await templateService.getTemplateById(getParam(req, "id"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -51,7 +56,7 @@ export async function updateTemplate(
 ): Promise<void> {
   try {
     const result = await templateService.updateTemplate(
-      req.params.id,
+      getParam(req, "id"),
       req.body,
       req.user?.id
     );
@@ -68,7 +73,7 @@ export async function deleteTemplate(
 ): Promise<void> {
   try {
     const result = await templateService.deleteTemplate(
-      req.params.id,
+      getParam(req, "id"),
       req.user?.id
     );
     successResponse(res, result);
@@ -84,7 +89,7 @@ export async function setDefaultTemplate(
 ): Promise<void> {
   try {
     const result = await templateService.setDefaultTemplate(
-      req.params.id,
+      getParam(req, "id"),
       req.user?.id
     );
     successResponse(res, result);

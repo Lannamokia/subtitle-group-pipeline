@@ -3,6 +3,11 @@ import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as projectService from "./project.service";
 
+function getParam(req: Request, name: string): string {
+  const val = req.params[name];
+  return Array.isArray(val) ? val[0] : val;
+}
+
 export async function createProject(
   req: AuthenticatedRequest,
   res: Response,
@@ -51,7 +56,7 @@ export async function getProject(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.getProjectById(req.params.id);
+    const result = await projectService.getProjectById(getParam(req, "id"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -64,7 +69,7 @@ export async function updateProject(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.updateProject(req.params.id, req.body, req.user?.id);
+    const result = await projectService.updateProject(getParam(req, "id"), req.body, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -77,7 +82,7 @@ export async function archiveProject(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.archiveProject(req.params.id, req.user?.id);
+    const result = await projectService.archiveProject(getParam(req, "id"), req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -90,7 +95,7 @@ export async function unarchiveProject(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.unarchiveProject(req.params.id, req.user?.id);
+    const result = await projectService.unarchiveProject(getParam(req, "id"), req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -103,7 +108,7 @@ export async function softDeleteProject(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.softDeleteProject(req.params.id, req.user?.id);
+    const result = await projectService.softDeleteProject(getParam(req, "id"), req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -116,7 +121,7 @@ export async function restoreProject(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.restoreProject(req.params.id, req.user?.id);
+    const result = await projectService.restoreProject(getParam(req, "id"), req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -129,7 +134,7 @@ export async function getProjectMembers(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.getProjectMembers(req.params.id);
+    const result = await projectService.getProjectMembers(getParam(req, "id"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -142,7 +147,7 @@ export async function addMember(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.addMember(req.params.id, req.body, req.user?.id);
+    const result = await projectService.addMember(getParam(req, "id"), req.body, req.user?.id);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -155,7 +160,7 @@ export async function removeMember(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.removeMember(req.params.id, req.params.userId, req.user?.id);
+    const result = await projectService.removeMember(getParam(req, "id"), getParam(req, "userId"), req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -168,7 +173,7 @@ export async function updateMember(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.updateMember(req.params.id, req.params.userId, req.body);
+    const result = await projectService.updateMember(getParam(req, "id"), getParam(req, "userId"), req.body);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -181,7 +186,7 @@ export async function createUnit(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.createUnit(req.params.id, req.body, req.user?.id);
+    const result = await projectService.createUnit(getParam(req, "id"), req.body, req.user?.id);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -194,7 +199,7 @@ export async function joinRequest(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.createJoinRequest(req.params.id, req.user!.id, req.body);
+    const result = await projectService.createJoinRequest(getParam(req, "id"), req.user!.id, req.body);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -208,7 +213,7 @@ export async function respondJoinRequest(
 ): Promise<void> {
   try {
     const result = await projectService.respondToJoinRequest(
-      req.params.requestId,
+      getParam(req, "requestId"),
       req.user!.id,
       req.body
     );
@@ -224,7 +229,7 @@ export async function getJoinRequests(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.getJoinRequests(req.params.id);
+    const result = await projectService.getJoinRequests(getParam(req, "id"));
     successResponse(res, result);
   } catch (error) {
     next(error);

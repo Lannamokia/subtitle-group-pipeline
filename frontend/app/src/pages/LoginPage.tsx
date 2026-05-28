@@ -1,14 +1,25 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useAuthStore } from "@/stores/authStore";
+import { authApi, getErrorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { mockCurrentUser } from "@/lib/mockData";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import type { TaskRole } from "@/types";
+import { toast } from "sonner";
 import {
   Eye,
   EyeOff,
@@ -18,6 +29,7 @@ import {
   User,
   Lock,
   QrCode,
+  Loader2,
 } from "lucide-react";
 
 type AuthView = "login" | "register" | "verification";
@@ -31,46 +43,111 @@ const ROLE_TAGS: { value: TaskRole; label: string }[] = [
   { value: "release", label: "发布" },
 ];
 
+// Login schema
+const loginSchema = z.object({
+  username: z.string().min(1, "用户名不能为空"),
+  password: z.string().min(1, "密码不能为空"),
+});
+
+type LoginFormData = z.infer<typeof loginSchema>;
+
+// Register schema
+const registerSchema = z
+  .object({
+    username: z
+      .string()
+      .min(2, "用户名至少2个字符")
+      .max(20, "用户名最多20个字符")
+      .regex(/^[a-zA-Z0-9_一-龥]+$/, "用户名只能包含字母、数字、下划线和中文"),
+    password: z.string().min(6, "密码至少6个字符").max(50, "密码最多50个字符"),
+    confirmPassword: z.string(),
+    qq: z
+      .string()
+      .min(5, "QQ号至少5位")
+      .max(11, "QQ号最多11位")
+      .regex(/^\d+$/, "QQ号只能包含数字"),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "两次输入的密码不一致",
+    path: ["confirmPassword"],
+  });
+
+type RegisterFormData = z.infer<typeof registerSchema>;
+
 export function LoginPage() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
   const [view, setView] = useState<AuthView>("login");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedRoles, setSelectedRoles] = useState<TaskRole[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [verificationInfo, setVerificationInfo] = useState<{
+    qqGroup: string;
+    command: string;
+  } | null>(null);
 
   // Login form
-  const [loginForm, setLoginForm] = useState({ username: "", password: "", remember: false });
-
-  // Register form
-  const [registerForm, setRegisterForm] = useState({
-    username: "",
-    password: "",
-    confirmPassword: "",
-    qq: "",
+  const loginForm = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { username: "", password: "" },
   });
 
-  // Verification
-  const [verificationCode] = useState("A3B7K9P2");
-  const [qqGroup] = useState("123456789");
+  // Register form
+  const registerForm = useForm<RegisterFormData>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { username: "", password: "", confirmPassword: "", qq: "" },
+  });
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Mock: always succeed with demo user
-    login(mockCurrentUser);
-    navigate("/dashboard");
+  const handleLogin = async (data: LoginFormData) => {
+    setIsLoading(true);
+    try {
+      const result = await authApi.login(data);
+      login(result.user);
+      toast.success("登录成功");
+      navigate("/dashboard");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Mock: go to verification
-    setView("verification");
+  const handleRegister = async (data: RegisterFormData) => {
+    setIsLoading(true);
+    try {
+      const result = await authApi.register({
+        username: data.username,
+        password: data.password,
+        confirmPassword: data.confirmPassword,
+        qq: data.qq,
+        tags: selectedRoles,
+      });
+
+      if (result.status === "pending_verification" && result.verification) {
+        setVerificationInfo(result.verification);
+        setView("verification");
+        toast.info("注册成功，请完成QQ群验证");
+      } else if (result.user && result.token) {
+        login(result.user);
+        toast.success("注册成功");
+        navigate("/dashboard");
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleCopyCommand = () => {
-    navigator.clipboard.writeText(`/verify ${verificationCode}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (verificationInfo) {
+      navigator.clipboard.writeText(verificationInfo.command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast.success("已复制到剪贴板");
+    }
   };
 
   const toggleRole = (role: TaskRole) => {
@@ -134,7 +211,9 @@ export function LoginPage() {
                   <Label className="text-xs text-gray-500">验证QQ群</Label>
                   <div className="flex items-center gap-2 mt-1">
                     <MessageCircle className="w-4 h-4 text-primary-500" />
-                    <span className="text-lg font-medium text-gray-800">{qqGroup}</span>
+                    <span className="text-lg font-medium text-gray-800">
+                      {verificationInfo?.qqGroup || "--"}
+                    </span>
                   </div>
                 </div>
 
@@ -142,7 +221,7 @@ export function LoginPage() {
                   <Label className="text-xs text-gray-500">验证指令</Label>
                   <div className="flex items-center gap-2 mt-1">
                     <code className="flex-1 bg-white border rounded-md px-3 py-2 text-sm font-mono text-gray-800">
-                      /verify {verificationCode}
+                      {verificationInfo?.command || "--"}
                     </code>
                     <Button
                       variant="outline"
@@ -163,11 +242,11 @@ export function LoginPage() {
               <div className="text-sm text-gray-500 space-y-2">
                 <p className="flex items-start gap-2">
                   <span className="shrink-0">1.</span>
-                  加入验证QQ群 {qqGroup}
+                  加入验证QQ群 {verificationInfo?.qqGroup || "--"}
                 </p>
                 <p className="flex items-start gap-2">
                   <span className="shrink-0">2.</span>
-                  在群中发送验证指令 /verify {verificationCode}
+                  在群中发送验证指令 {verificationInfo?.command || "--"}
                 </p>
                 <p className="flex items-start gap-2">
                   <span className="shrink-0">3.</span>
@@ -175,18 +254,16 @@ export function LoginPage() {
                 </p>
               </div>
 
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => setView("login")}
-                >
-                  返回登录
-                </Button>
-                <Button className="flex-1" onClick={() => { login(mockCurrentUser); navigate("/dashboard"); }}>
-                  模拟验证通过
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setView("login");
+                  setVerificationInfo(null);
+                }}
+              >
+                返回登录
+              </Button>
             </div>
           ) : (
             /* Login/Register Tabs */
@@ -197,128 +274,195 @@ export function LoginPage() {
               </TabsList>
 
               <TabsContent value="login" className="space-y-4">
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="login-username">用户名</Label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        id="login-username"
-                        placeholder="输入用户名"
-                        className="pl-9"
-                        value={loginForm.username}
-                        onChange={(e) => setLoginForm((p) => ({ ...p, username: e.target.value }))}
-                      />
-                    </div>
-                  </div>
+                <Form {...loginForm}>
+                  <form onSubmit={loginForm.handleSubmit(handleLogin)} className="space-y-4">
+                    <FormField
+                      control={loginForm.control}
+                      name="username"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>用户名</FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                              <Input placeholder="输入用户名" className="pl-9" {...field} />
+                            </div>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
 
-                  <div className="space-y-2">
-                    <Label htmlFor="login-password">密码</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        id="login-password"
-                        type={showPassword ? "text" : "password"}
-                        placeholder="输入密码"
-                        className="pl-9 pr-9"
-                        value={loginForm.password}
-                        onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        onClick={() => setShowPassword(!showPassword)}
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
+                    <FormField
+                      control={loginForm.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>密码</FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                              <Input
+                                type={showPassword ? "text" : "password"}
+                                placeholder="输入密码"
+                                className="pl-9 pr-9"
+                                {...field}
+                              />
+                              <button
+                                type="button"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                onClick={() => setShowPassword(!showPassword)}
+                              >
+                                {showPassword ? (
+                                  <EyeOff className="w-4 h-4" />
+                                ) : (
+                                  <Eye className="w-4 h-4" />
+                                )}
+                              </button>
+                            </div>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
 
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="remember"
-                        checked={loginForm.remember}
-                        onCheckedChange={(checked) =>
-                          setLoginForm((p) => ({ ...p, remember: checked as boolean }))
-                        }
-                      />
-                      <Label htmlFor="remember" className="text-sm text-gray-500 cursor-pointer">
-                        记住我
-                      </Label>
-                    </div>
-                  </div>
-
-                  <Button type="submit" className="w-full">
-                    登录
-                  </Button>
-                </form>
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          登录中...
+                        </>
+                      ) : (
+                        "登录"
+                      )}
+                    </Button>
+                  </form>
+                </Form>
               </TabsContent>
 
               <TabsContent value="register" className="space-y-4">
-                <form onSubmit={handleRegister} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="reg-username">用户名</Label>
-                    <Input
-                      id="reg-username"
-                      placeholder="设置用户名"
-                      value={registerForm.username}
-                      onChange={(e) => setRegisterForm((p) => ({ ...p, username: e.target.value }))}
+                <Form {...registerForm}>
+                  <form onSubmit={registerForm.handleSubmit(handleRegister)} className="space-y-4">
+                    <FormField
+                      control={registerForm.control}
+                      name="username"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>用户名</FormLabel>
+                          <FormControl>
+                            <Input placeholder="设置用户名" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="reg-password">密码</Label>
-                    <Input
-                      id="reg-password"
-                      type="password"
-                      placeholder="设置密码"
-                      value={registerForm.password}
-                      onChange={(e) => setRegisterForm((p) => ({ ...p, password: e.target.value }))}
+                    <FormField
+                      control={registerForm.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>密码</FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <Input
+                                type={showPassword ? "text" : "password"}
+                                placeholder="设置密码"
+                                className="pr-9"
+                                {...field}
+                              />
+                              <button
+                                type="button"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                onClick={() => setShowPassword(!showPassword)}
+                              >
+                                {showPassword ? (
+                                  <EyeOff className="w-4 h-4" />
+                                ) : (
+                                  <Eye className="w-4 h-4" />
+                                )}
+                              </button>
+                            </div>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="reg-confirm">确认密码</Label>
-                    <Input
-                      id="reg-confirm"
-                      type="password"
-                      placeholder="再次输入密码"
-                      value={registerForm.confirmPassword}
-                      onChange={(e) => setRegisterForm((p) => ({ ...p, confirmPassword: e.target.value }))}
+                    <FormField
+                      control={registerForm.control}
+                      name="confirmPassword"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>确认密码</FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <Input
+                                type={showConfirmPassword ? "text" : "password"}
+                                placeholder="再次输入密码"
+                                className="pr-9"
+                                {...field}
+                              />
+                              <button
+                                type="button"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                              >
+                                {showConfirmPassword ? (
+                                  <EyeOff className="w-4 h-4" />
+                                ) : (
+                                  <Eye className="w-4 h-4" />
+                                )}
+                              </button>
+                            </div>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="reg-qq">QQ号</Label>
-                    <Input
-                      id="reg-qq"
-                      placeholder="用于群验证"
-                      value={registerForm.qq}
-                      onChange={(e) => setRegisterForm((p) => ({ ...p, qq: e.target.value }))}
+                    <FormField
+                      control={registerForm.control}
+                      name="qq"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>QQ号</FormLabel>
+                          <FormControl>
+                            <Input placeholder="用于群验证" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label>意向岗位（可多选）</Label>
-                    <div className="flex flex-wrap gap-2">
-                      {ROLE_TAGS.map((role) => (
-                        <Badge
-                          key={role.value}
-                          variant={selectedRoles.includes(role.value) ? "default" : "outline"}
-                          className="cursor-pointer px-3 py-1.5"
-                          onClick={() => toggleRole(role.value)}
-                        >
-                          {role.label}
-                        </Badge>
-                      ))}
+                    <div className="space-y-2">
+                      <Label>意向岗位（可多选）</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {ROLE_TAGS.map((role) => (
+                          <Badge
+                            key={role.value}
+                            variant={selectedRoles.includes(role.value) ? "default" : "outline"}
+                            className="cursor-pointer px-3 py-1.5 select-none"
+                            onClick={() => toggleRole(role.value)}
+                          >
+                            {role.label}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                  </div>
 
-                  <Button type="submit" className="w-full">
-                    注册并验证
-                  </Button>
-                </form>
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          注册中...
+                        </>
+                      ) : (
+                        "注册并验证"
+                      )}
+                    </Button>
+                  </form>
+                </Form>
               </TabsContent>
             </Tabs>
           )}

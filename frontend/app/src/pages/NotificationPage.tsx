@@ -19,7 +19,9 @@ import {
   AtSign,
   Trash2,
   Settings,
+  ArrowRight,
 } from "lucide-react";
+import { Link } from "react-router";
 
 const typeIcons: Record<NotificationType, React.ReactNode> = {
   task: <ClipboardList className="w-4 h-4 text-blue-500" />,
@@ -75,8 +77,14 @@ export function NotificationPage() {
           </Button>
           <Button variant="outline" size="sm" onClick={() => setShowPrefs(!showPrefs)}>
             <Settings className="w-4 h-4 mr-1.5" />
-            偏好设置
+            快速设置
           </Button>
+          <Link to="/notifications/settings">
+            <Button variant="outline" size="sm">
+              <ArrowRight className="w-4 h-4 mr-1.5" />
+              详细设置
+            </Button>
+          </Link>
         </div>
       </div>
 

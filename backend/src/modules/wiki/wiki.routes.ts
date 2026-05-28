@@ -22,8 +22,9 @@ router.get("/by-slug/:slug", validateParams(slugParamSchema), controller.getWiki
 router.get("/:id", validateParams(idParamSchema), controller.getWiki);
 router.post("/", authenticate, validateBody(createWikiSchema), controller.createWiki);
 router.patch("/:id", authenticate, validateParams(idParamSchema), validateBody(updateWikiSchema), controller.updateWiki);
-router.post("/:id/approve", authenticate, requireRole("admin", "super_admin", "moderator"), validateParams(idParamSchema), validateBody(approveWikiSchema), controller.approveWiki);
-router.delete("/:id", authenticate, requireRole("admin", "super_admin", "moderator"), validateParams(idParamSchema), controller.deleteWiki);
+router.post("/:id/approve", authenticate, requireRole("super_admin", "group_admin", "supervisor"), validateParams(idParamSchema), validateBody(approveWikiSchema), controller.approveWikiChange);
+router.post("/:id/reject", authenticate, requireRole("super_admin", "group_admin", "supervisor"), validateParams(idParamSchema), validateBody(z.object({ reason: z.string().optional() })), controller.rejectWikiChange);
+router.delete("/:id", authenticate, requireRole("super_admin", "group_admin", "supervisor"), validateParams(idParamSchema), controller.deleteWiki);
 
 // Comments
 router.get("/:wikiId/comments", validateParams(wikiIdParamSchema), controller.getComments);

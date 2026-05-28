@@ -3,6 +3,11 @@ import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as taskService from "./task.service";
 
+function getParam(req: Request, name: string): string {
+  const val = req.params[name];
+  return Array.isArray(val) ? val[0] : val;
+}
+
 export async function createTask(
   req: AuthenticatedRequest,
   res: Response,
@@ -37,7 +42,7 @@ export async function getTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.getTaskById(req.params.id);
+    const result = await taskService.getTaskById(getParam(req, "id"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -50,7 +55,7 @@ export async function updateTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.updateTask(req.params.id, req.body, req.user?.id);
+    const result = await taskService.updateTask(getParam(req, "id"), req.body, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -63,7 +68,7 @@ export async function deleteTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.deleteTask(req.params.id, req.user?.id);
+    const result = await taskService.deleteTask(getParam(req, "id"), req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -78,7 +83,7 @@ export async function claimTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.claimTask(req.params.id, req.user!.id, req.user?.id);
+    const result = await taskService.claimTask(getParam(req, "id"), req.user!.id, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -92,7 +97,7 @@ export async function assignTask(
 ): Promise<void> {
   try {
     const { assignee_id } = req.body;
-    const result = await taskService.assignTask(req.params.id, assignee_id, req.user?.id);
+    const result = await taskService.assignTask(getParam(req, "id"), assignee_id, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -105,7 +110,7 @@ export async function returnTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.returnTask(req.params.id, req.user!.id, req.user?.id);
+    const result = await taskService.returnTask(getParam(req, "id"), req.user!.id, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -118,7 +123,7 @@ export async function startTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.startTask(req.params.id, req.user!.id, req.user?.id);
+    const result = await taskService.startTask(getParam(req, "id"), req.user!.id, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -131,7 +136,7 @@ export async function submitTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.submitTask(req.params.id, req.user!.id, req.user?.id);
+    const result = await taskService.submitTask(getParam(req, "id"), req.user!.id, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -144,7 +149,7 @@ export async function cancelTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.cancelTask(req.params.id, req.user?.id);
+    const result = await taskService.cancelTask(getParam(req, "id"), req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -158,7 +163,7 @@ export async function approveTask(
 ): Promise<void> {
   try {
     const result = await taskService.approveTask(
-      req.params.id,
+      getParam(req, "id"),
       req.user!.id,
       req.body,
       req.user?.id
@@ -176,7 +181,7 @@ export async function rejectTask(
 ): Promise<void> {
   try {
     const result = await taskService.rejectTask(
-      req.params.id,
+      getParam(req, "id"),
       req.user!.id,
       req.body,
       req.user?.id
@@ -193,7 +198,7 @@ export async function resetTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.resetTask(req.params.id, req.user?.id, req.body);
+    const result = await taskService.resetTask(getParam(req, "id"), req.user?.id, req.body);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -206,7 +211,7 @@ export async function updateTaskDeadline(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.updateTaskDeadline(req.params.id, req.body, req.user?.id);
+    const result = await taskService.updateTaskDeadline(getParam(req, "id"), req.body, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -222,7 +227,7 @@ export async function claimSegment(
 ): Promise<void> {
   try {
     const result = await taskService.claimTranslationSegment(
-      req.params.id,
+      getParam(req, "id"),
       req.user!.id,
       req.body
     );
@@ -239,7 +244,7 @@ export async function abandonSegment(
 ): Promise<void> {
   try {
     const result = await taskService.abandonTranslationSegment(
-      req.params.claimId,
+      getParam(req, "claimId"),
       req.user!.id
     );
     successResponse(res, result);
@@ -255,7 +260,7 @@ export async function submitTranslation(
 ): Promise<void> {
   try {
     const result = await taskService.submitTranslation(
-      req.params.id,
+      getParam(req, "id"),
       req.user!.id,
       req.body
     );
@@ -273,7 +278,7 @@ export async function createDependency(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.createDependency(req.params.id, req.body);
+    const result = await taskService.createDependency(getParam(req, "id"), req.body);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -287,8 +292,8 @@ export async function removeDependency(
 ): Promise<void> {
   try {
     const result = await taskService.removeDependency(
-      req.params.id,
-      req.params.dependencyId
+      getParam(req, "id"),
+      getParam(req, "dependencyId")
     );
     successResponse(res, result);
   } catch (error) {
@@ -317,7 +322,7 @@ export async function getProjectWorkload(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.getProjectWorkload(req.params.projectId);
+    const result = await taskService.getProjectWorkload(getParam(req, "projectId"));
     successResponse(res, result);
   } catch (error) {
     next(error);

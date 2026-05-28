@@ -16,6 +16,7 @@ import subtitleRoutes from "./modules/subtitle/subtitle.routes";
 import wikiRoutes from "./modules/wiki/wiki.routes";
 import storageRoutes from "./modules/storage/storage.routes";
 import announcementRoutes from "./modules/announcement/announcement.routes";
+import timelineRoutes from "./modules/timeline/timeline.routes";
 
 export function createApp(): Application {
   const app = express();
@@ -57,6 +58,7 @@ export function createApp(): Application {
   app.use(`${apiPrefix}/wiki`, wikiRoutes);
   app.use(`${apiPrefix}/storage`, storageRoutes);
   app.use(`${apiPrefix}/announcements`, announcementRoutes);
+  app.use(`${apiPrefix}/timeline`, timelineRoutes);
 
   // 404 handler
   app.use(notFoundHandler);

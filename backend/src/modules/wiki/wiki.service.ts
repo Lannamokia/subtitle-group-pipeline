@@ -1,5 +1,8 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
+import { TimelineEventType } from "@prisma/client";
+import * as timelineService from "../timeline/timeline.service";
+import * as auditService from "../audit/audit.service";
 import type {
   CreateWikiInput,
   UpdateWikiInput,
@@ -12,12 +15,10 @@ export async function createWiki(
   creatorId: string,
   data: CreateWikiInput
 ) {
-  const existing = await prisma.wikiDocument.findUnique({
+  const existing = await prisma.wikiDocument.findFirst({
     where: {
-      project_id_slug: {
-        project_id: data.project_id || null,
-        slug: data.slug,
-      },
+      project_id: data.project_id ?? null,
+      slug: data.slug,
     },
   });
 
@@ -31,7 +32,7 @@ export async function createWiki(
 
   const wiki = await prisma.wikiDocument.create({
     data: {
-      project_id: data.project_id || null,
+      project_id: data.project_id ?? null,
       title: data.title,
       slug: data.slug,
       content: data.content,
@@ -47,6 +48,24 @@ export async function createWiki(
         },
       },
     },
+  });
+
+  if (data.project_id) {
+    await timelineService.createTimelineEvent({
+      project_id: data.project_id,
+      event_type: TimelineEventType.wiki_updated,
+      title: "Wiki document created",
+      description: `Wiki "${wiki.title}" was created`,
+      actor_id: creatorId,
+    });
+  }
+
+  await auditService.log({
+    user_id: creatorId,
+    action: "wiki.create",
+    resource_type: "wiki",
+    resource_id: wiki.id,
+    new_value: wiki,
   });
 
   return wiki;
@@ -67,8 +86,8 @@ export async function getWikis(query: WikiQueryInput) {
   }
   if (query.search) {
     where.OR = [
-      { title: { contains: query.search, mode: "insensitive" } },
-      { content: { contains: query.search, mode: "insensitive" } },
+      { title: { contains: query.search } },
+      { content: { contains: query.search } },
     ];
   }
 
@@ -119,13 +138,6 @@ export async function getWikiById(wikiId: string) {
           nickname: true,
         },
       },
-      approved_by_user: {
-        select: {
-          id: true,
-          username: true,
-          nickname: true,
-        },
-      },
       comments: {
         where: { deleted_at: null },
         include: {
@@ -150,15 +162,13 @@ export async function getWikiById(wikiId: string) {
 }
 
 export async function getWikiBySlug(
-  projectId: string | null,
+  projectId: string | null | undefined,
   slug: string
 ) {
-  const wiki = await prisma.wikiDocument.findUnique({
+  const wiki = await prisma.wikiDocument.findFirst({
     where: {
-      project_id_slug: {
-        project_id: projectId,
-        slug,
-      },
+      project_id: projectId ?? null,
+      slug,
     },
     include: {
       creator: {
@@ -193,7 +203,8 @@ export async function getWikiBySlug(
 
 export async function updateWiki(
   wikiId: string,
-  data: UpdateWikiInput
+  data: UpdateWikiInput,
+  actorId?: string
 ) {
   const existing = await prisma.wikiDocument.findUnique({
     where: { id: wikiId },
@@ -203,16 +214,15 @@ export async function updateWiki(
     throw new AppError("Wiki document not found", "NOT_FOUND", 404);
   }
 
-  // If document is approved, new edits go to pending_content
+  const updateData: Record<string, unknown> = {};
+
+  if (data.title !== undefined) updateData.title = data.title;
+
+  // If approval flow is enabled (document is approved), save to pending_content
   const isApprovedEdit =
     existing.status === "approved" &&
     data.content !== undefined &&
     data.content !== existing.content;
-
-  const updateData: Record<string, unknown> = {};
-
-  if (data.title !== undefined) updateData.title = data.title;
-  if (data.status !== undefined) updateData.status = data.status;
 
   if (isApprovedEdit) {
     updateData.pending_content = data.content;
@@ -221,8 +231,8 @@ export async function updateWiki(
     updateData.content = data.content;
   }
 
-  if (data.pending_content !== undefined && !isApprovedEdit) {
-    updateData.pending_content = data.pending_content;
+  if (data.status !== undefined && !isApprovedEdit) {
+    updateData.status = data.status;
   }
 
   const wiki = await prisma.wikiDocument.update({
@@ -230,10 +240,31 @@ export async function updateWiki(
     data: updateData,
   });
 
+  if (existing.project_id) {
+    await timelineService.createTimelineEvent({
+      project_id: existing.project_id,
+      event_type: isApprovedEdit
+        ? TimelineEventType.wiki_updated
+        : TimelineEventType.wiki_updated,
+      title: isApprovedEdit ? "Wiki change pending approval" : "Wiki updated",
+      description: `Wiki "${wiki.title}" was ${isApprovedEdit ? "updated (pending approval)" : "updated"}`,
+      actor_id: actorId,
+    });
+  }
+
+  await auditService.log({
+    user_id: actorId,
+    action: "wiki.update",
+    resource_type: "wiki",
+    resource_id: wikiId,
+    old_value: existing,
+    new_value: wiki,
+  });
+
   return wiki;
 }
 
-export async function approveWiki(
+export async function approveWikiChange(
   wikiId: string,
   approverId: string,
   data: ApproveWikiInput
@@ -248,7 +279,7 @@ export async function approveWiki(
 
   if (data.approved) {
     // Approve: move pending_content to content
-    await prisma.wikiDocument.update({
+    const updated = await prisma.wikiDocument.update({
       where: { id: wikiId },
       data: {
         status: "approved",
@@ -258,22 +289,117 @@ export async function approveWiki(
         approved_at: new Date(),
       },
     });
+
+    if (wiki.project_id) {
+      await timelineService.createTimelineEvent({
+        project_id: wiki.project_id,
+        event_type: TimelineEventType.wiki_approved,
+        title: "Wiki change approved",
+        description: `Wiki "${wiki.title}" changes were approved`,
+        actor_id: approverId,
+      });
+    }
+
+    await auditService.log({
+      user_id: approverId,
+      action: "wiki.approve",
+      resource_type: "wiki",
+      resource_id: wikiId,
+      new_value: updated,
+    });
+
+    return { approved: true, wiki: updated };
   } else {
-    // Reject: keep pending_content but change status
-    await prisma.wikiDocument.update({
+    // Reject: keep pending_content but change status back to draft
+    const updated = await prisma.wikiDocument.update({
       where: { id: wikiId },
       data: {
         status: "draft",
       },
     });
-  }
 
-  return { approved: data.approved };
+    if (wiki.project_id) {
+      await timelineService.createTimelineEvent({
+        project_id: wiki.project_id,
+        event_type: TimelineEventType.wiki_rejected,
+        title: "Wiki change rejected",
+        description: `Wiki "${wiki.title}" changes were rejected${data.rejection_reason ? `: ${data.rejection_reason}` : ""}`,
+        actor_id: approverId,
+      });
+    }
+
+    await auditService.log({
+      user_id: approverId,
+      action: "wiki.reject",
+      resource_type: "wiki",
+      resource_id: wikiId,
+      new_value: updated,
+    });
+
+    return { approved: false, reason: data.rejection_reason, wiki: updated };
+  }
 }
 
-export async function deleteWiki(wikiId: string) {
+export async function rejectWikiChange(
+  wikiId: string,
+  approverId: string,
+  reason?: string
+) {
+  const wiki = await prisma.wikiDocument.findUnique({
+    where: { id: wikiId },
+  });
+
+  if (!wiki) {
+    throw new AppError("Wiki document not found", "NOT_FOUND", 404);
+  }
+
+  const updated = await prisma.wikiDocument.update({
+    where: { id: wikiId },
+    data: {
+      status: "draft",
+    },
+  });
+
+  if (wiki.project_id) {
+    await timelineService.createTimelineEvent({
+      project_id: wiki.project_id,
+      event_type: TimelineEventType.wiki_rejected,
+      title: "Wiki change rejected",
+      description: `Wiki "${wiki.title}" changes were rejected${reason ? `: ${reason}` : ""}`,
+      actor_id: approverId,
+    });
+  }
+
+  await auditService.log({
+    user_id: approverId,
+    action: "wiki.reject",
+    resource_type: "wiki",
+    resource_id: wikiId,
+    new_value: updated,
+  });
+
+  return { approved: false, reason, wiki: updated };
+}
+
+export async function deleteWiki(wikiId: string, actorId?: string) {
+  const existing = await prisma.wikiDocument.findUnique({
+    where: { id: wikiId },
+  });
+
+  if (!existing) {
+    throw new AppError("Wiki document not found", "NOT_FOUND", 404);
+  }
+
   await prisma.wikiDocument.delete({
     where: { id: wikiId },
+  });
+
+  await auditService.log({
+    user_id: actorId,
+    action: "wiki.delete",
+    resource_type: "wiki",
+    resource_id: wikiId,
+    old_value: existing,
   });
 
   return { success: true };

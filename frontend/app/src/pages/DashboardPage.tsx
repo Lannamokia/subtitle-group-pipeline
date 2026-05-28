@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { cn, formatFullDate } from "@/lib/utils";
+import { cn, formatFullDate, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TaskCard } from "@/components/TaskCard";
 import { TimelineEventItem } from "@/components/TimelineEvent";
@@ -12,6 +13,7 @@ import {
   mockTimelineEvents,
   mockAnnouncements,
 } from "@/lib/mockData";
+import type { TaskStatus } from "@/types";
 import {
   ClipboardList,
   CheckCircle2,
@@ -20,12 +22,14 @@ import {
   Plus,
   Layers,
   Megaphone,
+  ArrowRight,
+  Pin,
 } from "lucide-react";
 
 export function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const [taskTab, setTaskTab] = useState<"in_progress" | "submitted" | "overdue">("in_progress");
+  const [taskTab, setTaskTab] = useState<"in_progress" | "submitted" | "overdue" | "all">("in_progress");
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem("onboarding-dismissed");
   });
@@ -41,12 +45,19 @@ export function DashboardPage() {
       ? inProgressTasks
       : taskTab === "submitted"
         ? submittedTasks
-        : overdueTasks;
+        : taskTab === "overdue"
+          ? overdueTasks
+          : mockTasks;
 
   const dismissOnboarding = () => {
     setShowOnboarding(false);
     localStorage.setItem("onboarding-dismissed", "true");
   };
+
+  // Get latest global and project announcements
+  const globalAnnouncements = mockAnnouncements.filter((a) => a.type === "global");
+  const projectAnnouncements = mockAnnouncements.filter((a) => a.type === "project");
+  const latestGlobalAnnouncement = globalAnnouncements[0];
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -69,6 +80,27 @@ export function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      {/* Global announcement banner */}
+      {latestGlobalAnnouncement && (
+        <div
+          className="bg-primary-50 border border-primary-200 rounded-lg px-4 py-3 cursor-pointer hover:bg-primary-100/50 transition-colors"
+          onClick={() => navigate("/notifications")}
+        >
+          <div className="flex items-center gap-2">
+            <Megaphone className="w-4 h-4 text-primary-500 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-gray-800">
+                {latestGlobalAnnouncement.title}
+              </span>
+              <span className="text-sm text-gray-600 ml-2">
+                {latestGlobalAnnouncement.content}
+              </span>
+            </div>
+            <ArrowRight className="w-4 h-4 text-primary-400 shrink-0" />
+          </div>
+        </div>
+      )}
 
       {/* Stats cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
@@ -105,7 +137,7 @@ export function DashboardPage() {
 
       {/* Main content: Task list + Timeline */}
       <div className="grid grid-cols-1 lg:grid-cols-7 gap-4 md:gap-6">
-        {/* Task list (left, 7 cols) */}
+        {/* Task list (left, 5 cols) */}
         <div className="lg:col-span-5 space-y-4">
           <Card>
             <CardContent className="p-0">
@@ -130,6 +162,12 @@ export function DashboardPage() {
                         {overdueTasks.length}
                       </span>
                     </TabsTrigger>
+                    <TabsTrigger value="all">
+                      全部
+                      <span className="ml-1.5 text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                        {mockTasks.length}
+                      </span>
+                    </TabsTrigger>
                   </TabsList>
                 </div>
 
@@ -140,7 +178,7 @@ export function DashboardPage() {
                         <div
                           key={task.id}
                           className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                          onClick={() => navigate(`/projects/${task.projectId}/tasks/${task.id}`)}
+                          onClick={() => navigate(`/projects/${task.projectId}`)}
                         >
                           <TaskCard task={task} showProject />
                         </div>
@@ -149,7 +187,7 @@ export function DashboardPage() {
                   ) : (
                     <EmptyState
                       icon={<ClipboardList className="w-10 h-10 text-gray-300" />}
-                      title={`暂无${taskTab === "in_progress" ? "进行中" : taskTab === "submitted" ? "待审核" : "超期"}的任务`}
+                      title={`暂无${taskTab === "in_progress" ? "进行中" : taskTab === "submitted" ? "待审核" : taskTab === "overdue" ? "超期" : ""}的任务`}
                       subtitle="去项目页面领取或等待指派"
                     />
                   )}
@@ -157,15 +195,56 @@ export function DashboardPage() {
               </Tabs>
             </CardContent>
           </Card>
+
+          {/* Project announcements */}
+          {projectAnnouncements.length > 0 && (
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Megaphone className="w-4 h-4 text-primary-500" />
+                  <h2 className="text-h3 text-gray-800">项目公告</h2>
+                </div>
+                <div className="space-y-3">
+                  {projectAnnouncements.map((announcement) => (
+                    <div
+                      key={announcement.id}
+                      className="bg-gray-50 rounded-lg px-3 py-2.5 cursor-pointer hover:bg-gray-100 transition-colors"
+                      onClick={() => navigate(`/projects/${announcement.projectId}`)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[10px]">
+                          {announcement.projectId === "p1" ? "夏日重现" : "项目"}
+                        </Badge>
+                        <span className="text-sm font-medium text-gray-800">
+                          {announcement.title}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1 line-clamp-1">
+                        {announcement.content}
+                      </p>
+                      <span className="text-caption text-gray-400 mt-1 block">
+                        {formatRelativeTime(announcement.createdAt)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
-        {/* Timeline (right, 3 cols) */}
+        {/* Timeline (right, 2 cols) */}
         <div className="lg:col-span-2">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-h2 text-gray-800">最新动态</h2>
-                <Button variant="link" size="sm" className="text-primary-500 h-auto p-0">
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="text-primary-500 h-auto p-0"
+                  onClick={() => navigate("/projects")}
+                >
                   查看全部
                 </Button>
               </div>
@@ -178,16 +257,6 @@ export function DashboardPage() {
           </Card>
         </div>
       </div>
-
-      {/* Announcement bar */}
-      {mockAnnouncements.length > 0 && (
-        <div className="bg-primary-50 border-l-4 border-primary-500 rounded-r-md px-4 py-3 flex items-center gap-3">
-          <Megaphone className="w-4 h-4 text-primary-500 shrink-0" />
-          <span className="text-sm text-gray-700 truncate">
-            {mockAnnouncements[0].title}: {mockAnnouncements[0].content}
-          </span>
-        </div>
-      )}
 
       {/* Onboarding overlay for first-time users */}
       {showOnboarding && (

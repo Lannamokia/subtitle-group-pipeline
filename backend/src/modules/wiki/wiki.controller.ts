@@ -3,6 +3,11 @@ import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as wikiService from "./wiki.service";
 
+function getParam(req: Request, name: string): string {
+  const val = req.params[name];
+  return Array.isArray(val) ? val[0] : val;
+}
+
 export async function createWiki(
   req: AuthenticatedRequest,
   res: Response,
@@ -22,7 +27,9 @@ export async function getWikis(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.getWikis(req.query as unknown as Parameters<typeof wikiService.getWikis>[0]);
+    const result = await wikiService.getWikis(
+      req.query as unknown as Parameters<typeof wikiService.getWikis>[0]
+    );
     successResponse(res, result.wikis, 200, result.meta);
   } catch (error) {
     next(error);
@@ -35,7 +42,7 @@ export async function getWiki(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.getWikiById(req.params.id);
+    const result = await wikiService.getWikiById(getParam(req, "id"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -50,7 +57,7 @@ export async function getWikiBySlug(
   try {
     const result = await wikiService.getWikiBySlug(
       req.query.project_id as string | null,
-      req.params.slug
+      getParam(req, "slug")
     );
     successResponse(res, result);
   } catch (error) {
@@ -59,25 +66,39 @@ export async function getWikiBySlug(
 }
 
 export async function updateWiki(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.updateWiki(req.params.id, req.body);
+    const result = await wikiService.updateWiki(getParam(req, "id"), req.body, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
   }
 }
 
-export async function approveWiki(
+export async function approveWikiChange(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.approveWiki(req.params.id, req.user!.id, req.body);
+    const result = await wikiService.approveWikiChange(getParam(req, "id"), req.user!.id, req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function rejectWikiChange(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { reason } = req.body;
+    const result = await wikiService.rejectWikiChange(getParam(req, "id"), req.user!.id, reason);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -85,12 +106,12 @@ export async function approveWiki(
 }
 
 export async function deleteWiki(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.deleteWiki(req.params.id);
+    const result = await wikiService.deleteWiki(getParam(req, "id"), req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -117,7 +138,7 @@ export async function getComments(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.getComments(req.params.wikiId);
+    const result = await wikiService.getComments(getParam(req, "wikiId"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -130,7 +151,7 @@ export async function updateComment(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.updateComment(req.params.id, req.user!.id, req.body.content);
+    const result = await wikiService.updateComment(getParam(req, "id"), req.user!.id, req.body.content);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -143,7 +164,7 @@ export async function deleteComment(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.deleteComment(req.params.id, req.user!.id);
+    const result = await wikiService.deleteComment(getParam(req, "id"), req.user!.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
