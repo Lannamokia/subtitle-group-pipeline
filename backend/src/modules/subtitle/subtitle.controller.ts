@@ -10,6 +10,11 @@ import type {
   ReviewInput,
 } from "./subtitle.schema";
 
+function getParam(req: Request, name: string): string {
+  const val = req.params[name];
+  return Array.isArray(val) ? val[0] : val;
+}
+
 // ==================== TRANSLATION CLAIMS ====================
 
 export async function createTranslationClaim(
@@ -22,7 +27,7 @@ export async function createTranslationClaim(
     const userId = req.user!.id;
     const data = req.body as CreateTranslationClaimInput;
 
-    const result = await subtitleService.createTranslationClaim(unitId, userId, data);
+    const result = await subtitleService.createTranslationClaim(getParam(req, "unitId"), userId, data);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -35,7 +40,7 @@ export async function releaseTranslationClaim(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { claimId } = req.params;
+    const claimId = getParam(req, "claimId");
     const userId = req.user!.id;
 
     const result = await subtitleService.releaseTranslationClaim(claimId, userId);
@@ -51,7 +56,7 @@ export async function getTranslationClaims(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { unitId } = req.params;
+    const unitId = getParam(req, "unitId");
 
     const result = await subtitleService.getTranslationClaims(unitId);
     successResponse(res, result);
@@ -66,7 +71,7 @@ export async function getTranslationClaimById(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { claimId } = req.params;
+    const claimId = getParam(req, "claimId");
 
     const result = await subtitleService.getTranslationClaimById(claimId);
     successResponse(res, result);
@@ -83,7 +88,7 @@ export async function submitTranslation(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { taskId } = req.params;
+    const taskId = getParam(req, "taskId");
     const userId = req.user!.id;
     const data = req.body as SubmitTranslationInput;
 
@@ -100,7 +105,7 @@ export async function getSubmissionsByTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { taskId } = req.params;
+    const taskId = getParam(req, "taskId");
 
     const result = await subtitleService.getSubmissionsByTask(taskId);
     successResponse(res, result);
@@ -117,7 +122,7 @@ export async function createMergeJob(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { unitId } = req.params;
+    const unitId = getParam(req, "unitId");
     const userId = req.user!.id;
     const data = req.body as CreateUnitMergeJobInput;
 
@@ -134,7 +139,7 @@ export async function getMergeJob(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { jobId } = req.params;
+    const jobId = getParam(req, "jobId");
 
     const result = await subtitleService.getMergeJobStatus(jobId);
     successResponse(res, result);
@@ -149,7 +154,7 @@ export async function getMergeConflicts(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { jobId } = req.params;
+    const jobId = getParam(req, "jobId");
 
     const result = await subtitleService.getMergeConflicts(jobId);
     successResponse(res, result);
@@ -179,7 +184,7 @@ export async function updateMergeJobStatus(
 ): Promise<void> {
   try {
     const result = await subtitleService.updateMergeJobStatus(
-      req.params.id,
+      getParam(req, "id"),
       req.body.status,
       req.body.output_file_id,
       req.body.log
@@ -211,7 +216,7 @@ export async function getConflict(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getConflictById(req.params.id);
+    const result = await subtitleService.getConflictById(getParam(req, "id"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -224,7 +229,7 @@ export async function getConflictDetail(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getConflictDetail(req.params.conflictId);
+    const result = await subtitleService.getConflictDetail(getParam(req, "conflictId"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -238,7 +243,7 @@ export async function resolveConflict(
 ): Promise<void> {
   try {
     const result = await subtitleService.resolveConflict(
-      req.params.conflictId,
+      getParam(req, "conflictId"),
       req.user!.id,
       req.user!.role,
       req.body as ResolveConflictInput
@@ -257,7 +262,8 @@ export async function compareVersions(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { fileId, otherFileId } = req.params;
+    const fileId = getParam(req, "fileId");
+    const otherFileId = getParam(req, "otherFileId");
 
     const result = await subtitleService.compareVersions(fileId, otherFileId);
     successResponse(res, result);
@@ -272,7 +278,7 @@ export async function getTimelineVisualization(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { fileId } = req.params;
+    const fileId = getParam(req, "fileId");
 
     const result = await subtitleService.getTimelineVisualization(fileId);
     successResponse(res, result);
@@ -302,7 +308,7 @@ export async function getReviews(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getReviews(req.params.projectId);
+    const result = await subtitleService.getReviews(getParam(req, "projectId"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -315,7 +321,7 @@ export async function getReview(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getReviewById(req.params.id);
+    const result = await subtitleService.getReviewById(getParam(req, "id"));
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -328,7 +334,7 @@ export async function updateReview(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.updateReview(req.params.id, req.body);
+    const result = await subtitleService.updateReview(getParam(req, "id"), req.body);
     successResponse(res, result);
   } catch (error) {
     next(error);

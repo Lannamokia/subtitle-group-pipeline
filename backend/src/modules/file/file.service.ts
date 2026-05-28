@@ -904,6 +904,10 @@ export async function batchArchiveUnits(projectId: string) {
 
 // ============ Cleanup Expired Links ============
 
+export async function createFile(uploaderId: string, data: UploadFileInput) {
+  return uploadFile(uploaderId, data);
+}
+
 export async function cleanupExpiredLinks(): Promise<number> {
   const result = await prisma.downloadLink.updateMany({
     where: {

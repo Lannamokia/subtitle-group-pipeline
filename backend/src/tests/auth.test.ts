@@ -1,6 +1,6 @@
 import { createApp } from "../app";
 import { prisma, createTestUser, cleanDatabase } from "./setup";
-import { post, get, expectSuccess, expectError } from "./helpers";
+import { post, get, put, expectSuccess, expectError } from "./helpers";
 import type { Application } from "express";
 
 describe("Auth & Registration Tests", () => {

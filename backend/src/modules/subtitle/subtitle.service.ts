@@ -23,6 +23,7 @@ import type {
 import * as fileService from "../file/file.service";
 import * as storageService from "../storage/storage.service";
 import { randomUUID } from "crypto";
+import type { ConflictType } from "@prisma/client";
 
 // ==================== TRANSLATION CLAIMS ====================
 
@@ -518,9 +519,6 @@ export async function createMergeJob(
 export async function processMergeJob(jobId: string) {
   const job = await prisma.mergeJob.findUnique({
     where: { id: jobId },
-    include: {
-      unit: true,
-    },
   });
 
   if (!job) {
@@ -775,15 +773,6 @@ export async function processMergeJob(jobId: string) {
 export async function getMergeJobStatus(jobId: string) {
   const job = await prisma.mergeJob.findUnique({
     where: { id: jobId },
-    include: {
-      unit: {
-        select: {
-          id: true,
-          title: true,
-          unit_number: true,
-        },
-      },
-    },
   });
 
   if (!job) {
@@ -1012,14 +1001,6 @@ export async function resolveConflict(
 export async function getConflictDetail(conflictId: string) {
   const conflict = await prisma.subtitleConflict.findUnique({
     where: { id: conflictId },
-    include: {
-      project: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-    },
   });
 
   if (!conflict) {
