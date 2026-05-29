@@ -7,7 +7,7 @@ import {
   createTestTask,
   cleanDatabase,
 } from "./setup";
-import { get, expectSuccess } from "./helpers";
+import { post, get, expectSuccess } from "./helpers";
 import * as timelineService from "../modules/timeline/timeline.service";
 import type { Application } from "express";
 
@@ -116,18 +116,63 @@ describe("Timeline & Workload Tests", () => {
     });
 
     it("should create timeline event on file upload", async () => {
-      const { user } = await createTestUser();
+      const { user, token } = await createTestUser();
       const project = await createTestProject({ owner_id: user.id });
 
-      const event = await timelineService.createTimelineEvent({
-        project_id: project.id,
-        event_type: "file_uploaded",
-        title: "File uploaded",
-        description: "A new file was uploaded",
-        actor_id: user.id,
-      });
+      const uploadRes = await post(
+        app,
+        "/api/v1/files",
+        {
+          project_id: project.id,
+          name: "episode.ass",
+          file_type: "subtitle",
+          mime_type: "application/x-ass",
+          size_bytes: 128,
+          storage_path: "/uploads/episode.ass",
+        },
+        token
+      );
 
-      expect(event.event_type).toBe("file_uploaded");
+      expectSuccess(uploadRes, 201);
+
+      const event = await prisma.timelineEvent.findFirst({
+        where: {
+          project_id: project.id,
+          event_type: "file_uploaded",
+        },
+      });
+      expect(event).toBeDefined();
+      expect(event!.actor_id).toBe(user.id);
+      expect(event!.metadata).toContain(uploadRes.body.data.id);
+    });
+
+    it("should create timeline event on project announcement", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+
+      const res = await post(
+        app,
+        "/api/v1/announcements",
+        {
+          type: "project",
+          project_id: project.id,
+          title: "Timing update",
+          content: "Timing pass starts tonight.",
+        },
+        token
+      );
+
+      expectSuccess(res, 201);
+
+      const event = await prisma.timelineEvent.findFirst({
+        where: {
+          project_id: project.id,
+          event_type: "announcement",
+        },
+      });
+      expect(event).toBeDefined();
+      expect(event!.title).toBe("Project announcement");
+      expect(event!.metadata).toContain(res.body.data.id);
     });
   });
 

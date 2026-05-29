@@ -1,5 +1,7 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
+import { TimelineEventType } from "@prisma/client";
+import * as timelineService from "../timeline/timeline.service";
 import type {
   CreateAnnouncementInput,
   UpdateAnnouncementInput,
@@ -62,12 +64,13 @@ export async function createProjectAnnouncement(
   if (!data.project_id) {
     throw new AppError("project_id is required for project announcements", "BAD_REQUEST", 400);
   }
+  const projectId = data.project_id;
 
   // Verify creator is a member of the project
   const membership = await prisma.projectMember.findUnique({
     where: {
       project_id_user_id: {
-        project_id: data.project_id,
+        project_id: projectId,
         user_id: creatorId,
       },
     },
@@ -79,7 +82,7 @@ export async function createProjectAnnouncement(
   });
 
   const project = await prisma.project.findUnique({
-    where: { id: data.project_id },
+    where: { id: projectId },
     select: { owner_id: true },
   });
 
@@ -94,7 +97,7 @@ export async function createProjectAnnouncement(
   const announcement = await prisma.announcement.create({
     data: {
       type: "project",
-      project_id: data.project_id,
+      project_id: projectId,
       title: data.title,
       content: data.content,
       is_pinned: data.is_pinned,
@@ -116,6 +119,15 @@ export async function createProjectAnnouncement(
         },
       },
     },
+  });
+
+  await timelineService.createTimelineEvent({
+    project_id: projectId,
+    event_type: TimelineEventType.announcement,
+    title: "Project announcement",
+    description: announcement.title,
+    actor_id: creatorId,
+    metadata: { announcement_id: announcement.id },
   });
 
   return announcement;

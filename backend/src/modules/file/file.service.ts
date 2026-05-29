@@ -10,7 +10,8 @@ import type {
   FileQueryInput,
   UpdateUploadPolicyInput,
 } from "./file.schema";
-import { FileType, TaskRole, UserRole } from "@prisma/client";
+import { FileType, TaskRole, UserRole, TimelineEventType } from "@prisma/client";
+import * as timelineService from "../timeline/timeline.service";
 
 // ============ Upload Policy ============
 
@@ -544,6 +545,20 @@ export async function uploadFile(
     },
   });
 
+  await timelineService.createTimelineEvent({
+    project_id: data.project_id,
+    event_type: TimelineEventType.file_uploaded,
+    title: "File uploaded",
+    description: `File "${file.name}" was uploaded`,
+    actor_id: uploaderId,
+    metadata: {
+      file_id: file.id,
+      version_id: version.id,
+      file_type: file.file_type,
+      task_id: data.task_id || data.taskId,
+    },
+  });
+
   return {
     ...file,
     current_version: version,
@@ -666,6 +681,19 @@ export async function replaceFile(
 
   // Auto-resolve current_version: latest_approved if exists, else latest
   await resolveCurrentVersion(fileId);
+
+  await timelineService.createTimelineEvent({
+    project_id: file.project_id,
+    event_type: TimelineEventType.file_uploaded,
+    title: "File replaced",
+    description: `File "${updatedFile.name}" received a new version`,
+    actor_id: uploaderId,
+    metadata: {
+      file_id: fileId,
+      version_id: version.id,
+      version_number: version.version_number,
+    },
+  });
 
   return {
     ...updatedFile,
@@ -1320,6 +1348,19 @@ export async function createLinkAsset(
           file_type: true,
         },
       },
+    },
+  });
+
+  await timelineService.createTimelineEvent({
+    project_id: projectId,
+    event_type: TimelineEventType.file_uploaded,
+    title: "Link asset created",
+    description: `Link asset "${link.description || link.url}" was added`,
+    actor_id: creatorId,
+    metadata: {
+      link_id: link.id,
+      file_id: link.file_id,
+      link_type: link.link_type,
     },
   });
 
