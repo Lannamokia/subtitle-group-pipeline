@@ -1,12 +1,19 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router";
-import { api, getErrorMessage } from "@/lib/api";
+import { api, getErrorMessage, normalizeConflict, normalizeProject } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -26,6 +33,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+type ApiEnvelope<T> = { data: T };
+
 export function DedupPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
@@ -35,17 +44,19 @@ export function DedupPage() {
   const [selectedConflict, setSelectedConflict] = useState<SubtitleConflict | null>(null);
   const [resolving, setResolving] = useState(false);
   const [filter, setFilter] = useState<"all" | "pending" | "resolved" | "deferred">("all");
+  const [leftVersion, setLeftVersion] = useState("");
+  const [rightVersion, setRightVersion] = useState("");
 
   const fetchData = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
     try {
       const [projectRes, conflictsRes] = await Promise.all([
-        api.get<Project>(`/projects/${projectId}`),
-        api.get<SubtitleConflict[]>(`/projects/${projectId}/conflicts`),
+        api.get<ApiEnvelope<unknown>>(`/projects/${projectId}`),
+        api.get<ApiEnvelope<unknown[]>>(`/projects/${projectId}/conflicts`),
       ]);
-      setProject(projectRes.data);
-      setConflicts(conflictsRes.data);
+      setProject(normalizeProject(projectRes.data.data as Record<string, unknown>));
+      setConflicts(conflictsRes.data.data.map((conflict) => normalizeConflict(conflict as Record<string, unknown>)));
     } catch (error) {
       toast.error("获取数据失败: " + getErrorMessage(error));
     } finally {
@@ -89,6 +100,16 @@ export function DedupPage() {
   const pendingCount = conflicts.filter((c) => !c.resolution || c.resolution.status === "pending").length;
   const resolvedCount = conflicts.filter((c) => c.resolution?.status === "resolved").length;
   const deferredCount = conflicts.filter((c) => c.resolution?.status === "deferred").length;
+  const versionOptions = Array.from(
+    new Map(
+      conflicts.flatMap((conflict) =>
+        conflict.translations.map((translation) => [
+          translation.translatorId,
+          `${translation.translatorName} / ${translation.translatorId}`,
+        ])
+      )
+    ).entries()
+  );
 
   if (loading) {
     return (
@@ -149,22 +170,60 @@ export function DedupPage() {
       {/* Timeline Visualization */}
       <Card>
         <CardHeader className="py-3 px-4">
-          <CardTitle className="text-h3">时间轴可视化</CardTitle>
+          <CardTitle className="text-h3">版本对比与时间轴可视化</CardTitle>
         </CardHeader>
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3">
+            <Select value={leftVersion} onValueChange={setLeftVersion}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择版本 A" />
+              </SelectTrigger>
+              <SelectContent>
+                {versionOptions.map(([id, label]) => (
+                  <SelectItem key={id} value={id}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={rightVersion} onValueChange={setRightVersion}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择版本 B" />
+              </SelectTrigger>
+              <SelectContent>
+                {versionOptions.map(([id, label]) => (
+                  <SelectItem key={id} value={id}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              disabled={!leftVersion || !rightVersion}
+              onClick={() => {
+                const matched = conflicts.find((conflict) =>
+                  conflict.translations.some((item) => item.translatorId === leftVersion) &&
+                  conflict.translations.some((item) => item.translatorId === rightVersion)
+                );
+                if (matched) setSelectedConflict(matched);
+              }}
+            >
+              <GitMerge className="w-4 h-4 mr-1.5" />
+              对比
+            </Button>
+          </div>
           <div className="h-20 bg-gray-50 rounded-lg relative overflow-hidden">
             {/* Timeline track */}
             <div className="absolute inset-x-4 top-1/2 h-1 bg-gray-200 rounded -translate-y-1/2" />
+            <div className="absolute left-4 right-4 top-1/2 h-3 -translate-y-1/2 rounded bg-gray-300/70" />
             {/* Conflict markers */}
             {conflicts.map((conflict) => {
               const isResolved = conflict.resolution?.status === "resolved";
               const isDeferred = conflict.resolution?.status === "deferred";
               const leftPercent = Math.min((conflict.startTime / 1800) * 100, 98);
+              const widthPercent = Math.max(((conflict.endTime - conflict.startTime) / 1800) * 100, 0.6);
               return (
                 <button
                   key={conflict.id}
                   className={cn(
-                    "absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white shadow-sm hover:scale-125 transition-transform cursor-pointer",
+                    "absolute top-1/2 -translate-y-1/2 h-5 rounded-sm border border-white shadow-sm hover:scale-y-125 transition-transform cursor-pointer",
                     isResolved
                       ? "bg-green-400"
                       : isDeferred
@@ -172,10 +231,10 @@ export function DedupPage() {
                         : conflict.conflictType === "text_conflict"
                           ? "bg-red-400"
                           : conflict.conflictType === "exact_duplicate"
-                            ? "bg-yellow-400"
-                            : "bg-orange-400"
+                            ? "bg-red-300"
+                            : "bg-red-500"
                   )}
-                  style={{ left: `${leftPercent}%` }}
+                  style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
                   onClick={() => setSelectedConflict(conflict)}
                   title={`${formatTime(conflict.startTime)} - ${formatTime(conflict.endTime)}`}
                 />

@@ -9,12 +9,14 @@ export type RegistrationMode = 'disabled' | 'open' | 'qq_verification';
 export interface User {
   id: string;
   username: string;
+  nickname?: string;
   qq?: string;
   avatar?: string;
   role: UserRole;
   status: UserStatus;
   tags?: RoleTag[];
   token?: string;
+  refreshToken?: string;
   createdAt: string;
 }
 
@@ -48,7 +50,7 @@ export interface VerificationStatus {
 
 export type ProjectStatus = 'active' | 'completed' | 'archived' | 'deleted';
 
-export type ProjectType = 'anime' | 'movie' | 'collection';
+export type ProjectType = 'anime' | 'movie' | 'ova' | 'special' | 'music_video' | 'other' | 'collection';
 
 export interface Project {
   id: string;
@@ -62,6 +64,11 @@ export interface Project {
   supervisor: User;
   members: ProjectMember[];
   progress: number;
+  archivedAt?: string;
+  deletedAt?: string;
+  deliveryChecklist?: DeliveryItem[];
+  downloadLinkTtlSeconds?: number;
+  wikiApprovalRequired?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -122,6 +129,7 @@ export interface TaskComment {
   user: User;
   content: string;
   fileVersionId?: string;
+  fileVersion?: FileVersion;
   lineNumber?: number;
   mentions: string[];
   createdAt: string;
@@ -175,11 +183,15 @@ export interface FileVersion {
   id: string;
   fileId: string;
   versionNumber: number;
-  uploader: User;
+  uploader?: User;
   size: number;
   hash?: string;
   storagePath: string;
   isApproved: boolean;
+  isCurrent?: boolean;
+  isLatest?: boolean;
+  isLatestApproved?: boolean;
+  changeSummary?: string;
   createdAt: string;
 }
 
@@ -215,9 +227,17 @@ export interface Notification {
   content: string;
   isRead: boolean;
   channels: NotificationChannel[];
+  deliveries?: NotificationDelivery[];
   relatedId?: string;
   relatedType?: string;
   createdAt: string;
+}
+
+export interface NotificationDelivery {
+  id: string;
+  channel: NotificationChannel;
+  status: 'pending' | 'sent' | 'delivered' | 'failed';
+  sentAt?: string;
 }
 
 export interface NotificationPreference {
@@ -296,6 +316,9 @@ export interface WikiDocument {
   blocks: WikiBlock[];
   status: WikiStatus;
   pendingContent?: string;
+  displayContent?: string;
+  pendingDiff?: { from: string; to: string } | null;
+  approvalRequired?: boolean;
   updatedBy: User;
   updatedAt: string;
 }
@@ -309,7 +332,53 @@ export interface WikiBlock {
 
 // ========== Timeline Types ==========
 
-export type TimelineEventType = 'task_status' | 'file_upload' | 'review' | 'member_join' | 'system';
+export type TimelineEventType =
+  | 'project_created'
+  | 'project_started'
+  | 'project_paused'
+  | 'project_resumed'
+  | 'project_completed'
+  | 'project_archived'
+  | 'project_unarchived'
+  | 'project_deleted'
+  | 'project_restored'
+  | 'task_created'
+  | 'task_claimed'
+  | 'task_assigned'
+  | 'task_started'
+  | 'task_submitted'
+  | 'task_approved'
+  | 'task_rejected'
+  | 'task_reset'
+  | 'task_cancelled'
+  | 'task_returned'
+  | 'task_completed'
+  | 'task_overdue'
+  | 'task_frozen'
+  | 'member_joined'
+  | 'member_left'
+  | 'member_added'
+  | 'member_removed'
+  | 'join_request_created'
+  | 'join_request_approved'
+  | 'join_request_rejected'
+  | 'file_uploaded'
+  | 'review_submitted'
+  | 'review_approved'
+  | 'review_rejected'
+  | 'conflict_detected'
+  | 'conflict_resolved'
+  | 'milestone_reached'
+  | 'wiki_updated'
+  | 'wiki_approved'
+  | 'wiki_rejected'
+  | 'announcement'
+  | 'task_status'
+  | 'file_upload'
+  | 'member_join'
+  | 'review'
+  | 'system'
+  | 'custom';
 
 export interface TimelineEvent {
   id: string;
@@ -369,10 +438,18 @@ export interface RegistrationSettings {
 }
 
 export interface DataRetentionSettings {
+  id?: string;
   archiveCleanupDays: number;
+  archiveRetentionDays?: number;
+  autoArchiveDays?: number;
+  autoDeleteDays?: number | null;
   recycleBinDays: number;
+  auditLogRetentionDays?: number;
+  notificationRetentionDays?: number;
+  maxFileVersions?: number;
   downloadLinkTtl: number;
   linkCleanupInterval: number;
+  wikiApprovalRequired?: boolean;
 }
 
 // ========== Role Tag Types ==========
@@ -444,6 +521,12 @@ export interface StorageBackendInput {
 export interface ApiResponse<T> {
   success: boolean;
   data: T;
+  meta?: {
+    total?: number;
+    page?: number;
+    pageSize?: number;
+    totalPages?: number;
+  };
   message?: string;
 }
 
@@ -455,14 +538,24 @@ export interface PaginatedResponse<T> {
 }
 
 export interface LoginResponse {
-  user: User;
-  token: string;
+  user?: User;
+  token?: string;
+  refreshToken?: string;
+  status?: 'active' | 'pending_verification';
+  requiresVerification?: boolean;
+  verification?: {
+    qqGroup: string;
+    command: string;
+  };
+  qqGroup?: string;
+  verifyCommand?: string;
 }
 
 export interface RegisterResponse {
   status: 'active' | 'pending_verification';
   user?: User;
   token?: string;
+  refreshToken?: string;
   verification?: {
     qqGroup: string;
     command: string;

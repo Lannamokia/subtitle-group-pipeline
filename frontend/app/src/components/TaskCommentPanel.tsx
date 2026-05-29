@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { UserAvatar } from "@/components/UserAvatar";
 import {
@@ -11,45 +12,71 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { memberApi } from "@/lib/api";
-import type { TaskComment, User } from "@/types";
+import { fileApi, getErrorMessage, memberApi, taskApi } from "@/lib/api";
+import { toast } from "sonner";
+import type { FileVersion, TaskComment, User } from "@/types";
 import {
   Send,
   FileText,
   AtSign,
   MessageSquare,
   Hash,
+  Loader2,
 } from "lucide-react";
 
-// Mock file versions (empty)
-const mockFileVersions: { id: string; fileId: string; versionNumber: number; label: string }[] = [];
-
-// Mock ASS lines for line-level commenting (empty)
-const mockAssLines: { number: number; time: string; text: string }[] = [];
+type FileVersionOption = FileVersion & {
+  fileName: string;
+};
 
 interface TaskCommentPanelProps {
   taskId: string;
   projectId: string;
 }
 
-export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
+export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
   const currentUser = useAuthStore((s) => s.user);
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [newComment, setNewComment] = useState("");
-  const [selectedFileVersion, setSelectedFileVersion] = useState<string>("");
+  const [selectedFileVersion, setSelectedFileVersion] = useState<string>("none");
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [fileVersions, setFileVersions] = useState<FileVersionOption[]>([]);
 
   useEffect(() => {
-    memberApi.getMembers()
-      .then((data) => setAllUsers(data.items || []))
-      .catch(() => {});
-  }, []);
+    const fetchPanelData = async () => {
+      setIsLoading(true);
+      try {
+        const [commentData, memberData, fileData] = await Promise.all([
+          taskApi.getComments(taskId),
+          memberApi.getMembers().catch(() => ({ items: [] as User[] })),
+          fileApi.getFiles({ projectId, type: "subtitle" }).catch(() => ({ items: [] })),
+        ]);
+        setComments(commentData);
+        setAllUsers(memberData.items || []);
+
+        const versionGroups = await Promise.all(
+          fileData.items.slice(0, 20).map(async (file) => {
+            const versions = await fileApi.getVersions(file.id).catch(() => []);
+            return versions.map((version) => ({ ...version, fileName: file.name }));
+          })
+        );
+        setFileVersions(versionGroups.flat());
+      } catch (error) {
+        toast.error("获取评论失败: " + getErrorMessage(error));
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchPanelData();
+  }, [projectId, taskId]);
 
   // Filter users for mention
   const mentionableUsers = allUsers.filter(
@@ -116,42 +143,35 @@ export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!newComment.trim() || !currentUser) return;
-
-    // Extract mentions from comment text
-    const mentionPattern = /@(\S+)/g;
-    const mentions: string[] = [];
-    let match: RegExpExecArray | null = null;
-    while ((match = mentionPattern.exec(newComment)) !== null) {
-      const username = match[1];
-      const mentionedUser = allUsers.find((u) => u.username === username);
-      if (mentionedUser) {
-        mentions.push(mentionedUser.id);
-      }
+    setIsSubmitting(true);
+    try {
+      const comment = await taskApi.createComment(taskId, {
+        content: newComment.trim(),
+        fileVersionId: selectedFileVersion === "none" ? undefined : selectedFileVersion,
+        lineNumber: selectedLine || undefined,
+      });
+      setComments((prev) => [...prev, comment]);
+      setNewComment("");
+      setSelectedFileVersion("none");
+      setSelectedLine(null);
+    } catch (error) {
+      toast.error("评论失败: " + getErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const comment: TaskComment = {
-      id: `c-${Date.now()}`,
-      taskId,
-      user: currentUser,
-      content: newComment.trim(),
-      fileVersionId: selectedFileVersion || undefined,
-      lineNumber: selectedLine || undefined,
-      mentions,
-      createdAt: new Date().toISOString(),
-    };
-
-    setComments((prev) => [...prev, comment]);
-    setNewComment("");
-    setSelectedLine(null);
   };
 
   return (
     <div className="flex flex-col h-full">
       {/* Comment list */}
       <div className="flex-1 overflow-y-auto space-y-4 p-4 min-h-[300px]">
-        {comments.length === 0 ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+          </div>
+        ) : comments.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <MessageSquare className="w-10 h-10 text-gray-300" />
             <p className="text-sm text-gray-500 mt-3">暂无评论</p>
@@ -169,34 +189,32 @@ export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
         {/* File version selector */}
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-gray-400" />
-          <Select value={selectedFileVersion} onValueChange={setSelectedFileVersion}>
+          <Select value={selectedFileVersion} onValueChange={(value) => {
+            setSelectedFileVersion(value);
+            if (value === "none") setSelectedLine(null);
+          }}>
             <SelectTrigger className="w-fit h-8 text-xs">
               <SelectValue placeholder="引用文件版本（可选）" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">不引用文件</SelectItem>
-              {mockFileVersions.map((v) => (
+              <SelectItem value="none">不引用文件</SelectItem>
+              {fileVersions.map((v) => (
                 <SelectItem key={v.id} value={v.id}>
-                  {v.label}
+                  {v.fileName} v{v.versionNumber}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          {selectedFileVersion && (
-            <Select value={selectedLine?.toString() || ""} onValueChange={(v) => setSelectedLine(v ? Number(v) : null)}>
-              <SelectTrigger className="w-fit h-8 text-xs">
-                <SelectValue placeholder="选择行号（可选）" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">不指定行</SelectItem>
-                {mockAssLines.map((line) => (
-                  <SelectItem key={line.number} value={line.number.toString()}>
-                    行 {line.number} ({line.time})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {selectedFileVersion !== "none" && (
+            <Input
+              type="number"
+              min={1}
+              className="h-8 w-28 text-xs"
+              placeholder="ASS行号"
+              value={selectedLine ?? ""}
+              onChange={(event) => setSelectedLine(event.target.value ? Number(event.target.value) : null)}
+            />
           )}
         </div>
 
@@ -207,7 +225,7 @@ export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
               <Hash className="w-3 h-3" />
               行 {selectedLine}
             </div>
-            {mockAssLines.find((l) => l.number === selectedLine)?.text}
+            行级评论会绑定到所选 ASS 文件版本和该行号。
           </div>
         )}
 
@@ -225,9 +243,9 @@ export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
             size="sm"
             className="absolute bottom-2 right-2 h-7 px-2"
             onClick={handleSubmit}
-            disabled={!newComment.trim()}
+            disabled={!newComment.trim() || isSubmitting}
           >
-            <Send className="w-3.5 h-3.5" />
+            {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
           </Button>
         </div>
 
@@ -290,7 +308,9 @@ function CommentItem({ comment }: { comment: TaskComment }) {
             <FileText className="w-3 h-3 text-gray-400" />
             <span className="text-xs text-gray-500">
               引用{" "}
-              {mockFileVersions.find((v) => v.id === comment.fileVersionId)?.label || "文件版本"}
+              {comment.fileVersion
+                ? `文件版本 v${comment.fileVersion.versionNumber}`
+                : "文件版本"}
             </span>
           </div>
         )}

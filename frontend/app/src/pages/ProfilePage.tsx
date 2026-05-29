@@ -68,7 +68,7 @@ export function ProfilePage() {
         setAvatarUrl(meData.avatar || "");
         form.reset({
           username: meData.username,
-          nickname: meData.username,
+          nickname: meData.nickname || "",
         });
         setTagStatuses(tagData);
       } catch (error) {
@@ -85,7 +85,6 @@ export function ProfilePage() {
     setIsSaving(true);
     try {
       const updated = await authApi.updateProfile({
-        username: data.username,
         nickname: data.nickname,
         avatar: avatarUrl,
       });
@@ -201,7 +200,7 @@ export function ProfilePage() {
                       <FormItem>
                         <FormLabel>用户名</FormLabel>
                         <FormControl>
-                          <Input {...field} />
+                          <Input {...field} disabled className="bg-gray-50" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>

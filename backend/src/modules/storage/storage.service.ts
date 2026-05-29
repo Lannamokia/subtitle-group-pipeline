@@ -4,6 +4,7 @@ import { LocalAdapter } from "./adapters/local.adapter";
 import { S3Adapter, type S3Config } from "./adapters/s3.adapter";
 import type {
   CreateStorageBackendInput,
+  DataRetentionSettingsInput,
   UpdateStorageBackendInput,
   StorageQueryInput,
 } from "./storage.schema";
@@ -491,4 +492,27 @@ export async function getStorageStats() {
     totalUsed,
     backendCount,
   };
+}
+
+// ==================== DATA RETENTION SETTINGS ====================
+
+export async function getDataRetentionSettings() {
+  const existing = await prisma.dataRetentionSettings.findFirst({
+    orderBy: { updated_at: "desc" },
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return prisma.dataRetentionSettings.create({ data: {} });
+}
+
+export async function updateDataRetentionSettings(data: DataRetentionSettingsInput) {
+  const existing = await getDataRetentionSettings();
+
+  return prisma.dataRetentionSettings.update({
+    where: { id: existing.id },
+    data,
+  });
 }

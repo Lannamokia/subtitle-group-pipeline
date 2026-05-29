@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
-import { announcementApi } from "@/lib/api";
+import { announcementApi, api, getErrorMessage } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,7 @@ import {
   Globe,
   Calendar,
 } from "lucide-react";
+import { toast } from "sonner";
 
 const announcementSchema = z.object({
   title: z.string().min(1, "标题不能为空").max(200, "标题最多200字"),
@@ -96,46 +97,54 @@ export function AnnouncementAdminPage() {
   const onSubmit = async (data: AnnouncementFormValues) => {
     setIsSubmitting(true);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-
       if (editingAnnouncement) {
-        // Update existing
+        const updated = await announcementApi.updateAnnouncement(editingAnnouncement.id, {
+          title: data.title,
+          content: data.content,
+          isPinned: data.pinned,
+        });
         setAnnouncements((prev) =>
           prev.map((a) =>
             a.id === editingAnnouncement.id
-              ? { ...a, title: data.title, content: data.content }
+              ? updated
               : a
           )
         );
       } else {
-        // Create new
-        const newAnnouncement: Announcement = {
-          id: `a-${Date.now()}`,
+        const created = await announcementApi.createAnnouncement({
           type: "global",
           title: data.title,
           content: data.content,
-          createdBy: currentUser || { id: 'unknown', username: '未知', role: 'member', status: 'active', createdAt: new Date().toISOString() },
-          createdAt: new Date().toISOString(),
-        };
-        setAnnouncements((prev) => [newAnnouncement, ...prev]);
+          isPinned: data.pinned,
+        });
+        setAnnouncements((prev) => [created, ...prev]);
       }
       setIsDialogOpen(false);
+      toast.success(editingAnnouncement ? "公告已保存" : "公告已发布");
+    } catch (error) {
+      toast.error("公告操作失败: " + getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    try {
+      await announcementApi.deleteAnnouncement(id);
+      setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+      toast.success("公告已删除");
+    } catch (error) {
+      toast.error("删除失败: " + getErrorMessage(error));
+    }
   };
 
   const handleTogglePin = async (id: string) => {
-    // In a real app, this would toggle a pinned field
-    setAnnouncements((prev) =>
-      prev.map((a) =>
-        a.id === id ? { ...a } : a
-      )
-    );
+    try {
+      await api.post(`/announcements/${id}/pin`, { pinned: true });
+      setAnnouncements(await announcementApi.getAnnouncements({ type: "global" }));
+    } catch (error) {
+      toast.error("置顶失败: " + getErrorMessage(error));
+    }
   };
 
   const regularAnnouncements = announcements;

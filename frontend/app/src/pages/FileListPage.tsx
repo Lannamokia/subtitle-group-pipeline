@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, getErrorMessage } from "@/lib/api";
+import { api, fileApi, getErrorMessage, projectApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { FileListItem } from "@/components/FileListItem";
 import { toast } from "sonner";
-import type { FileEntity, FileType, LinkAsset } from "@/types";
+import type { FileEntity, FileType, FileVersion, LinkAsset, Project } from "@/types";
 import {
   Search,
   FileArchive,
@@ -47,63 +47,114 @@ const FILE_TYPE_OPTIONS: { value: FileType | "all"; label: string }[] = [
   { value: "other", label: "其他" },
 ];
 
+type ApiEnvelope<T> = { data: T };
+
 export function FileListPage() {
   const [files, setFiles] = useState<FileEntity[]>([]);
   const [links, setLinks] = useState<LinkAsset[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<FileType | "all">("all");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadMode, setUploadMode] = useState<"new" | "replace">("new");
+  const [replaceTargetId, setReplaceTargetId] = useState("");
+  const [uploadType, setUploadType] = useState<FileType>("other");
+  const [uploadTags, setUploadTags] = useState("");
+  const [changeSummary, setChangeSummary] = useState("");
   const [selectedFile, setSelectedFile] = useState<FileEntity | null>(null);
+  const [versions, setVersions] = useState<FileVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkForm, setLinkForm] = useState({ name: "", url: "", extractCode: "", description: "" });
   const [addingLink, setAddingLink] = useState(false);
 
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await projectApi.getProjects({ include_archived: true, pageSize: 100 });
+      setProjects(res.items);
+    } catch {
+      setProjects([]);
+    }
+  }, []);
+
   const fetchFiles = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get<FileEntity[]>("/files");
-      setFiles(res.data);
+      const params = selectedProjectId === "all" ? undefined : { projectId: selectedProjectId };
+      const res = await fileApi.getFiles({ ...params, search: search || undefined, type: typeFilter === "all" ? undefined : typeFilter, tag: tagFilter || undefined });
+      setFiles(res.items);
+      if (selectedProjectId !== "all") {
+        setLinks(await fileApi.getLinks({ projectId: selectedProjectId }));
+      } else {
+        setLinks([]);
+      }
     } catch (error) {
       toast.error("获取文件列表失败: " + getErrorMessage(error));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, selectedProjectId, tagFilter, typeFilter]);
 
-  const fetchLinks = useCallback(async () => {
-    try {
-      const res = await api.get<LinkAsset[]>("/links");
-      setLinks(res.data);
-    } catch {
-      setLinks([]);
-    }
-  }, []);
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
 
   useEffect(() => {
     fetchFiles();
-    fetchLinks();
-  }, [fetchFiles, fetchLinks]);
+  }, [fetchFiles]);
+
+  useEffect(() => {
+    if (!selectedFile) {
+      setVersions([]);
+      return;
+    }
+    setVersionsLoading(true);
+    fileApi.getVersions(selectedFile.id)
+      .then(setVersions)
+      .catch((error) => toast.error("获取版本历史失败: " + getErrorMessage(error)))
+      .finally(() => setVersionsLoading(false));
+  }, [selectedFile]);
 
   const filteredFiles = files.filter((f) => {
     if (search && !f.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (tagFilter && !f.tags.some((tag) => tag.toLowerCase().includes(tagFilter.toLowerCase()))) return false;
     if (typeFilter !== "all" && f.type !== typeFilter) return false;
     return true;
   });
 
   const handleUpload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
+    if (selectedProjectId === "all") {
+      toast.error("请先选择项目");
+      return;
+    }
+    if (uploadMode === "replace" && !replaceTargetId) {
+      toast.error("请先选择要替换的文件实体");
+      return;
+    }
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", fileList[0]);
-      await api.post("/files/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const tags = uploadTags.split(",").map((tag) => tag.trim()).filter(Boolean);
+      if (uploadMode === "replace") {
+        await fileApi.replaceFile(replaceTargetId, fileList[0], { changeSummary, tags });
+      } else {
+        await fileApi.uploadFile(fileList[0], {
+          projectId: selectedProjectId,
+          type: uploadType,
+          tags,
+          changeSummary,
+        });
+      }
       toast.success("文件上传成功");
       setUploadOpen(false);
+      setReplaceTargetId("");
+      setUploadTags("");
+      setChangeSummary("");
       fetchFiles();
     } catch (error) {
       toast.error("上传失败: " + getErrorMessage(error));
@@ -115,7 +166,7 @@ export function FileListPage() {
   const handleDownload = async (fileId: string) => {
     try {
       const res = await api.post(`/files/${fileId}/download`);
-      window.open(res.data.url, "_blank");
+      window.open(res.data.data?.url ?? res.data.data?.downloadUrl, "_blank");
     } catch (error) {
       toast.error("获取下载链接失败: " + getErrorMessage(error));
     }
@@ -126,13 +177,17 @@ export function FileListPage() {
       toast.error("请填写名称和链接");
       return;
     }
+    if (selectedProjectId === "all") {
+      toast.error("请先选择项目");
+      return;
+    }
     setAddingLink(true);
     try {
-      await api.post("/links", linkForm);
+      await fileApi.createLink({ ...linkForm, projectId: selectedProjectId });
       toast.success("链接已添加");
       setLinkDialogOpen(false);
       setLinkForm({ name: "", url: "", extractCode: "", description: "" });
-      fetchLinks();
+      setLinks(await fileApi.getLinks({ projectId: selectedProjectId }));
     } catch (error) {
       toast.error("添加失败: " + getErrorMessage(error));
     } finally {
@@ -142,11 +197,26 @@ export function FileListPage() {
 
   const handleDeleteLink = async (linkId: string) => {
     try {
-      await api.delete(`/links/${linkId}`);
+      await fileApi.deleteLink(linkId);
       toast.success("链接已删除");
       setLinks((prev) => prev.filter((l) => l.id !== linkId));
     } catch (error) {
       toast.error("删除失败: " + getErrorMessage(error));
+    }
+  };
+
+  const handleApproveVersion = async (versionId: string) => {
+    if (!selectedFile) return;
+    setVersionsLoading(true);
+    try {
+      await fileApi.approveVersion(selectedFile.id, versionId);
+      setVersions(await fileApi.getVersions(selectedFile.id));
+      toast.success("版本已审核通过");
+      fetchFiles();
+    } catch (error) {
+      toast.error("审核失败: " + getErrorMessage(error));
+    } finally {
+      setVersionsLoading(false);
     }
   };
 
@@ -170,6 +240,19 @@ export function FileListPage() {
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
+        <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部项目</SelectItem>
+            {projects.map((project) => (
+              <SelectItem key={project.id} value={project.id}>
+                {project.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
@@ -179,6 +262,12 @@ export function FileListPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <Input
+          placeholder="标签过滤..."
+          className="w-40"
+          value={tagFilter}
+          onChange={(e) => setTagFilter(e.target.value)}
+        />
         <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as FileType | "all")}>
           <SelectTrigger className="w-40">
             <Filter className="w-3.5 h-3.5 mr-1" />
@@ -281,6 +370,54 @@ export function FileListPage() {
           <DialogHeader>
             <DialogTitle>上传文件</DialogTitle>
           </DialogHeader>
+          <div className="space-y-3">
+            <Select value={uploadMode} onValueChange={(value) => setUploadMode(value as "new" | "replace")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="new">新建独立文件实体（同名也不合并）</SelectItem>
+                <SelectItem value="replace">显式替换已有文件</SelectItem>
+              </SelectContent>
+            </Select>
+            {uploadMode === "replace" ? (
+              <Select value={replaceTargetId} onValueChange={setReplaceTargetId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择被替换文件" />
+                </SelectTrigger>
+                <SelectContent>
+                  {files.map((file) => (
+                    <SelectItem key={file.id} value={file.id}>
+                      {file.name} · {file.versionCount}版本
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Select value={uploadType} onValueChange={(value) => setUploadType(value as FileType)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FILE_TYPE_OPTIONS.filter((opt) => opt.value !== "all").map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Input
+              value={uploadTags}
+              onChange={(event) => setUploadTags(event.target.value)}
+              placeholder="标签，用逗号分隔"
+            />
+            <Input
+              value={changeSummary}
+              onChange={(event) => setChangeSummary(event.target.value)}
+              placeholder="版本变更说明"
+            />
+          </div>
           <div
             className={cn(
               "border-2 border-dashed rounded-lg p-8 text-center transition-colors",
@@ -364,7 +501,7 @@ export function FileListPage() {
 
       {/* Version History Sheet */}
       <Sheet open={!!selectedFile} onOpenChange={() => setSelectedFile(null)}>
-        <SheetContent>
+        <SheetContent className="overflow-y-auto">
           <SheetHeader>
             <SheetTitle>版本历史</SheetTitle>
           </SheetHeader>
@@ -374,9 +511,40 @@ export function FileListPage() {
                 <p className="font-medium">{selectedFile.name}</p>
                 <p className="text-gray-500">共 {selectedFile.versionCount} 个版本</p>
               </div>
-              <div className="text-center py-8 text-sm text-gray-400">
-                版本历史详情需要从后端获取
-              </div>
+              {versionsLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+                </div>
+              ) : versions.length > 0 ? (
+                <div className="space-y-2">
+                  {versions.map((version) => (
+                    <div key={version.id} className="rounded-md border border-gray-200 p-3 text-sm space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">v{version.versionNumber}</span>
+                        <div className="flex items-center gap-1">
+                          {version.isCurrent && <span className="text-[10px] rounded bg-primary-50 text-primary-700 px-1.5 py-0.5">当前</span>}
+                          {version.isLatestApproved && <span className="text-[10px] rounded bg-green-50 text-green-700 px-1.5 py-0.5">通过</span>}
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {version.changeSummary || "无变更说明"} · {new Date(version.createdAt).toLocaleString("zh-CN")}
+                      </p>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => handleDownload(selectedFile.id)}>
+                          下载
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleApproveVersion(version.id)}>
+                          通过此版本
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-sm text-gray-400">
+                  暂无版本记录
+                </div>
+              )}
             </div>
           )}
         </SheetContent>

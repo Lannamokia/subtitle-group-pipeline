@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm, Controller, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -12,18 +12,22 @@ import {
   Form,
 } from "@/components/ui/form";
 import { useNotificationStore } from "@/stores/notificationStore";
-import type { NotificationType } from "@/types";
+import { getErrorMessage, notificationApi } from "@/lib/api";
+import { toast } from "sonner";
+import type { Notification, NotificationType } from "@/types";
 import {
   Bell,
   Mail,
   MessageCircle,
   TrendingUp,
   ClipboardList,
+  Check,
   CheckCircle2,
   FileText,
   AtSign,
   Info,
   Save,
+  Loader2,
 } from "lucide-react";
 
 const settingsSchema = z.object({
@@ -57,6 +61,8 @@ const typeLabels: Record<NotificationType, string> = {
 export function NotificationSettingsPage() {
   const { preferences, setPreferences } = useNotificationStore();
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [activeSection, setActiveSection] = useState<"preferences" | "delivery">("preferences");
 
   const form = useForm<SettingsFormValues>({
@@ -71,13 +77,32 @@ export function NotificationSettingsPage() {
     },
   });
 
-  const onSubmit = (data: SettingsFormValues) => {
-    setPreferences({
-      ...data,
-      subscribedTypes: data.subscribedTypes as import("@/types").NotificationType[],
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  useEffect(() => {
+    notificationApi.getPreferences()
+      .then((data) => {
+        setPreferences(data);
+        form.reset(data);
+      })
+      .catch((error) => toast.error("获取通知偏好失败: " + getErrorMessage(error)))
+      .finally(() => setLoading(false));
+  }, [form, setPreferences]);
+
+  const onSubmit = async (data: SettingsFormValues) => {
+    setSaving(true);
+    try {
+      const updated = await notificationApi.updatePreferences({
+        ...data,
+        subscribedTypes: data.subscribedTypes as import("@/types").NotificationType[],
+      });
+      setPreferences(updated);
+      form.reset(updated);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      toast.error("保存失败: " + getErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const watchedSubscribedTypes = useWatch({
@@ -137,6 +162,13 @@ export function NotificationSettingsPage() {
       </div>
 
       {activeSection === "preferences" ? (
+        loading ? (
+          <Card>
+            <CardContent className="flex items-center justify-center py-16">
+              <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+            </CardContent>
+          </Card>
+        ) : (
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             {/* Channel Preferences */}
@@ -319,13 +351,14 @@ export function NotificationSettingsPage() {
                   已保存
                 </span>
               )}
-              <Button type="submit" disabled={!form.formState.isDirty}>
-                <Save className="w-4 h-4 mr-1.5" />
+              <Button type="submit" disabled={!form.formState.isDirty || saving}>
+                {saving ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Save className="w-4 h-4 mr-1.5" />}
                 保存设置
               </Button>
             </div>
           </form>
         </Form>
+        )
       ) : (
         <DeliveryStatusView />
       )}
@@ -361,16 +394,64 @@ function ChannelPreferenceRow({
 }
 
 function DeliveryStatusView() {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    notificationApi.getNotifications({ pageSize: 20 })
+      .then((data) => setNotifications(data.items))
+      .catch((error) => toast.error("获取投递记录失败: " + getErrorMessage(error)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const deliveryRows = notifications.flatMap((notification) =>
+    (notification.deliveries ?? []).map((delivery) => ({
+      notification,
+      delivery,
+    }))
+  );
+
   return (
     <Card>
       <CardHeader className="py-4">
         <CardTitle className="text-h2">最近投递记录</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+          </div>
+        ) : deliveryRows.length > 0 ? (
+          <div className="divide-y divide-gray-100">
+            {deliveryRows.map(({ notification, delivery }) => (
+              <div key={`${notification.id}-${delivery.id}`} className="flex items-center justify-between px-4 py-3 gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">{notification.title}</p>
+                  <p className="text-xs text-gray-500">
+                    {delivery.channel.toUpperCase()} · {delivery.sentAt ? new Date(delivery.sentAt).toLocaleString("zh-CN") : "等待发送"}
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "text-xs px-2 py-1 rounded-full",
+                    delivery.status === "failed"
+                      ? "bg-red-50 text-red-600"
+                      : delivery.status === "pending"
+                        ? "bg-yellow-50 text-yellow-700"
+                        : "bg-green-50 text-green-700"
+                  )}
+                >
+                  {delivery.status === "failed" ? "失败" : delivery.status === "pending" ? "等待" : "已发送"}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="flex flex-col items-center py-16 text-center">
           <Info className="w-10 h-10 text-gray-300" />
           <p className="text-sm text-gray-500 mt-3">暂无投递记录</p>
         </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -94,7 +94,12 @@ export async function uploadAvatar(
   next: NextFunction
 ): Promise<void> {
   try {
-    if (!req.file) {
+    const files = req.files;
+    const uploadedFile =
+      req.file ||
+      (Array.isArray(files) ? files[0] : files ? Object.values(files)[0]?.[0] : undefined);
+
+    if (!uploadedFile) {
       res.status(400).json({
         success: false,
         error: { code: "VALIDATION_ERROR", message: "No file uploaded" },
@@ -104,9 +109,9 @@ export async function uploadAvatar(
 
     const result = await storageService.uploadAvatar(
       req.user!.id,
-      req.file.buffer,
-      req.file.mimetype,
-      req.file.originalname
+      uploadedFile.buffer,
+      uploadedFile.mimetype,
+      uploadedFile.originalname
     );
 
     successResponse(res, result);
@@ -122,6 +127,32 @@ export async function getStorageStats(
 ): Promise<void> {
   try {
     const result = await storageService.getStorageStats();
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getDataRetentionSettings(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await storageService.getDataRetentionSettings();
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateDataRetentionSettings(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await storageService.updateDataRetentionSettings(_req.body);
     successResponse(res, result);
   } catch (error) {
     next(error);

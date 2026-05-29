@@ -5,6 +5,7 @@ import { validateBody, validateQuery, validateParams } from "../../middleware/va
 import * as controller from "./storage.controller";
 import {
   createStorageBackendSchema,
+  dataRetentionSettingsSchema,
   updateStorageBackendSchema,
   storageQuerySchema,
 } from "./storage.schema";
@@ -30,14 +31,8 @@ const upload = multer({
 
 const idParamSchema = z.object({ id: z.string().uuid("Invalid backend ID") });
 
-router.get("/", validateQuery(storageQuerySchema), controller.getBackends);
-router.get("/default", controller.getDefaultBackend);
-router.get("/:id", validateParams(idParamSchema), controller.getBackend);
-router.post("/", authenticate, requireRole("super_admin", "group_admin"), validateBody(createStorageBackendSchema), controller.createBackend);
-router.patch("/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
-router.delete("/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), controller.deleteBackend);
-
 // Backward-compatible aliases for tests and older clients using /storage/backends.
+// MUST be registered BEFORE /:id to avoid "backends" being captured as an ID parameter.
 router.get("/backends", validateQuery(storageQuerySchema), controller.getBackends);
 router.get("/backends/default", controller.getDefaultBackend);
 router.get("/backends/:id", validateParams(idParamSchema), controller.getBackend);
@@ -46,10 +41,23 @@ router.put("/backends/:id", authenticate, requireRole("super_admin", "group_admi
 router.patch("/backends/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
 router.delete("/backends/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), controller.deleteBackend);
 
-// Avatar upload endpoint
-router.post("/avatar", authenticate, upload.single("avatar"), controller.uploadAvatar);
-
-// Storage stats endpoint
+// Avatar and stats routes must be registered before /:id.
+router.post("/avatar", authenticate, upload.any(), controller.uploadAvatar);
 router.get("/stats", authenticate, controller.getStorageStats);
+router.get("/retention", authenticate, requireRole("super_admin", "group_admin"), controller.getDataRetentionSettings);
+router.put(
+  "/retention",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateBody(dataRetentionSettingsSchema),
+  controller.updateDataRetentionSettings
+);
+
+router.get("/", validateQuery(storageQuerySchema), controller.getBackends);
+router.get("/default", controller.getDefaultBackend);
+router.get("/:id", validateParams(idParamSchema), controller.getBackend);
+router.post("/", authenticate, requireRole("super_admin", "group_admin"), validateBody(createStorageBackendSchema), controller.createBackend);
+router.patch("/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
+router.delete("/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), controller.deleteBackend);
 
 export default router;

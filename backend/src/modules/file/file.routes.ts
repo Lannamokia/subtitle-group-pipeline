@@ -5,8 +5,6 @@ import { validateBody, validateQuery, validateParams } from "../../middleware/va
 import * as controller from "./file.controller";
 import {
   fileQuerySchema,
-  uploadFileSchema,
-  replaceFileSchema,
   createLinkSchema,
   updateUploadPolicySchema,
   downloadLinkQuerySchema,
@@ -126,7 +124,7 @@ router.post(
     projectId: z.string().uuid("Invalid project ID"),
     fileId: z.string().uuid("Invalid file ID"),
   })),
-  validateBody(replaceFileSchema),
+  upload.single("file"),
   controller.replaceFile
 );
 
@@ -197,7 +195,7 @@ router.post(
   "/:fileId/replace",
   authenticate,
   validateParams(fileIdParamSchema),
-  validateBody(replaceFileSchema),
+  upload.single("file"),
   controller.replaceFile
 );
 

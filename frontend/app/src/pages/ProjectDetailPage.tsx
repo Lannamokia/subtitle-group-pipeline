@@ -1,6 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router";
-import { api, getErrorMessage } from "@/lib/api";
+import {
+  announcementApi,
+  api,
+  fileApi,
+  getErrorMessage,
+  normalizeAnnouncement,
+  normalizeConflict,
+  normalizeFile,
+  normalizeProject,
+  normalizeTask,
+  normalizeTimelineEvent,
+  normalizeUser,
+  projectApi,
+  taskApi,
+  wikiApi,
+} from "@/lib/api";
 import { cn, getRoleLabel, getRoleColor, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +50,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { TaskCard } from "@/components/TaskCard";
 import { FileListItem } from "@/components/FileListItem";
 import { TimelineEventItem } from "@/components/TimelineEvent";
+import { DeliveryChecklistEditor } from "@/components/DeliveryChecklistEditor";
+import { TaskCommentPanel } from "@/components/TaskCommentPanel";
 import { toast } from "sonner";
 import type {
   Project,
@@ -42,6 +59,7 @@ import type {
   TaskStatus,
   FileEntity,
   FileType,
+  FileVersion,
   TimelineEvent,
   WikiDocument,
   SubtitleConflict,
@@ -82,9 +100,11 @@ import {
 
 type ProjectTab = "tasks" | "files" | "wiki" | "members" | "settings" | "activity" | "dedup" | "announcements";
 
+type ApiEnvelope<T> = { data: T };
+
 const KANBAN_COLUMNS: { id: string; title: string; statuses: TaskStatus[] }[] = [
   { id: "todo", title: "待处理", statuses: ["pending_publish", "claimable", "assigned"] },
-  { id: "in_progress", title: "进行中", statuses: ["in_progress", "submitted"] },
+  { id: "in_progress", title: "进行中", statuses: ["in_progress"] },
   { id: "review", title: "待审核", statuses: ["submitted"] },
   { id: "done", title: "已完成", statuses: ["review_approved", "completed"] },
 ];
@@ -115,17 +135,17 @@ export function ProjectDetailPage() {
     setLoading(true);
     try {
       const [projectRes, tasksRes, filesRes, eventsRes, wikiRes] = await Promise.all([
-        api.get<{ data: Project }>(`/projects/${projectId}`),
-        api.get<{ data: Task[] }>(`/tasks`, { params: { projectId } }),
-        api.get<{ data: FileEntity[] }>(`/files`, { params: { projectId } }),
-        api.get<{ data: TimelineEvent[] }>(`/timeline/project/${projectId}`),
-        api.get<{ data: { wikis: WikiDocument[] } }>(`/wiki`, { params: { project_id: projectId } }).catch(() => ({ data: { data: { wikis: [] } } })),
+        projectApi.getProject(projectId),
+        taskApi.getTasks({ projectId }),
+        fileApi.getFiles({ projectId }),
+        api.get<ApiEnvelope<{ events: unknown[] }>>(`/timeline/project/${projectId}`),
+        wikiApi.getWiki(projectId).catch(() => null),
       ]);
-      setProject(projectRes.data.data);
-      setTasks(tasksRes.data.data);
-      setFiles(filesRes.data.data);
-      setEvents(eventsRes.data.data);
-      setWiki(wikiRes.data.data?.wikis?.[0] ?? null);
+      setProject(projectRes);
+      setTasks(tasksRes);
+      setFiles(filesRes.items);
+      setEvents((eventsRes.data.data.events ?? []).map((event) => normalizeTimelineEvent(event as Record<string, unknown>)));
+      setWiki(wikiRes);
     } catch (error) {
       toast.error("获取项目信息失败: " + getErrorMessage(error));
     } finally {
@@ -136,9 +156,9 @@ export function ProjectDetailPage() {
   const fetchConflicts = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await api.get<SubtitleConflict[]>(`/projects/${projectId}/conflicts`);
-      setConflicts(res.data);
-    } catch {
+      const res = await api.get<ApiEnvelope<unknown[]>>(`/projects/${projectId}/conflicts`);
+      setConflicts(res.data.data.map((conflict) => normalizeConflict(conflict as Record<string, unknown>)));
+    } catch (error) {
       // Conflicts endpoint may not exist
       setConflicts([]);
     }
@@ -243,7 +263,7 @@ export function ProjectDetailPage() {
         </TabsList>
 
         <TabsContent value="tasks" className="mt-6">
-          <TasksTab tasks={tasks} onUpdate={fetchProject} />
+          <TasksTab project={project} tasks={tasks} onUpdate={fetchProject} />
         </TabsContent>
 
         <TabsContent value="files" className="mt-6">
@@ -309,23 +329,62 @@ function ProjectTabTrigger({
 
 /* ---------- Tasks Tab ---------- */
 
-function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) {
+function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[]; onUpdate: () => void }) {
+  const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskFilter, setTaskFilter] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [assigneeId, setAssigneeId] = useState("");
+  const [reviewComment, setReviewComment] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
 
   const filteredTasks = tasks.filter((t) =>
     taskFilter ? t.name.toLowerCase().includes(taskFilter.toLowerCase()) : true
   );
 
-  const handleTaskAction = async (taskId: string, action: string) => {
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const blockedDependencies = (task: Task) =>
+    task.dependencies
+      .map((depId) => taskById.get(depId))
+      .filter((dep): dep is Task => Boolean(dep))
+      .filter((dep) => !["review_approved", "completed"].includes(dep.status));
+
+  const handleTaskAction = async (task: Task, action: string) => {
     setUpdating(true);
     try {
-      await api.post(`/tasks/${taskId}/${action}`);
+      if (action === "claim") await taskApi.claimTask(task.id);
+      if (action === "start") await taskApi.startTask(task.id);
+      if (action === "submit") await taskApi.submitTask(task.id);
+      if (action === "return") await taskApi.returnTask(task.id);
+      if (action === "approve") await taskApi.approveTask(task.id, reviewComment || undefined);
+      if (action === "reject") await taskApi.rejectTask(task.id, reviewComment || undefined);
       toast.success("操作成功");
+      setReviewComment("");
+      setSelectedTask(null);
       onUpdate();
-    } catch {
+    } catch (error) {
       toast.error("操作失败: " + getErrorMessage(error));
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleAssignTask = async () => {
+    if (!selectedTask || !assigneeId) return;
+    setUpdating(true);
+    try {
+      await taskApi.assignTask(selectedTask.id, assigneeId, overrideReason || undefined);
+      toast.success("任务已指派");
+      setAssigneeId("");
+      setOverrideReason("");
+      setSelectedTask(null);
+      onUpdate();
+    } catch (error) {
+      toast.error(
+        "指派失败: " +
+          getErrorMessage(error) +
+          (overrideReason ? "" : "；若是依赖阻塞，请填写覆盖原因后由监制处理")
+      );
     } finally {
       setUpdating(false);
     }
@@ -427,6 +486,71 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
                   )}
                 </div>
 
+                {selectedTask.dependencies.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-700">依赖状态</h4>
+                    <div className="space-y-2">
+                      {selectedTask.dependencies.map((depId) => {
+                        const dep = taskById.get(depId);
+                        const done = dep ? ["review_approved", "completed"].includes(dep.status) : false;
+                        return (
+                          <div key={depId} className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2 text-xs">
+                            <span className="text-gray-600 truncate">{dep?.name ?? depId}</span>
+                            <Badge variant={done ? "default" : "outline"} className="text-[10px]">
+                              {done ? "已满足" : "阻塞中"}
+                            </Badge>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {blockedDependencies(selectedTask).length > 0 && (
+                      <p className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-md px-3 py-2">
+                        前置任务未完成，后续领取或开始会被依赖规则阻止。
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {isSupervisor && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-700">监制指派</h4>
+                    <div className="flex gap-2">
+                      <Select value={assigneeId} onValueChange={setAssigneeId}>
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="选择负责人" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {project.members.map((member) => (
+                            <SelectItem key={member.user.id} value={member.user.id}>
+                              {member.user.nickname || member.user.username} · {getRoleLabel(member.role)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" onClick={handleAssignTask} disabled={!assigneeId || updating}>
+                        <UserCheck className="w-3.5 h-3.5 mr-1" />
+                        指派
+                      </Button>
+                    </div>
+                    <Input
+                      value={overrideReason}
+                      onChange={(event) => setOverrideReason(event.target.value)}
+                      placeholder="依赖覆盖原因（可选）"
+                    />
+                  </div>
+                )}
+
+                {selectedTask.status === "submitted" && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-700">审核意见</h4>
+                    <Textarea
+                      value={reviewComment}
+                      onChange={(event) => setReviewComment(event.target.value)}
+                      placeholder="填写通过或驳回说明..."
+                    />
+                  </div>
+                )}
+
                 {/* Task Actions */}
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-gray-700">操作</h4>
@@ -434,7 +558,7 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
                     {selectedTask.status === "claimable" && (
                       <Button
                         size="sm"
-                        onClick={() => handleTaskAction(selectedTask.id, "claim")}
+                        onClick={() => handleTaskAction(selectedTask, "claim")}
                         disabled={updating}
                       >
                         <UserCheck className="w-3.5 h-3.5 mr-1" />
@@ -444,7 +568,7 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
                     {selectedTask.status === "assigned" && (
                       <Button
                         size="sm"
-                        onClick={() => handleTaskAction(selectedTask.id, "start")}
+                        onClick={() => handleTaskAction(selectedTask, "start")}
                         disabled={updating}
                       >
                         <Play className="w-3.5 h-3.5 mr-1" />
@@ -454,7 +578,7 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
                     {selectedTask.status === "in_progress" && (
                       <Button
                         size="sm"
-                        onClick={() => handleTaskAction(selectedTask.id, "submit")}
+                        onClick={() => handleTaskAction(selectedTask, "submit")}
                         disabled={updating}
                       >
                         <CheckCircle className="w-3.5 h-3.5 mr-1" />
@@ -466,7 +590,7 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleTaskAction(selectedTask.id, "approve")}
+                          onClick={() => handleTaskAction(selectedTask, "approve")}
                           disabled={updating}
                         >
                           <Check className="w-3.5 h-3.5 mr-1" />
@@ -476,7 +600,7 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
                           size="sm"
                           variant="outline"
                           className="text-red-600"
-                          onClick={() => handleTaskAction(selectedTask.id, "reject")}
+                          onClick={() => handleTaskAction(selectedTask, "reject")}
                           disabled={updating}
                         >
                           <X className="w-3.5 h-3.5 mr-1" />
@@ -484,11 +608,11 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
                         </Button>
                       </>
                     )}
-                    {(selectedTask.status === "review_rejected" || selectedTask.status === "overdue") && (
+                    {["assigned", "in_progress", "review_rejected", "overdue"].includes(selectedTask.status) && (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleTaskAction(selectedTask.id, "return")}
+                        onClick={() => handleTaskAction(selectedTask, "return")}
                         disabled={updating}
                       >
                         <RotateCcw className="w-3.5 h-3.5 mr-1" />
@@ -496,6 +620,10 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
                       </Button>
                     )}
                   </div>
+                </div>
+
+                <div className="border rounded-lg overflow-hidden">
+                  <TaskCommentPanel taskId={selectedTask.id} projectId={project.id} />
                 </div>
               </div>
             </>
@@ -510,32 +638,65 @@ function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) 
 
 function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; projectId: string; onUpdate: () => void }) {
   const [search, setSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<FileType | "all">("all");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadMode, setUploadMode] = useState<"new" | "replace">("new");
+  const [replaceTargetId, setReplaceTargetId] = useState("");
+  const [uploadType, setUploadType] = useState<FileType>("other");
+  const [uploadTags, setUploadTags] = useState("");
+  const [changeSummary, setChangeSummary] = useState("");
   const [selectedFile, setSelectedFile] = useState<FileEntity | null>(null);
+  const [versions, setVersions] = useState<FileVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const filteredFiles = files.filter((f) => {
     if (search && !f.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (tagFilter && !f.tags.some((tag) => tag.toLowerCase().includes(tagFilter.toLowerCase()))) return false;
     if (typeFilter !== "all" && f.type !== typeFilter) return false;
     return true;
   });
 
+  useEffect(() => {
+    if (!selectedFile) {
+      setVersions([]);
+      return;
+    }
+    setVersionsLoading(true);
+    fileApi.getVersions(selectedFile.id)
+      .then(setVersions)
+      .catch((error) => toast.error("获取版本历史失败: " + getErrorMessage(error)))
+      .finally(() => setVersionsLoading(false));
+  }, [selectedFile]);
+
   const handleUpload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
+    if (uploadMode === "replace" && !replaceTargetId) {
+      toast.error("请先选择要替换的文件实体");
+      return;
+    }
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", fileList[0]);
-      formData.append("projectId", projectId);
-      await api.post("/files/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const tags = uploadTags.split(",").map((tag) => tag.trim()).filter(Boolean);
+      if (uploadMode === "replace") {
+        await fileApi.replaceFile(replaceTargetId, fileList[0], { changeSummary, tags });
+      } else {
+        await fileApi.uploadFile(fileList[0], {
+          projectId,
+          type: uploadType,
+          tags,
+          changeSummary,
+        });
+      }
       toast.success("文件上传成功");
       setUploadOpen(false);
+      setReplaceTargetId("");
+      setChangeSummary("");
+      setUploadTags("");
       onUpdate();
-    } catch {
+    } catch (error) {
       toast.error("上传失败: " + getErrorMessage(error));
     } finally {
       setUploading(false);
@@ -545,9 +706,23 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
   const handleDownload = async (fileId: string) => {
     try {
       const res = await api.post(`/files/${fileId}/download`);
-      window.open(res.data.url, "_blank");
-    } catch {
+      window.open(res.data.data?.url ?? res.data.data?.downloadUrl, "_blank");
+    } catch (error) {
       toast.error("获取下载链接失败: " + getErrorMessage(error));
+    }
+  };
+
+  const handleApproveVersion = async (file: FileEntity, versionId: string) => {
+    setVersionsLoading(true);
+    try {
+      await fileApi.approveVersion(file.id, versionId);
+      setVersions(await fileApi.getVersions(file.id));
+      toast.success("版本已审核通过");
+      onUpdate();
+    } catch (error) {
+      toast.error("审核失败: " + getErrorMessage(error));
+    } finally {
+      setVersionsLoading(false);
     }
   };
 
@@ -564,6 +739,12 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          <Input
+            placeholder="按标签过滤..."
+            className="w-40"
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+          />
           <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as FileType | "all")}>
             <SelectTrigger className="w-32">
               <Filter className="w-3.5 h-3.5 mr-1" />
@@ -609,6 +790,54 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
           <DialogHeader>
             <DialogTitle>上传文件</DialogTitle>
           </DialogHeader>
+          <div className="space-y-3">
+            <Select value={uploadMode} onValueChange={(value) => setUploadMode(value as "new" | "replace")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="new">新建独立文件实体（同名也不合并）</SelectItem>
+                <SelectItem value="replace">显式替换已有文件</SelectItem>
+              </SelectContent>
+            </Select>
+            {uploadMode === "replace" ? (
+              <Select value={replaceTargetId} onValueChange={setReplaceTargetId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择被替换文件" />
+                </SelectTrigger>
+                <SelectContent>
+                  {files.map((file) => (
+                    <SelectItem key={file.id} value={file.id}>
+                      {file.name} · {file.versionCount}版本
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Select value={uploadType} onValueChange={(value) => setUploadType(value as FileType)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FILE_TYPE_OPTIONS.filter((opt) => opt.value !== "all").map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Input
+              value={uploadTags}
+              onChange={(event) => setUploadTags(event.target.value)}
+              placeholder="标签，用逗号分隔"
+            />
+            <Input
+              value={changeSummary}
+              onChange={(event) => setChangeSummary(event.target.value)}
+              placeholder="版本变更说明"
+            />
+          </div>
           <div
             className={cn(
               "border-2 border-dashed rounded-lg p-8 text-center transition-colors",
@@ -652,10 +881,41 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
                 <p className="font-medium">{selectedFile.name}</p>
                 <p className="text-gray-500">共 {selectedFile.versionCount} 个版本</p>
               </div>
-              {/* Version list would be fetched from API */}
-              <div className="text-center py-8 text-sm text-gray-400">
-                版本历史详情需要从后端获取
-              </div>
+              {versionsLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+                </div>
+              ) : versions.length > 0 ? (
+                <div className="space-y-2">
+                  {versions.map((version) => (
+                    <div key={version.id} className="rounded-md border border-gray-200 p-3 text-sm space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium">v{version.versionNumber}</div>
+                        <div className="flex items-center gap-1">
+                          {version.isCurrent && <Badge variant="default" className="text-[10px]">当前</Badge>}
+                          {version.isLatest && <Badge variant="outline" className="text-[10px]">最新</Badge>}
+                          {version.isLatestApproved && <Badge variant="outline" className="text-[10px]">已锁版</Badge>}
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {version.changeSummary || "无变更说明"} · {new Date(version.createdAt).toLocaleString("zh-CN")}
+                      </p>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => handleDownload(selectedFile.id)}>
+                          下载
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleApproveVersion(selectedFile, version.id)}>
+                          通过此版本
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-sm text-gray-400">
+                  暂无版本记录
+                </div>
+              )}
             </div>
           )}
         </SheetContent>
@@ -694,18 +954,22 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.put(`/projects/${projectId}/wiki`, { title, blocks });
+      const updated = wiki
+        ? await wikiApi.updateWiki(wiki.id, { title, blocks })
+        : await wikiApi.createWiki({ projectId, title, blocks, status: "draft" });
+      setBlocks(updated.blocks);
+      setTitle(updated.title);
+      setStatus(updated.status);
       setIsEditing(false);
-      setStatus("approved");
       toast.success("Wiki已保存");
-    } catch {
+    } catch (error) {
       toast.error("保存失败: " + getErrorMessage(error));
     } finally {
       setSaving(false);
     }
   };
 
-  // Use wiki data or fallback to mock
+  // Keep the active editor state in sync with the loaded wiki document.
   const displayBlocks = blocks.length > 0 ? blocks : (wiki?.blocks || []);
   const displayTitle = title || wiki?.title || "项目Wiki";
 
@@ -945,20 +1209,28 @@ function ProjectAnnouncementsTab({ projectId }: { projectId: string }) {
   const [newContent, setNewContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    announcementApi.getAnnouncements({ type: "project", projectId })
+      .then(setAnnouncements)
+      .catch(() => {});
+  }, [projectId]);
+
   const handleCreate = async () => {
     if (!newTitle.trim() || !newContent.trim()) return;
     setSubmitting(true);
     try {
-      const res = await api.post(`/projects/${projectId}/announcements`, {
+      const created = await announcementApi.createAnnouncement({
+        type: "project",
+        projectId,
         title: newTitle.trim(),
         content: newContent.trim(),
       });
-      setAnnouncements((prev) => [res.data as import("@/types").Announcement, ...prev]);
+      setAnnouncements((prev) => [created, ...prev]);
       setNewTitle("");
       setNewContent("");
       setIsCreating(false);
       toast.success("公告已发布");
-    } catch {
+    } catch (error) {
       toast.error("发布失败: " + getErrorMessage(error));
     } finally {
       setSubmitting(false);
@@ -1048,8 +1320,16 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
     if (!isSupervisor) return;
     const fetchJoinRequests = async () => {
       try {
-        const res = await api.get(`/projects/${project.id}/join-requests`);
-        setJoinRequests(res.data);
+        const res = await api.get<ApiEnvelope<unknown[]>>(`/projects/${project.id}/join-requests`);
+        setJoinRequests(res.data.data.map((request) => {
+          const raw = request as Record<string, unknown>;
+          return {
+            id: String(raw.id),
+            user: normalizeUser((raw.user ?? {}) as Record<string, unknown>),
+            role: raw.role as TaskRole,
+            message: raw.message as string | undefined,
+          };
+        }));
       } catch {
         setJoinRequests([]);
       }
@@ -1063,7 +1343,7 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
       toast.success("已批准加入请求");
       setJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
       onUpdate();
-    } catch {
+    } catch (error) {
       toast.error("操作失败: " + getErrorMessage(error));
     }
   };
@@ -1073,7 +1353,7 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
       await api.post(`/projects/${project.id}/join-requests/${requestId}/reject`);
       toast.success("已拒绝加入请求");
       setJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
-    } catch {
+    } catch (error) {
       toast.error("操作失败: " + getErrorMessage(error));
     }
   };
@@ -1203,7 +1483,7 @@ function DedupTab({ conflicts, projectId, isSupervisor }: { conflicts: SubtitleC
       await api.post(`/projects/${projectId}/conflicts/${conflictId}/resolve`, resolution);
       toast.success("冲突已解决");
       setSelectedConflict(null);
-    } catch {
+    } catch (error) {
       toast.error("解决失败: " + getErrorMessage(error));
     } finally {
       setResolving(false);
@@ -1446,17 +1726,24 @@ function ActivityTab({ events }: { events: TimelineEvent[] }) {
 function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => void }) {
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const [name, setName] = useState(project.name);
-  const [tags, setTags] = useState(project.tags);
+  const [deliveryChecklist, setDeliveryChecklist] = useState(project.deliveryChecklist ?? []);
+  const [downloadLinkTtlSeconds, setDownloadLinkTtlSeconds] = useState(project.downloadLinkTtlSeconds ?? 300);
+  const [wikiApprovalRequired, setWikiApprovalRequired] = useState(project.wikiApprovalRequired ?? false);
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.put(`/projects/${project.id}`, { name, tags });
+      await projectApi.updateProject(project.id, {
+        name,
+        deliveryChecklist,
+        downloadLinkTtlSeconds,
+        wikiApprovalRequired,
+      });
       toast.success("设置已保存");
       onUpdate();
-    } catch {
+    } catch (error) {
       toast.error("保存失败: " + getErrorMessage(error));
     } finally {
       setSaving(false);
@@ -1466,10 +1753,10 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
   const handleArchive = async () => {
     setArchiving(true);
     try {
-      await api.post(`/projects/${project.id}/archive`);
+      await projectApi.archiveProject(project.id);
       toast.success("项目已归档");
       onUpdate();
-    } catch {
+    } catch (error) {
       toast.error("归档失败: " + getErrorMessage(error));
     } finally {
       setArchiving(false);
@@ -1492,13 +1779,40 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">标签</label>
-            <Input
-              value={tags.join(", ")}
-              onChange={(e) => setTags(e.target.value.split(",").map((t) => t.trim()).filter(Boolean))}
-              disabled={!isSupervisor}
-              placeholder="用逗号分隔"
+            <label className="text-sm font-medium text-gray-700">交付清单</label>
+            <DeliveryChecklistEditor
+              items={deliveryChecklist}
+              onChange={setDeliveryChecklist}
+              readOnly={!isSupervisor}
             />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">下载链接有效期（秒）</label>
+              <Input
+                type="number"
+                min={90}
+                value={downloadLinkTtlSeconds}
+                onChange={(event) => setDownloadLinkTtlSeconds(Number(event.target.value))}
+                disabled={!isSupervisor}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Wiki审批</label>
+              <Select
+                value={wikiApprovalRequired ? "required" : "optional"}
+                onValueChange={(value) => setWikiApprovalRequired(value === "required")}
+                disabled={!isSupervisor}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="optional">直接生效</SelectItem>
+                  <SelectItem value="required">需要监制审批</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           {isSupervisor && (
             <div className="pt-4 flex items-center gap-3">

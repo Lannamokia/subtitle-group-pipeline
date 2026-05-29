@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
-import { projectApi } from "@/lib/api";
+import { getErrorMessage, projectApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ import {
   Clock,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
 type ArchiveTab = "archived" | "recycle";
 
@@ -46,15 +47,26 @@ export function ArchivePage() {
   const [recycledProjects, setRecycledProjects] = useState<ProjectWithDeleteInfo[]>([]);
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
 
+  const fetchArchiveState = async () => {
+    try {
+      const data = await projectApi.getProjects({
+        include_archived: true,
+        include_deleted: true,
+        pageSize: 100,
+      });
+      setArchivedProjects(
+        data.items.filter((project) => project.archivedAt && !project.deletedAt)
+      );
+      setRecycledProjects(
+        data.items.filter((project) => Boolean(project.deletedAt))
+      );
+    } catch (error) {
+      toast.error("获取归档项目失败: " + getErrorMessage(error));
+    }
+  };
+
   useEffect(() => {
-    projectApi.getProjects()
-      .then((data) => {
-        const filtered = data.items
-          .filter((p) => p.status === "archived" || p.status === "completed")
-          .map((p) => ({ ...p, status: "archived" as const }));
-        setArchivedProjects(filtered);
-      })
-      .catch(() => {});
+    fetchArchiveState();
   }, []);
 
   const filteredArchived = archivedProjects.filter(
@@ -70,12 +82,11 @@ export function ArchivePage() {
   const handleUnarchive = async (projectId: string) => {
     setIsProcessing(projectId);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-      setArchivedProjects((prev) =>
-        prev.map((p) => (p.id === projectId ? { ...p, status: "active" as const } : p))
-      );
-      // In real app, would call API and refresh
-      setArchivedProjects((prev) => prev.filter((p) => p.id !== projectId));
+      await projectApi.unarchiveProject(projectId);
+      await fetchArchiveState();
+      toast.success("项目已取消归档");
+    } catch (error) {
+      toast.error("恢复失败: " + getErrorMessage(error));
     } finally {
       setIsProcessing(null);
     }
@@ -84,15 +95,11 @@ export function ArchivePage() {
   const handleSoftDelete = async (projectId: string) => {
     setIsProcessing(projectId);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-      const project = archivedProjects.find((p) => p.id === projectId);
-      if (project) {
-        setRecycledProjects((prev) => [
-          ...prev,
-          { ...project, status: "deleted" as const, deletedAt: new Date().toISOString() },
-        ]);
-        setArchivedProjects((prev) => prev.filter((p) => p.id !== projectId));
-      }
+      await projectApi.deleteProject(projectId);
+      await fetchArchiveState();
+      toast.success("项目已移入回收站");
+    } catch (error) {
+      toast.error("删除失败: " + getErrorMessage(error));
     } finally {
       setIsProcessing(null);
     }
@@ -101,15 +108,11 @@ export function ArchivePage() {
   const handleRestoreFromRecycle = async (projectId: string) => {
     setIsProcessing(projectId);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-      const project = recycledProjects.find((p) => p.id === projectId);
-      if (project) {
-        setArchivedProjects((prev) => [
-          ...prev,
-          { ...project, status: "archived" as const },
-        ]);
-        setRecycledProjects((prev) => prev.filter((p) => p.id !== projectId));
-      }
+      await projectApi.restoreProject(projectId);
+      await fetchArchiveState();
+      toast.success("项目已从回收站还原");
+    } catch (error) {
+      toast.error("还原失败: " + getErrorMessage(error));
     } finally {
       setIsProcessing(null);
     }
@@ -118,8 +121,7 @@ export function ArchivePage() {
   const handlePermanentDelete = async (projectId: string) => {
     setIsProcessing(projectId);
     try {
-      await new Promise((r) => setTimeout(r, 500));
-      setRecycledProjects((prev) => prev.filter((p) => p.id !== projectId));
+      toast.info("物理清理由后台回收站保留任务执行");
     } finally {
       setIsProcessing(null);
     }

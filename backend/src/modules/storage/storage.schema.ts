@@ -24,6 +24,19 @@ export const storageQuerySchema = z.object({
     .default("true"),
 });
 
+export const dataRetentionSettingsSchema = z.object({
+  auto_archive_days: z.number().int().min(1).optional(),
+  archive_retention_days: z.number().int().min(1).optional(),
+  auto_delete_days: z.number().int().min(1).nullable().optional(),
+  recycle_bin_days: z.number().int().min(1).optional(),
+  audit_log_retention_days: z.number().int().min(1).optional(),
+  notification_retention_days: z.number().int().min(1).optional(),
+  max_file_versions: z.number().int().min(1).optional(),
+  download_link_ttl_seconds: z.number().int().min(90).optional(),
+  wiki_approval_required: z.boolean().optional(),
+});
+
 export type CreateStorageBackendInput = z.infer<typeof createStorageBackendSchema>;
 export type UpdateStorageBackendInput = z.infer<typeof updateStorageBackendSchema>;
 export type StorageQueryInput = z.infer<typeof storageQuerySchema>;
+export type DataRetentionSettingsInput = z.infer<typeof dataRetentionSettingsSchema>;

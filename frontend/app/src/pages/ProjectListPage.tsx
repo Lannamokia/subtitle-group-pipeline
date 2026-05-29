@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 import { projectApi } from "@/lib/api";
+import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ type ProjectStatus = "all" | "active" | "completed" | "archived";
 
 export function ProjectListPage() {
   const navigate = useNavigate();
+  const currentUser = useAuthStore((s) => s.user);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus>("all");
   const [scope, setScope] = useState<"mine" | "all">("mine");
@@ -35,7 +37,7 @@ export function ProjectListPage() {
     if (searchQuery && !p.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     if (statusFilter !== "all" && p.status !== statusFilter) return false;
     if (scope === "mine") {
-      return p.members.some((m) => m.user.id === "u1");
+      return p.members.some((m) => m.user.id === currentUser?.id) || p.supervisorId === currentUser?.id;
     }
     return true;
   });

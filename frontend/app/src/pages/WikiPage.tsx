@@ -381,6 +381,16 @@ function DiffView({
   );
 }
 
+function parseWikiBlocks(value?: string): WikiBlock[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return [{ id: "pending-markdown", type: "markdown", content: value }];
+  }
+}
+
 export function WikiPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const isSupervisor = useAuthStore((s) => s.isSupervisor)();
@@ -403,6 +413,7 @@ export function WikiPage() {
         setBlocks(data.blocks);
         setStatus(data.status);
         setTitle(data.title);
+        setPendingBlocks(parseWikiBlocks(data.pendingContent));
       })
       .catch(() => {});
   }, [projectId]);
@@ -441,30 +452,34 @@ export function WikiPage() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      // Simulate API call
-      await new Promise((r) => setTimeout(r, 500));
-
-      if (isSupervisor) {
-        // Supervisors can directly approve
-        setStatus("approved");
-        setPendingBlocks(null);
-      } else {
-        // Members submit for approval
-        setPendingBlocks([...blocks]);
-        setStatus("pending");
-      }
+      const saved = wiki
+        ? await wikiApi.updateWiki(wiki.id, {
+            title,
+            blocks,
+            status: isSupervisor || !wiki.approvalRequired ? "approved" : "pending",
+          })
+        : await wikiApi.createWiki({ projectId: projectId!, title, blocks, status: isSupervisor ? "approved" : "pending" });
+      setWiki(saved);
+      setBlocks(saved.blocks);
+      setStatus(saved.status);
+      setTitle(saved.title);
+      setPendingBlocks(parseWikiBlocks(saved.pendingContent));
       setIsEditing(false);
       setActiveTab("view");
+      setShowDiff(false);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleApprove = async () => {
+    if (!wiki) return;
     setIsSaving(true);
     try {
-      await new Promise((r) => setTimeout(r, 300));
-      setStatus("approved");
+      const approved = await wikiApi.approveWiki(wiki.id, true);
+      setWiki(approved);
+      setBlocks(approved.blocks);
+      setStatus(approved.status);
       setPendingBlocks(null);
       setShowDiff(false);
     } finally {
@@ -473,11 +488,13 @@ export function WikiPage() {
   };
 
   const handleReject = async () => {
+    if (!wiki) return;
     setIsSaving(true);
     try {
-      await new Promise((r) => setTimeout(r, 300));
+      const rejected = await wikiApi.approveWiki(wiki.id, false, "前端驳回");
+      setWiki(rejected);
+      setStatus(rejected.status);
       setPendingBlocks(null);
-      setStatus("draft");
       setShowDiff(false);
     } finally {
       setIsSaving(false);

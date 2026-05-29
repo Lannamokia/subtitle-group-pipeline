@@ -23,15 +23,40 @@ interface TimelineEventProps {
 
 const eventIcons: Record<string, React.ReactNode> = {
   task_status: <ArrowRightCircle className="w-3.5 h-3.5 text-white" />,
+  task_created: <ArrowRightCircle className="w-3.5 h-3.5 text-white" />,
+  task_claimed: <ArrowRightCircle className="w-3.5 h-3.5 text-white" />,
+  task_assigned: <ArrowRightCircle className="w-3.5 h-3.5 text-white" />,
+  task_started: <ArrowRightCircle className="w-3.5 h-3.5 text-white" />,
+  task_submitted: <ArrowRightCircle className="w-3.5 h-3.5 text-white" />,
+  task_approved: <CheckCircle className="w-3.5 h-3.5 text-white" />,
+  task_rejected: <CheckCircle className="w-3.5 h-3.5 text-white" />,
+  task_reset: <ArrowRightCircle className="w-3.5 h-3.5 text-white" />,
+  task_cancelled: <Info className="w-3.5 h-3.5 text-white" />,
+  task_returned: <ArrowRightCircle className="w-3.5 h-3.5 text-white" />,
+  task_completed: <CheckCircle className="w-3.5 h-3.5 text-white" />,
+  task_overdue: <Info className="w-3.5 h-3.5 text-white" />,
+  task_frozen: <Info className="w-3.5 h-3.5 text-white" />,
   file_upload: <Upload className="w-3.5 h-3.5 text-white" />,
+  file_uploaded: <Upload className="w-3.5 h-3.5 text-white" />,
   review: <CheckCircle className="w-3.5 h-3.5 text-white" />,
+  review_submitted: <CheckCircle className="w-3.5 h-3.5 text-white" />,
+  review_approved: <CheckCircle className="w-3.5 h-3.5 text-white" />,
+  review_rejected: <CheckCircle className="w-3.5 h-3.5 text-white" />,
   member_join: <UserPlus className="w-3.5 h-3.5 text-white" />,
+  member_joined: <UserPlus className="w-3.5 h-3.5 text-white" />,
+  member_left: <UserPlus className="w-3.5 h-3.5 text-white" />,
+  member_added: <UserPlus className="w-3.5 h-3.5 text-white" />,
+  member_removed: <UserPlus className="w-3.5 h-3.5 text-white" />,
+  join_request_created: <UserPlus className="w-3.5 h-3.5 text-white" />,
+  join_request_approved: <UserPlus className="w-3.5 h-3.5 text-white" />,
+  join_request_rejected: <UserPlus className="w-3.5 h-3.5 text-white" />,
+  announcement: <Info className="w-3.5 h-3.5 text-white" />,
   system: <Info className="w-3.5 h-3.5 text-white" />,
 };
 
 export function TimelineEventItem({ event, compact = false }: TimelineEventProps) {
-  const eventConfig = TIMELINE_EVENT_MAP[event.type];
-  const icon = eventIcons[event.type];
+  const eventConfig = TIMELINE_EVENT_MAP[event.type] ?? TIMELINE_EVENT_MAP.system;
+  const icon = eventIcons[event.type] ?? eventIcons.system;
 
   return (
     <div className="flex gap-3 group">
@@ -84,13 +109,21 @@ interface EnhancedTimelineProps {
 
 const ALL_EVENT_TYPES: EventType[] = ["task_status", "file_upload", "review", "member_join", "system"];
 
-const typeLabels: Record<EventType, string> = {
+const typeLabels: Record<string, string> = {
   task_status: "任务变更",
   file_upload: "文件上传",
   review: "审核",
   member_join: "成员变动",
   system: "系统",
 };
+
+function getTimelineCategory(type: EventType): EventType {
+  if (type.startsWith("task_")) return "task_status";
+  if (type.startsWith("file_")) return "file_upload";
+  if (type.startsWith("review_") || type.startsWith("conflict_")) return "review";
+  if (type.startsWith("member_") || type.startsWith("join_request_")) return "member_join";
+  return "system";
+}
 
 export function EnhancedTimeline({
   events,
@@ -104,7 +137,7 @@ export function EnhancedTimeline({
   const [displayCount, setDisplayCount] = useState(10);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  const filteredEvents = events.filter((e) => selectedTypes.includes(e.type));
+  const filteredEvents = events.filter((e) => selectedTypes.includes(getTimelineCategory(e.type)));
   const displayedEvents = filteredEvents.slice(0, displayCount);
   const hasMore = displayCount < filteredEvents.length;
 
@@ -120,8 +153,6 @@ export function EnhancedTimeline({
   const loadMore = useCallback(async () => {
     if (isLoadingMore || !hasMore) return;
     setIsLoadingMore(true);
-    // Simulate API delay
-    await new Promise((r) => setTimeout(r, 300));
     setDisplayCount((prev) => prev + 10);
     setIsLoadingMore(false);
   }, [isLoadingMore, hasMore]);
@@ -239,7 +270,10 @@ export function GlobalTimelinePage() {
 
   useEffect(() => {
     timelineApi.getGlobalEvents()
-      .then(setEvents)
+      .then((res) => {
+        const list = Array.isArray(res) ? res : (res as { events?: TimelineEventType[] }).events ?? [];
+        setEvents(list);
+      })
       .catch(() => {});
   }, []);
 

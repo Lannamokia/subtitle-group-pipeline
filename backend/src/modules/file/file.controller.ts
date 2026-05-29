@@ -11,7 +11,7 @@ import crypto from "crypto";
 import { FileType, TaskRole } from "@prisma/client";
 import type { UserRole } from "@prisma/client";
 import * as storageService from "../storage/storage.service";
-import { uploadFileSchema } from "./file.schema";
+import { replaceFileSchema, uploadFileSchema } from "./file.schema";
 
 // Helper to prevent path traversal in local download
 function preventPathTraversal(filepath: string): string {
@@ -154,6 +154,85 @@ async function buildUploadInputFromMultipart(req: AuthenticatedRequest) {
   };
 }
 
+async function buildReplaceInputFromMultipart(req: AuthenticatedRequest, fileId: string) {
+  if (!req.file) {
+    return null;
+  }
+
+  const existing = await prisma.fileEntity.findUnique({
+    where: { id: fileId },
+    include: {
+      project: { select: { storage_backend_id: true } },
+    },
+  });
+  if (!existing) {
+    throw new AppError("File not found", "NOT_FOUND", 404);
+  }
+
+  const body = req.body as Record<string, unknown>;
+  const metadata = typeof body.metadata === "string" ? body.metadata : existing.metadata;
+  let parsedMetadata: Record<string, unknown> = {};
+  if (metadata) {
+    try {
+      const parsed = JSON.parse(metadata);
+      parsedMetadata = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch {
+      parsedMetadata = {};
+    }
+  }
+  const metadataRole = typeof parsedMetadata.role === "string" ? parsedMetadata.role : undefined;
+  const taskRole = metadataRole && Object.values(TaskRole).includes(metadataRole as TaskRole)
+    ? metadataRole as TaskRole
+    : undefined;
+
+  const validation = await fileService.validateUpload(
+    {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+    },
+    existing.project_id,
+    req.user!.role as UserRole,
+    {
+      userId: req.user!.id,
+      taskRole,
+      fileType: existing.file_type,
+    }
+  );
+  if (!validation.valid) {
+    throw new AppError(validation.error || "Invalid upload", "VALIDATION_ERROR", 400);
+  }
+
+  const backendId = existing.storage_backend_id || existing.project.storage_backend_id;
+  const backend = backendId
+    ? await prisma.storageBackend.findUnique({ where: { id: backendId } })
+    : await storageService.getDefaultBackend();
+  if (!backend || !backend.is_active) {
+    throw new AppError("No active storage backend configured for replacement", "CONFIG_ERROR", 500);
+  }
+
+  const uploadResult = await storageService.uploadFile(
+    backend.id,
+    existing.project_id,
+    req.file.buffer,
+    req.file.originalname,
+    req.file.mimetype
+  );
+  const checksum = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
+
+  return {
+    name: typeof body.name === "string" && body.name.trim() ? body.name : req.file.originalname,
+    mime_type: req.file.mimetype || "application/octet-stream",
+    size_bytes: uploadResult.size,
+    storage_path: uploadResult.storagePath,
+    storage_backend_id: backend.id,
+    checksum,
+    metadata,
+    tags: typeof body.tags === "string" ? body.tags : existing.tags,
+    change_summary: typeof body.change_summary === "string" ? body.change_summary : null,
+  };
+}
+
 function getRequestedTtl(req: Request): number {
   const queryTtl = req.query.ttl;
   if (typeof queryTtl === "string") {
@@ -198,10 +277,12 @@ export async function replaceFile(
   next: NextFunction
 ): Promise<void> {
   try {
+    const multipartInput = await buildReplaceInputFromMultipart(req, getParam(req, "fileId"));
+    const input = multipartInput || replaceFileSchema.parse(req.body);
     const result = await fileService.replaceFile(
       getParam(req, "fileId"),
       req.user!.id,
-      req.body
+      input
     );
     successResponse(res, result);
   } catch (error) {
