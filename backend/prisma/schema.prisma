@@ -987,6 +987,7 @@ model AuditLog {
 model DataRetentionSettings {
   id                     String   @id @default(uuid())
   auto_archive_days      Int      @default(90)    // archive completed projects after N days
+  archive_retention_days Int      @default(365)   // clean archived project versions after N days
   auto_delete_days       Int?     @default(365)   // delete archived projects after N days (null = never)
   recycle_bin_days       Int      @default(30)    // keep deleted items in recycle bin
   audit_log_retention_days Int    @default(365)   // keep audit logs

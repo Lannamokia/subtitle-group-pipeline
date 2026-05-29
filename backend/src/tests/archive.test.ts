@@ -10,6 +10,8 @@ import {
 } from "./setup";
 import { post, get, put, del, expectSuccess, expectError } from "./helpers";
 import type { Application } from "express";
+import { cleanupArchivedProjects } from "../jobs/archive.cleanup";
+import { cleanupRecycleBin } from "../jobs/recyclebin.cleanup";
 
 describe("Archive & Lifecycle Tests", () => {
   let app: Application;
@@ -199,11 +201,15 @@ describe("Archive & Lifecycle Tests", () => {
 
   describe("Archive Retention Cleanup", () => {
     it("should preserve only final versions during cleanup", async () => {
-      const { user, token } = await createTestUser();
+      const { user } = await createTestUser();
+      await prisma.dataRetentionSettings.create({
+        data: { archive_retention_days: 1 },
+      });
       const project = await createTestProject({
         owner_id: user.id,
         status: "archived",
         is_archived: true,
+        archived_at: new Date(Date.now() - 3 * 86400000),
       });
 
       // Create file with multiple versions
@@ -231,6 +237,8 @@ describe("Archive & Lifecycle Tests", () => {
             is_current: i === 5,
             is_latest: i === 5,
             is_latest_approved: i === 3,
+            approved_by: i === 3 ? user.id : null,
+            approved_at: i === 3 ? new Date(Date.now() - 2 * 86400000) : null,
           },
         });
       }
@@ -238,18 +246,69 @@ describe("Archive & Lifecycle Tests", () => {
       const allVersions = await prisma.fileVersion.findMany({
         where: { file_id: file.id },
       });
-      expect(allVersions.length).toBe(6); // 5 + initial
+      expect(allVersions.length).toBe(6);
 
-      // Simulate cleanup: keep only current and latest_approved
-      const currentVersion = await prisma.fileVersion.findFirst({
-        where: { file_id: file.id, is_current: true },
-      });
-      const latestApproved = await prisma.fileVersion.findFirst({
-        where: { file_id: file.id, is_latest_approved: true },
+      await cleanupArchivedProjects();
+
+      const remainingVersions = await prisma.fileVersion.findMany({
+        where: { file_id: file.id },
+        orderBy: { version_number: "asc" },
       });
 
-      expect(currentVersion).toBeDefined();
-      expect(latestApproved).toBeDefined();
+      expect(remainingVersions).toHaveLength(1);
+      expect(remainingVersions[0].version_number).toBe(3);
+      expect(remainingVersions[0].is_current).toBe(true);
+      expect(remainingVersions[0].is_latest).toBe(true);
+      expect(remainingVersions[0].is_latest_approved).toBe(true);
+    });
+
+    it("should skip soft-deleted archived projects during archive cleanup", async () => {
+      const { user } = await createTestUser();
+      await prisma.dataRetentionSettings.create({
+        data: { archive_retention_days: 1 },
+      });
+      const project = await createTestProject({
+        owner_id: user.id,
+        status: "deleted",
+        is_archived: true,
+        archived_at: new Date(Date.now() - 3 * 86400000),
+        deleted_at: new Date(Date.now() - 2 * 86400000),
+      });
+      const file = await prisma.fileEntity.create({
+        data: {
+          project_id: project.id,
+          uploader_id: user.id,
+          name: "deleted-project.ass",
+          original_name: "deleted-project.ass",
+          file_type: "subtitle",
+          mime_type: "application/x-ass",
+          size_bytes: 1024,
+          storage_path: "/uploads/deleted-project.ass",
+        },
+      });
+
+      for (let i = 1; i <= 3; i++) {
+        await prisma.fileVersion.create({
+          data: {
+            file_id: file.id,
+            version_number: i,
+            storage_path: `/uploads/deleted_project_v${i}.ass`,
+            size_bytes: 1024,
+            is_current: i === 3,
+            is_latest: i === 3,
+            is_latest_approved: i === 2,
+            approved_by: i === 2 ? user.id : null,
+            approved_at: i === 2 ? new Date(Date.now() - 2 * 86400000) : null,
+          },
+        });
+      }
+
+      await cleanupArchivedProjects();
+
+      const remainingVersions = await prisma.fileVersion.findMany({
+        where: { file_id: file.id },
+      });
+      expect(remainingVersions).toHaveLength(4);
     });
 
     it("should clean up expired recycle bin records", async () => {
@@ -277,13 +336,17 @@ describe("Archive & Lifecycle Tests", () => {
         },
       });
 
-      // Simulate cleanup
+      await cleanupRecycleBin();
+
       const expiredRecords = await prisma.recycleBinRecord.findMany({
-        where: { expires_at: { lt: new Date() }, restored_at: null },
+        where: { resource_id: "expired-project-id" },
+      });
+      const activeRecords = await prisma.recycleBinRecord.findMany({
+        where: { resource_id: "active-file-id" },
       });
 
-      expect(expiredRecords.length).toBe(1);
-      expect(expiredRecords[0].resource_type).toBe("project");
+      expect(expiredRecords).toHaveLength(0);
+      expect(activeRecords).toHaveLength(1);
     });
 
     it("should bypass cleanup for restored items", async () => {
@@ -299,6 +362,8 @@ describe("Archive & Lifecycle Tests", () => {
           restored_at: new Date(),
         },
       });
+
+      await cleanupRecycleBin();
 
       const restoredRecords = await prisma.recycleBinRecord.findMany({
         where: { restored_at: { not: null } },

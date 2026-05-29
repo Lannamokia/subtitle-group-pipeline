@@ -43,6 +43,7 @@ export async function cleanupRecycleBin(): Promise<void> {
 
   if (expiredProjects.length === 0) {
     console.log("[RecycleBinCleanupJob] No expired projects in recycle bin");
+    await cleanupOrphanRecycleBinRecords();
     return;
   }
 
@@ -258,6 +259,8 @@ async function cleanupOrphanRecycleBinRecords(): Promise<void> {
   const orphanRecords = await prisma.recycleBinRecord.findMany({
     where: {
       resource_type: "project",
+      expires_at: { lt: new Date() },
+      restored_at: null,
       resource_id: {
         notIn: await prisma.project.findMany({ select: { id: true } }).then((projects) =>
           projects.map((p) => p.id)

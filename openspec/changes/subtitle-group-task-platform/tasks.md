@@ -82,7 +82,7 @@
 - [x] 8.5 Add backend integration tests for notification recipient resolution, QQ group @ payload generation, channel escalation rules, task-reassignment notifications, comment @ mentions, overdue marking and escalation, channel delivery logging, and retry handling
 - [x] 8.6 Add backend integration tests for ASS parsing, merge jobs with independent merge entities, duplicate elimination, version comparison generation, conflict generation, online dedup write-back restricted to supervisors, and file version reference in task comments
 - [x] 8.7 Add backend integration tests for project wiki persistence, Markdown rendering data, glossary-table retrieval, and wiki approval flow configuration
-- [ ] 8.8 Add backend integration tests for project archive/unarchive, soft-delete and recycle bin, archive retention cleanup (preserving only final versions), restoration bypassing cleanup, and announcement CRUD
+- [x] 8.8 Add backend integration tests for project archive/unarchive, soft-delete and recycle bin, archive retention cleanup (preserving only final versions), restoration bypassing cleanup, and announcement CRUD
 - [x] 8.9 Add backend integration tests for activity timeline event generation and retrieval, and workload dashboard aggregation queries
 - [x] 8.10 Add backend integration tests for user profile updates, avatar upload to default storage backend, and storage backend CRUD with quota enforcement
 - [x] 8.11 Add backend integration tests for project creation with storage backend binding, file upload routing to bound backend, and multi-backend isolation
@@ -92,7 +92,7 @@
 ## 9. Background jobs and scheduled tasks
 
 - [x] 9.1 Implement overdue task auto-marking: periodically scan active tasks past deadline, mark them "overdue", and send escalation notifications via configured channels
-- [ ] 9.2 Implement archive retention cleanup: periodically scan archived projects that are NOT soft-deleted and have passed the configured retention days, remove old file versions and intermediate artifacts, preserving only final approved versions per workflow stage. Projects that were soft-deleted before the retention period are handled entirely by recycle bin cleanup (9.3).
+- [x] 9.2 Implement archive retention cleanup: periodically scan archived projects that are NOT soft-deleted and have passed the configured retention days, remove old file versions and intermediate artifacts, preserving only final approved versions per workflow stage. Projects that were soft-deleted before the retention period are handled entirely by recycle bin cleanup (9.3).
 - [x] 9.3 Implement recycle bin physical cleanup: periodically scan soft-deleted projects past the configured recycle-bin retention days, permanently delete all associated data
 - [x] 9.4 Implement notification channel escalation: periodically check unread in-site notifications past the escalation threshold, upgrade to email; check unread email past threshold, upgrade to QQ
 - [x] 9.5 Implement temporary download link expiration cleanup: run every 30 seconds to scan and delete expired `download_links` records

@@ -1,5 +1,5 @@
 import { prisma } from "../config/database";
-import { deleteFile, initAdapterForBackend } from "../modules/storage/storage.service";
+import { deleteFile } from "../modules/storage/storage.service";
 
 /**
  * Job: Archive Retention Cleanup
@@ -10,14 +10,14 @@ import { deleteFile, initAdapterForBackend } from "../modules/storage/storage.se
  */
 export async function cleanupArchivedProjects(): Promise<void> {
   const settings = await prisma.dataRetentionSettings.findFirst();
-  const autoDeleteDays = settings?.auto_delete_days;
+  const archiveRetentionDays = settings?.archive_retention_days ?? settings?.auto_delete_days;
 
-  if (!autoDeleteDays) {
-    console.log("[ArchiveCleanupJob] auto_delete_days not configured, skipping");
+  if (!archiveRetentionDays) {
+    console.log("[ArchiveCleanupJob] archive_retention_days not configured, skipping");
     return;
   }
 
-  const cutoffDate = new Date(Date.now() - autoDeleteDays * 24 * 60 * 60 * 1000);
+  const cutoffDate = new Date(Date.now() - archiveRetentionDays * 24 * 60 * 60 * 1000);
 
   // Find archived projects that are NOT soft-deleted and passed retention
   const archivedProjects = await prisma.project.findMany({
@@ -88,11 +88,9 @@ interface ProjectWithFiles {
 }
 
 async function cleanupProjectArtifacts(project: ProjectWithFiles): Promise<void> {
-  const maxVersionsToKeep = await getMaxFileVersions();
-
   for (const file of project.files) {
     try {
-      await cleanupFileVersions(file, project.storage_backend_id, maxVersionsToKeep);
+      await cleanupFileVersions(file, project.storage_backend_id);
     } catch (error) {
       console.error(`[ArchiveCleanupJob] Failed to cleanup file ${file.id}:`, error);
       // Continue with next file
@@ -102,38 +100,31 @@ async function cleanupProjectArtifacts(project: ProjectWithFiles): Promise<void>
 
 async function cleanupFileVersions(
   file: ProjectWithFiles["files"][0],
-  projectBackendId: string | null,
-  maxVersionsToKeep: number
+  projectBackendId: string | null
 ): Promise<void> {
-  if (file.versions.length <= maxVersionsToKeep) {
+  if (file.versions.length <= 1) {
     return; // Nothing to clean up
   }
 
-  // Identify versions to preserve:
-  // 1. The latest approved version (if any)
-  // 2. The current version
-  // 3. The latest version
-  const approvedVersion = file.versions.find((v) => v.is_latest_approved);
-  const currentVersion = file.versions.find((v) => v.is_current);
-  const latestVersion = file.versions.find((v) => v.is_latest);
-
-  const preserveIds = new Set<string>();
-  if (approvedVersion) preserveIds.add(approvedVersion.id);
-  if (currentVersion) preserveIds.add(currentVersion.id);
-  if (latestVersion) preserveIds.add(latestVersion.id);
-
-  // Sort by version_number desc to keep the most recent ones
   const sortedVersions = [...file.versions].sort((a, b) => b.version_number - a.version_number);
+  const finalApprovedVersion =
+    sortedVersions.find((v) => v.is_latest_approved) ||
+    sortedVersions
+      .filter((v) => v.approved_at)
+      .sort((a, b) => {
+        const dateDiff = (b.approved_at?.getTime() ?? 0) - (a.approved_at?.getTime() ?? 0);
+        return dateDiff || b.version_number - a.version_number;
+      })[0];
+  const fallbackVersion =
+    sortedVersions.find((v) => v.is_current) ||
+    sortedVersions.find((v) => v.is_latest) ||
+    sortedVersions[0];
 
-  // Keep up to maxVersionsToKeep recent versions, plus any approved/current/latest
-  const versionsToKeep = new Set<string>();
-  let keptCount = 0;
-  for (const version of sortedVersions) {
-    if (keptCount < maxVersionsToKeep || preserveIds.has(version.id)) {
-      versionsToKeep.add(version.id);
-      keptCount++;
-    }
-  }
+  // Archived projects should keep the final approved artifact for each file/stage.
+  // If legacy data has no approved version, keep one current/latest fallback so the
+  // file bucket never points at an empty version chain.
+  const versionToKeep = finalApprovedVersion || fallbackVersion;
+  const versionsToKeep = new Set<string>(versionToKeep ? [versionToKeep.id] : []);
 
   // Delete versions not in the keep set
   for (const version of file.versions) {
@@ -156,7 +147,18 @@ async function cleanupFileVersions(
     }
   }
 
-  console.log(`[ArchiveCleanupJob] File "${file.name}": kept ${versionsToKeep.size}/${file.versions.length} versions`);
+  if (versionToKeep) {
+    await prisma.fileVersion.update({
+      where: { id: versionToKeep.id },
+      data: {
+        is_current: true,
+        is_latest: true,
+        is_latest_approved: Boolean(finalApprovedVersion),
+      },
+    });
+  }
+
+  console.log(`[ArchiveCleanupJob] File "${file.name}": kept ${versionsToKeep.size}/${file.versions.length} final version(s)`);
 }
 
 async function deleteFileFromStorage(
@@ -170,9 +172,4 @@ async function deleteFileFromStorage(
     // Log but don't fail - the file may already be gone
     console.warn(`[ArchiveCleanupJob] Storage delete warning for ${storagePath}:`, error);
   }
-}
-
-async function getMaxFileVersions(): Promise<number> {
-  const settings = await prisma.dataRetentionSettings.findFirst();
-  return settings?.max_file_versions ?? 10;
 }
