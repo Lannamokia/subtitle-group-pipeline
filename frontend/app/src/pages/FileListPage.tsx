@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, getErrorMessage } from "@/lib/api";
-import { cn, formatFileSize } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -35,8 +34,6 @@ import {
   Loader2,
   Filter,
   Link2,
-  Plus,
-  Download,
   Trash2,
   ExternalLink,
 } from "lucide-react";

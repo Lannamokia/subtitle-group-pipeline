@@ -13,7 +13,6 @@ import {
   mockTimelineEvents,
   mockAnnouncements,
 } from "@/lib/mockData";
-import type { TaskStatus } from "@/types";
 import {
   ClipboardList,
   CheckCircle2,
@@ -23,7 +22,6 @@ import {
   Layers,
   Megaphone,
   ArrowRight,
-  Pin,
 } from "lucide-react";
 
 export function DashboardPage() {

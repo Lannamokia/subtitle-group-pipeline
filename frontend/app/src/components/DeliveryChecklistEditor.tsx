@@ -33,7 +33,7 @@ export function DeliveryChecklistEditor({
   onChange,
   readOnly = false,
 }: DeliveryChecklistEditorProps) {
-  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [draggingIndex] = useState<number | null>(null);
 
   const handleAddItem = () => {
     const newItem: DeliveryItem = {

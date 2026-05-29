@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -105,7 +105,7 @@ export function RegistrationSettingsPage() {
     defaultValues: { name: "", roleType: "", description: "" },
   });
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
       const [settingsData, tagsData, appsData] = await Promise.all([
@@ -126,11 +126,11 @@ export function RegistrationSettingsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [form]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   const handleSaveSettings = async (data: SettingsFormData) => {
     setIsSaving(true);

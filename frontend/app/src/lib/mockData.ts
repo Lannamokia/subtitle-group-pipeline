@@ -394,7 +394,7 @@ export const mockTemplates: ProjectTemplate[] = [
       { role: "encoding", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
       { role: "release", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
     ],
-    uploadPolicy: { allowedTypes: {} as any },
+    uploadPolicy: { allowedTypes: {} as Record<string, boolean> },
     notificationPolicy: { events: {} },
     assPolicy: { mergeRule: "default", dedupThreshold: 0.1 },
     productConfig: {
@@ -427,7 +427,7 @@ export const mockTemplates: ProjectTemplate[] = [
       { role: "encoding", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
       { role: "release", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
     ],
-    uploadPolicy: { allowedTypes: {} as any },
+    uploadPolicy: { allowedTypes: {} as Record<string, boolean> },
     notificationPolicy: { events: {} },
     assPolicy: { mergeRule: "default", dedupThreshold: 0.1 },
     productConfig: {

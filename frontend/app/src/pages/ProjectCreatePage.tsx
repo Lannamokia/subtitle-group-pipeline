@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -24,7 +24,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import type { ProjectTemplate, TaskRole, StorageBackend, User } from "@/types";
@@ -37,7 +36,6 @@ import {
   Film,
   FolderOpen,
   Loader2,
-  UserPlus,
   X,
   HardDrive,
   Users,
@@ -89,7 +87,6 @@ export function ProjectCreatePage() {
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [storageBackends, setStorageBackends] = useState<StorageBackend[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null);
   const [tagInput, setTagInput] = useState("");
@@ -141,7 +138,7 @@ export function ProjectCreatePage() {
       try {
         const res = await api.get<User[]>("/users");
         setUsers(res.data);
-      } catch (error) {
+      } catch {
         // Users endpoint may not exist, use mock
         setUsers([]);
       }
@@ -560,36 +557,6 @@ export function ProjectCreatePage() {
                           <div className="space-y-2">
                             {Array.from({ length: roleConfig.slotCount }, (_, i) => {
                               const member = roleMembers[i];
-                              const memberIndex = form
-                                .watch("members")
-                                .findIndex(
-                                  (m, idx) =>
-                                    m.role === roleConfig.role &&
-                                    idx ===
-                                      form
-                                        .watch("members")
-                                        .filter((m) => m.role === roleConfig.role)
-                                        .indexOf(member)
-                                );
-                              const actualIndex = form
-                                .watch("members")
-                                .findIndex(
-                                  (m, idx) =>
-                                    idx >=
-                                      form
-                                        .watch("members")
-                                        .findIndex((m) => m.role === roleConfig.role) &&
-                                    m.role === roleConfig.role &&
-                                    form
-                                      .watch("members")
-                                      .slice(
-                                        0,
-                                        idx + 1
-                                      )
-                                      .filter((m) => m.role === roleConfig.role)
-                                      .length ===
-                                      i + 1
-                                );
 
                               return (
                                 <div key={i} className="flex items-center gap-2">

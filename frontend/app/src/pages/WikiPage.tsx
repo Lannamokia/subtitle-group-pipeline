@@ -7,15 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import { useAuthStore } from "@/stores/authStore";
-import { mockWiki, mockUsers } from "@/lib/mockData";
+import { mockWiki } from "@/lib/mockData";
 import type { WikiBlock, WikiBlockType, WikiStatus } from "@/types";
 import {
   Edit3,
@@ -390,7 +383,6 @@ function DiffView({
 
 export function WikiPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const user = useAuthStore((s) => s.user);
   const isSupervisor = useAuthStore((s) => s.isSupervisor)();
 
   const [blocks, setBlocks] = useState<WikiBlock[]>(mockWiki.blocks);

@@ -3,12 +3,10 @@ import { useNavigate } from "react-router";
 import { cn, formatRelativeTime, getRoleColor, getRoleLabel, getTaskStatusColor, TASK_STATUS_MAP } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { UserAvatar } from "@/components/UserAvatar";
-import { mockTasks, mockUsers, mockProjects } from "@/lib/mockData";
+import { mockTasks, mockProjects } from "@/lib/mockData";
 import type { Task, TaskStatus, User } from "@/types";
 import {
   LayoutDashboard,
@@ -19,7 +17,6 @@ import {
   CheckCircle2,
   ClipboardList,
   BarChart3,
-  ArrowRight,
 } from "lucide-react";
 
 type WorkloadView = "personal" | "supervisor" | "admin";
@@ -241,7 +238,7 @@ function SupervisorView({ navigate }: { navigate: ReturnType<typeof useNavigate>
 
 /* ---------- Admin View ---------- */
 
-function AdminView({ navigate }: { navigate: ReturnType<typeof useNavigate> }) {
+function AdminView() {
   // All tasks across all projects
   const allTasks = mockTasks;
 

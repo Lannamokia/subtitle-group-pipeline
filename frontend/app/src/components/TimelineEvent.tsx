@@ -246,7 +246,7 @@ export function GlobalTimelinePage() {
       projectName: i % 2 === 0 ? "夏日重现" : "进击的巨人 最终季",
       description: `示例动态事件 ${i + 1}`,
       user: mockUsers[i % mockUsers.length] as User,
-      createdAt: new Date(Date.now() - (i + 1) * 3600000).toISOString(),
+      createdAt: new Date(new Date().getTime() - (i + 1) * 3600000).toISOString(),
     })),
   ]);
 

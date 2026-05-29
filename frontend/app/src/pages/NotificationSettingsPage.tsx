@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -11,10 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   Form,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormControl,
 } from "@/components/ui/form";
 import { useNotificationStore } from "@/stores/notificationStore";
 import { mockNotifications } from "@/lib/mockData";
@@ -105,6 +101,18 @@ export function NotificationSettingsPage() {
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  const watchedSubscribedTypes = useWatch({
+    control: form.control,
+    name: "subscribedTypes",
+    defaultValue: [],
+  }) as string[];
+
+  const escalationEnabled = useWatch({
+    control: form.control,
+    name: "escalationEnabled",
+    defaultValue: false,
+  }) as boolean;
 
   const toggleType = (type: NotificationType) => {
     const current = form.getValues("subscribedTypes");
@@ -234,7 +242,7 @@ export function NotificationSettingsPage() {
                   />
                 </div>
 
-                {form.watch("escalationEnabled") && (
+                {escalationEnabled && (
                   <div className="bg-gray-50 rounded-lg p-4 space-y-3">
                     <p className="text-sm text-gray-600">升级路径：</p>
                     <div className="flex items-center gap-3">
@@ -290,7 +298,7 @@ export function NotificationSettingsPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {(["task", "review", "file", "mention", "system"] as NotificationType[]).map(
                     (type) => {
-                      const isSubscribed = form.watch("subscribedTypes").includes(type);
+                      const isSubscribed = watchedSubscribedTypes.includes(type);
                       return (
                         <button
                           key={type}

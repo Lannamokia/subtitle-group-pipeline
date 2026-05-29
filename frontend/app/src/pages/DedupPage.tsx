@@ -20,11 +20,8 @@ import {
   Loader2,
   GitMerge,
   Check,
-  X,
   Clock,
   AlertTriangle,
-  User,
-  FileText,
   Eye,
   ChevronRight,
 } from "lucide-react";

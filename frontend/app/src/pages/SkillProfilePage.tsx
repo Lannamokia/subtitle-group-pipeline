@@ -106,7 +106,7 @@ export function SkillProfilePage() {
     if (isAdmin()) {
       fetchApplications();
     }
-  }, []);
+  }, [isAdmin]);
 
   const handleApply = async (data: ApplyFormData) => {
     if (!selectedTag) return;

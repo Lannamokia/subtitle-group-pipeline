@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { cn, formatDate, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,11 +43,8 @@ import {
   Pencil,
   Trash2,
   Pin,
-  PinOff,
   Globe,
   Calendar,
-  X,
-  Check,
 } from "lucide-react";
 
 const announcementSchema = z.object({
@@ -135,7 +132,6 @@ export function AnnouncementAdminPage() {
     );
   };
 
-  const pinnedAnnouncements = announcements.filter(() => false); // Would filter by pinned field
   const regularAnnouncements = announcements;
 
   return (

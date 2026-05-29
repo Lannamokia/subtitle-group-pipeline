@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { mockUsers, mockFiles } from "@/lib/mockData";
+import { mockUsers } from "@/lib/mockData";
 import type { TaskComment, User } from "@/types";
 import {
   Send,
@@ -76,7 +76,7 @@ interface TaskCommentPanelProps {
   projectId: string;
 }
 
-export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
+export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
   const currentUser = useAuthStore((s) => s.user);
   const [comments, setComments] = useState<TaskComment[]>(mockComments);
   const [newComment, setNewComment] = useState("");

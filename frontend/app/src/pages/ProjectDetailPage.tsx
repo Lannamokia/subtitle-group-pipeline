@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router";
 import { api, getErrorMessage } from "@/lib/api";
-import { cn, getRoleLabel, getRoleColor, formatFileSize, formatRelativeTime } from "@/lib/utils";
+import { cn, getRoleLabel, getRoleColor, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -62,7 +62,6 @@ import {
   Loader2,
   Plus,
   Upload,
-  Download,
   CheckCircle,
   Play,
   UserCheck,
@@ -77,10 +76,8 @@ import {
   Send,
   Edit3,
   Table,
-  GripVertical,
   Trash2,
   FileText,
-  Eye,
 } from "lucide-react";
 
 type ProjectTab = "tasks" | "files" | "wiki" | "members" | "settings" | "activity" | "dedup" | "announcements";
@@ -111,7 +108,6 @@ export function ProjectDetailPage() {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [wiki, setWiki] = useState<WikiDocument | null>(null);
   const [conflicts, setConflicts] = useState<SubtitleConflict[]>([]);
-  const [, setProjectAnnouncements] = useState<import("@/types").Announcement[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchProject = useCallback(async () => {
@@ -130,7 +126,7 @@ export function ProjectDetailPage() {
       setFiles(filesRes.data);
       setEvents(eventsRes.data);
       setWiki(wikiRes.data);
-    } catch (error) {
+    } catch {
       toast.error("获取项目信息失败: " + getErrorMessage(error));
     } finally {
       setLoading(false);
@@ -142,7 +138,7 @@ export function ProjectDetailPage() {
     try {
       const res = await api.get<SubtitleConflict[]>(`/projects/${projectId}/conflicts`);
       setConflicts(res.data);
-    } catch (error) {
+    } catch {
       // Conflicts endpoint may not exist
       setConflicts([]);
     }
@@ -247,7 +243,7 @@ export function ProjectDetailPage() {
         </TabsList>
 
         <TabsContent value="tasks" className="mt-6">
-          <TasksTab tasks={tasks} projectId={projectId!} onUpdate={fetchProject} />
+          <TasksTab tasks={tasks} onUpdate={fetchProject} />
         </TabsContent>
 
         <TabsContent value="files" className="mt-6">
@@ -313,7 +309,7 @@ function ProjectTabTrigger({
 
 /* ---------- Tasks Tab ---------- */
 
-function TasksTab({ tasks, projectId, onUpdate }: { tasks: Task[]; projectId: string; onUpdate: () => void }) {
+function TasksTab({ tasks, onUpdate }: { tasks: Task[]; onUpdate: () => void }) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskFilter, setTaskFilter] = useState("");
   const [updating, setUpdating] = useState(false);
@@ -328,7 +324,7 @@ function TasksTab({ tasks, projectId, onUpdate }: { tasks: Task[]; projectId: st
       await api.post(`/tasks/${taskId}/${action}`);
       toast.success("操作成功");
       onUpdate();
-    } catch (error) {
+    } catch {
       toast.error("操作失败: " + getErrorMessage(error));
     } finally {
       setUpdating(false);
@@ -539,7 +535,7 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
       toast.success("文件上传成功");
       setUploadOpen(false);
       onUpdate();
-    } catch (error) {
+    } catch {
       toast.error("上传失败: " + getErrorMessage(error));
     } finally {
       setUploading(false);
@@ -550,7 +546,7 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
     try {
       const res = await api.post(`/files/${fileId}/download`);
       window.open(res.data.url, "_blank");
-    } catch (error) {
+    } catch {
       toast.error("获取下载链接失败: " + getErrorMessage(error));
     }
   };
@@ -702,7 +698,7 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
       setIsEditing(false);
       setStatus("approved");
       toast.success("Wiki已保存");
-    } catch (error) {
+    } catch {
       toast.error("保存失败: " + getErrorMessage(error));
     } finally {
       setSaving(false);
@@ -962,7 +958,7 @@ function ProjectAnnouncementsTab({ projectId }: { projectId: string }) {
       setNewContent("");
       setIsCreating(false);
       toast.success("公告已发布");
-    } catch (error) {
+    } catch {
       toast.error("发布失败: " + getErrorMessage(error));
     } finally {
       setSubmitting(false);
@@ -1048,20 +1044,18 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
   const [inviteOpen, setInviteOpen] = useState(false);
   const [joinRequests, setJoinRequests] = useState<{ id: string; user: User; role: TaskRole; message?: string }[]>([]);
 
-  const fetchJoinRequests = useCallback(async () => {
-    try {
-      const res = await api.get(`/projects/${project.id}/join-requests`);
-      setJoinRequests(res.data);
-    } catch {
-      setJoinRequests([]);
-    }
-  }, [project.id]);
-
   useEffect(() => {
-    if (isSupervisor) {
-      fetchJoinRequests();
-    }
-  }, [isSupervisor, fetchJoinRequests]);
+    if (!isSupervisor) return;
+    const fetchJoinRequests = async () => {
+      try {
+        const res = await api.get(`/projects/${project.id}/join-requests`);
+        setJoinRequests(res.data);
+      } catch {
+        setJoinRequests([]);
+      }
+    };
+    fetchJoinRequests();
+  }, [isSupervisor, project.id]);
 
   const handleApproveRequest = async (requestId: string) => {
     try {
@@ -1069,7 +1063,7 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
       toast.success("已批准加入请求");
       setJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
       onUpdate();
-    } catch (error) {
+    } catch {
       toast.error("操作失败: " + getErrorMessage(error));
     }
   };
@@ -1079,7 +1073,7 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
       await api.post(`/projects/${project.id}/join-requests/${requestId}/reject`);
       toast.success("已拒绝加入请求");
       setJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
-    } catch (error) {
+    } catch {
       toast.error("操作失败: " + getErrorMessage(error));
     }
   };
@@ -1209,7 +1203,7 @@ function DedupTab({ conflicts, projectId, isSupervisor }: { conflicts: SubtitleC
       await api.post(`/projects/${projectId}/conflicts/${conflictId}/resolve`, resolution);
       toast.success("冲突已解决");
       setSelectedConflict(null);
-    } catch (error) {
+    } catch {
       toast.error("解决失败: " + getErrorMessage(error));
     } finally {
       setResolving(false);
@@ -1239,7 +1233,7 @@ function DedupTab({ conflicts, projectId, isSupervisor }: { conflicts: SubtitleC
         </CardHeader>
         <CardContent className="p-4">
           <div className="h-16 bg-gray-50 rounded-lg relative overflow-hidden">
-            {conflicts.map((conflict, i) => (
+            {conflicts.map((conflict) => (
               <div
                 key={conflict.id}
                 className={cn(
@@ -1462,7 +1456,7 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
       await api.put(`/projects/${project.id}`, { name, tags });
       toast.success("设置已保存");
       onUpdate();
-    } catch (error) {
+    } catch {
       toast.error("保存失败: " + getErrorMessage(error));
     } finally {
       setSaving(false);
@@ -1475,7 +1469,7 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
       await api.post(`/projects/${project.id}/archive`);
       toast.success("项目已归档");
       onUpdate();
-    } catch (error) {
+    } catch {
       toast.error("归档失败: " + getErrorMessage(error));
     } finally {
       setArchiving(false);
