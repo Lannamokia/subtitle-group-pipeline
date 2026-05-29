@@ -356,7 +356,13 @@ model Project {
   template_id       String?
   storage_backend_id String?
   current_season    Int           @default(1)
+  workflow_config   String?       // JSON snapshot of template roles and workflow defaults
+  upload_policy_config String?    // JSON snapshot of template upload policy
+  notification_policy String?     // JSON snapshot of template notification policy
+  ass_policy        String?       // JSON snapshot of template ASS processing policy
+  product_config    String?       // JSON snapshot of template product/output configuration
   delivery_checklist String?       // JSON: array of checklist items, inherited from template, editable at project level
+  release_task_type String?       // snapshot of template release task type
   is_archived       Boolean       @default(false)
   archived_at       DateTime?
   deleted_at        DateTime?

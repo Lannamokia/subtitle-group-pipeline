@@ -64,6 +64,75 @@ async function getDownstreamTasks(taskId: string) {
   return dependents.map((d) => d.task);
 }
 
+function parseMetadata(metadata: string | null | undefined): Record<string, unknown> {
+  if (!metadata) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(metadata);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function discardReleaseArtifacts(
+  task: { id: string; project_id: string },
+  actorId?: string
+): Promise<{ fileIds: string[]; linkCount: number }> {
+  const projectFiles = await prisma.fileEntity.findMany({
+    where: {
+      project_id: task.project_id,
+      is_deleted: false,
+    },
+    select: {
+      id: true,
+      metadata: true,
+    },
+  });
+
+  const fileIds = projectFiles
+    .filter((file) => {
+      const metadata = parseMetadata(file.metadata);
+      return metadata.task_id === task.id || metadata.taskId === task.id;
+    })
+    .map((file) => file.id);
+
+  let linkCount = 0;
+  if (fileIds.length > 0) {
+    const linkDelete = await prisma.linkHistory.deleteMany({
+      where: {
+        project_id: task.project_id,
+        file_id: { in: fileIds },
+      },
+    });
+    linkCount = linkDelete.count;
+
+    await prisma.fileEntity.updateMany({
+      where: { id: { in: fileIds } },
+      data: {
+        is_deleted: true,
+        deleted_at: new Date(),
+        deleted_by: actorId,
+      },
+    });
+  }
+
+  await auditService.log({
+    user_id: actorId,
+    project_id: task.project_id,
+    action: "task.release_artifacts_discard",
+    resource_type: "task",
+    resource_id: task.id,
+    new_value: { file_ids: fileIds, link_count: linkCount },
+  });
+
+  return { fileIds, linkCount };
+}
+
 /**
  * Cascade reset downstream completed/submitted tasks when a task is reset
  */
@@ -79,16 +148,15 @@ async function cascadeResetDownstream(
       downTask.status === "submitted" ||
       downTask.status === "review_approved"
     ) {
-      // For release role, discard uploaded artifacts
-      if (downTask.role === "release") {
-        // Mark associated file versions as non-current
-        // (In a real system, you might delete or archive them)
+      const isReleaseReset = downTask.role === "release";
+      if (isReleaseReset) {
+        await discardReleaseArtifacts(downTask, actorId);
       }
 
       await prisma.task.update({
         where: { id: downTask.id },
         data: {
-          status: "in_progress",
+          status: isReleaseReset ? "pending_publish" : "in_progress",
           completed_at: null,
           submitted_at: null,
         },
@@ -1164,8 +1232,7 @@ export async function resetTask(
 
   // For release role, discard uploaded artifacts
   if (task.role === "release") {
-    // In a real system, you might delete or archive file versions
-    // Here we just note it in the audit log
+    await discardReleaseArtifacts(task, actorId);
   }
 
   const updated = await prisma.task.update({

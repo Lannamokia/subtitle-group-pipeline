@@ -25,6 +25,45 @@ const ROLE_PIPELINE: TaskRole[] = [
   "release",
 ];
 
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function numberFromPolicy(policy: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = policy[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function booleanFromPolicy(policy: Record<string, unknown>, ...keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = policy[key];
+    if (typeof value === "boolean") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function stringifyPolicyList(policy: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = policy[key];
+    if (Array.isArray(value)) {
+      return JSON.stringify(value);
+    }
+  }
+  return null;
+}
+
 export async function createProject(
   ownerId: string,
   data: CreateProjectInput
@@ -92,17 +131,14 @@ export async function createProjectFromTemplate(
     throw new AppError("Template not found", "NOT_FOUND", 404);
   }
 
-  // Validate storage backend if provided
-  if (data.storage_backend_id) {
-    const backend = await prisma.storageBackend.findUnique({
-      where: { id: data.storage_backend_id },
-    });
-    if (!backend) {
-      throw new AppError("Storage backend not found", "NOT_FOUND", 404);
-    }
-    if (!backend.is_active) {
-      throw new AppError("Storage backend is not active", "BAD_REQUEST", 400);
-    }
+  const backend = await prisma.storageBackend.findUnique({
+    where: { id: data.storage_backend_id },
+  });
+  if (!backend) {
+    throw new AppError("Storage backend not found", "NOT_FOUND", 404);
+  }
+  if (!backend.is_active) {
+    throw new AppError("Storage backend is not active", "BAD_REQUEST", 400);
   }
 
   // Parse template roles
@@ -128,7 +164,13 @@ export async function createProjectFromTemplate(
       owner_id: ownerId,
       template_id: template.id,
       storage_backend_id: data.storage_backend_id,
+      workflow_config: template.roles,
+      upload_policy_config: template.upload_policy,
+      notification_policy: template.notification_policy,
+      ass_policy: template.ass_policy,
+      product_config: template.product_config,
       delivery_checklist: template.delivery_checklist,
+      release_task_type: template.release_task_type,
       status: "draft",
     },
     include: {
@@ -150,6 +192,17 @@ export async function createProjectFromTemplate(
       user_id: ownerId,
       role: "supervisor",
       is_lead: true,
+    },
+  });
+
+  const uploadPolicy = parseJsonObject(template.upload_policy);
+  await prisma.uploadPolicy.create({
+    data: {
+      project_id: project.id,
+      allowed_types: template.upload_policy,
+      max_size_bytes: numberFromPolicy(uploadPolicy, "max_size_bytes", "maxSize") ?? 104857600,
+      require_approval: booleanFromPolicy(uploadPolicy, "require_approval", "requireApproval") ?? false,
+      extension_whitelist: stringifyPolicyList(uploadPolicy, "extension_whitelist", "extensionWhitelist", "extensions"),
     },
   });
 
@@ -335,8 +388,12 @@ export async function getProjectById(projectId: string) {
           id: true,
           name: true,
           roles: true,
+          upload_policy: true,
           product_config: true,
+          notification_policy: true,
+          ass_policy: true,
           delivery_checklist: true,
+          release_task_type: true,
         },
       },
       storage_backend: {

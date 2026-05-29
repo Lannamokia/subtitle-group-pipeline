@@ -7,6 +7,7 @@ import {
   createTestUnit,
   createTestTask,
   createTestFile,
+  createTestStorageBackend,
   cleanDatabase,
 } from "./setup";
 import { post, get, put, del, expectSuccess, expectError } from "./helpers";
@@ -35,6 +36,7 @@ describe("Project & Workflow Tests", () => {
       const template = await createTestTemplate({
         delivery_checklist: checklist,
       });
+      const backend = await createTestStorageBackend();
 
       const res = await post(
         app,
@@ -42,6 +44,7 @@ describe("Project & Workflow Tests", () => {
         {
           name: "Templated Project",
           template_id: template.id,
+          storage_backend_id: backend.id,
           season_count: 1,
           units_per_season: 2,
         },
@@ -56,8 +59,8 @@ describe("Project & Workflow Tests", () => {
       });
 
       expect(project!.template_id).toBe(template.id);
-      const templateChecklist = JSON.parse(project!.template!.delivery_checklist);
-      expect(templateChecklist).toEqual(checklist);
+      expect(project!.storage_backend_id).toBe(backend.id);
+      expect(JSON.parse(project!.delivery_checklist!)).toEqual(checklist);
     });
 
     it("should inherit product config from template", async () => {
@@ -70,6 +73,7 @@ describe("Project & Workflow Tests", () => {
       const template = await createTestTemplate({
         product_config: productConfig,
       });
+      const backend = await createTestStorageBackend();
 
       const res = await post(
         app,
@@ -77,6 +81,7 @@ describe("Project & Workflow Tests", () => {
         {
           name: "Product Config Project",
           template_id: template.id,
+          storage_backend_id: backend.id,
           season_count: 1,
           units_per_season: 1,
         },
@@ -87,12 +92,98 @@ describe("Project & Workflow Tests", () => {
 
       const project = await prisma.project.findUnique({
         where: { id: res.body.data.id },
-        include: { template: true },
       });
 
-      const config = JSON.parse(project!.template!.product_config);
+      const config = JSON.parse(project!.product_config!);
       expect(config.resolutions).toEqual(["1080p", "720p"]);
       expect(config.codecs).toEqual(["h264", "hevc"]);
+    });
+
+    it("should require an active storage backend when creating from a template", async () => {
+      const { token } = await createTestUser();
+      const template = await createTestTemplate();
+
+      const missingRes = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Missing Backend Project",
+          template_id: template.id,
+          season_count: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+      expectError(missingRes, 400, "VALIDATION_ERROR");
+
+      const inactiveBackend = await createTestStorageBackend({ is_active: false });
+      const inactiveRes = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Inactive Backend Project",
+          template_id: template.id,
+          storage_backend_id: inactiveBackend.id,
+          season_count: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+      expectError(inactiveRes, 400, "BAD_REQUEST");
+    });
+
+    it("should snapshot template defaults so later template edits do not affect the project", async () => {
+      const { token } = await createTestUser();
+      const backend = await createTestStorageBackend();
+      const template = await createTestTemplate({
+        upload_policy: {
+          roles: {
+            translation: { fileTypes: ["subtitle"], extensions: [".ass"] },
+          },
+          maxSize: 2048,
+          requireApproval: true,
+          extensions: [".ass"],
+        },
+        notification_policy: { channels: ["in_site", "email"], events: ["task_assigned"] },
+        ass_policy: { mergeRule: "strict", dedupThreshold: 0.2 },
+        product_config: { resolutions: ["1080p"], codecs: ["hevc"], containers: ["mkv"] },
+        release_task_type: "torrent+cloud_drive",
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Snapshot Project",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          season_count: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+
+      expectSuccess(res, 201);
+
+      await prisma.projectTemplate.update({
+        where: { id: template.id },
+        data: {
+          product_config: JSON.stringify({ resolutions: ["480p"], codecs: ["h264"], containers: ["mp4"] }),
+          release_task_type: "other",
+        },
+      });
+
+      const project = await prisma.project.findUnique({ where: { id: res.body.data.id } });
+      expect(JSON.parse(project!.product_config!).resolutions).toEqual(["1080p"]);
+      expect(JSON.parse(project!.notification_policy!).channels).toEqual(["in_site", "email"]);
+      expect(JSON.parse(project!.ass_policy!).mergeRule).toBe("strict");
+      expect(project!.release_task_type).toBe("torrent+cloud_drive");
+
+      const policy = await prisma.uploadPolicy.findFirst({ where: { project_id: project!.id } });
+      expect(policy).toBeDefined();
+      expect(policy!.max_size_bytes).toBe(2048);
+      expect(policy!.require_approval).toBe(true);
+      expect(JSON.parse(policy!.extension_whitelist!)).toEqual([".ass"]);
     });
 
     it("should create tasks for each unit based on template roles", async () => {
@@ -105,6 +196,7 @@ describe("Project & Workflow Tests", () => {
           { role: "release", enabled: false, slotCount: 1, assignmentStrategy: "manual" },
         ],
       });
+      const backend = await createTestStorageBackend();
 
       const res = await post(
         app,
@@ -112,6 +204,7 @@ describe("Project & Workflow Tests", () => {
         {
           name: "Multi-Unit Project",
           template_id: template.id,
+          storage_backend_id: backend.id,
           season_count: 1,
           units_per_season: 3,
         },
@@ -150,6 +243,7 @@ describe("Project & Workflow Tests", () => {
           { role: "translation", enabled: true, slotCount: 1, assignmentStrategy: "open_claim" },
         ],
       });
+      const backend = await createTestStorageBackend();
 
       const res = await post(
         app,
@@ -157,6 +251,7 @@ describe("Project & Workflow Tests", () => {
         {
           name: "Dependency Project",
           template_id: template.id,
+          storage_backend_id: backend.id,
           season_count: 1,
           units_per_season: 1,
         },
@@ -833,11 +928,43 @@ describe("Project & Workflow Tests", () => {
         creator_id: owner.id,
       });
 
+      const releaseTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "release",
+        status: "submitted",
+        creator_id: owner.id,
+      });
+
       await prisma.taskDependency.create({
         data: {
           task_id: task2.id,
           depends_on_id: task1.id,
           dependency_type: "finish_to_start",
+        },
+      });
+      await prisma.taskDependency.create({
+        data: {
+          task_id: releaseTask.id,
+          depends_on_id: task2.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const { file: releaseFile } = await createTestFile({
+        project_id: project.id,
+        uploader_id: owner.id,
+        name: "release.torrent",
+        file_type: "other",
+        metadata: JSON.stringify({ task_id: releaseTask.id, role: "release" }),
+      });
+      await prisma.linkHistory.create({
+        data: {
+          project_id: project.id,
+          file_id: releaseFile.id,
+          url: "https://drive.example/release",
+          link_type: "cloud_drive",
+          created_by: owner.id,
         },
       });
 
@@ -855,6 +982,15 @@ describe("Project & Workflow Tests", () => {
       const resetTask = await prisma.task.findUnique({ where: { id: task2.id } });
       expect(resetTask!.status).toBe("in_progress");
       expect(resetTask!.completed_at).toBeNull();
+
+      const resetReleaseTask = await prisma.task.findUnique({ where: { id: releaseTask.id } });
+      expect(resetReleaseTask!.status).toBe("pending_publish");
+      expect(resetReleaseTask!.submitted_at).toBeNull();
+
+      const discardedFile = await prisma.fileEntity.findUnique({ where: { id: releaseFile.id } });
+      expect(discardedFile!.is_deleted).toBe(true);
+      const releaseLinks = await prisma.linkHistory.findMany({ where: { file_id: releaseFile.id } });
+      expect(releaseLinks).toHaveLength(0);
     });
   });
 
@@ -921,6 +1057,14 @@ describe("Project & Workflow Tests", () => {
         creator_id: owner.id,
       });
 
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: worker.id,
+        name: "release.torrent",
+        file_type: "other",
+        metadata: JSON.stringify({ task_id: task.id, role: "release" }),
+      });
+
       // Reset the task
       const resetRes = await post(
         app,
@@ -935,6 +1079,11 @@ describe("Project & Workflow Tests", () => {
       expect(updatedTask!.status).toBe("in_progress");
       expect(updatedTask!.submitted_at).toBeNull();
       expect(updatedTask!.completed_at).toBeNull();
+
+      const discardedFile = await prisma.fileEntity.findUnique({
+        where: { id: file.id },
+      });
+      expect(discardedFile!.is_deleted).toBe(true);
     });
   });
 });

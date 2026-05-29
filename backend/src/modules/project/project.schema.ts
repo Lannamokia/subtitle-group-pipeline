@@ -13,7 +13,7 @@ export const createProjectFromTemplateSchema = z.object({
   name: z.string().min(1, "Project name is required").max(200),
   description: z.string().max(5000).optional().nullable(),
   template_id: z.string().uuid("Template ID is required"),
-  storage_backend_id: z.string().uuid().optional().nullable(),
+  storage_backend_id: z.string().uuid("Storage backend ID is required"),
   season_count: z.number().int().min(1).default(1),
   units_per_season: z.number().int().min(1).default(12),
   episode_length: z.number().int().min(1).optional().nullable(), // in seconds
