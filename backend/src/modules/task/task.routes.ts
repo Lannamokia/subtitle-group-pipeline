@@ -41,7 +41,16 @@ router.delete("/:id", authenticate, validateParams(idParamSchema), controller.de
 
 // State transitions
 router.post("/:id/claim", authenticate, validateParams(idParamSchema), controller.claimTask);
-router.post("/:id/assign", authenticate, validateParams(idParamSchema), validateBody(z.object({ assignee_id: z.string().uuid() })), controller.assignTask);
+router.post(
+  "/:id/assign",
+  authenticate,
+  validateParams(idParamSchema),
+  validateBody(z.object({
+    assignee_id: z.string().uuid(),
+    override_reason: z.string().min(1).max(1000).optional().nullable(),
+  })),
+  controller.assignTask
+);
 router.post("/:id/return", authenticate, validateParams(idParamSchema), controller.returnTask);
 router.post("/:id/start", authenticate, validateParams(idParamSchema), controller.startTask);
 router.post("/:id/submit", authenticate, validateParams(idParamSchema), controller.submitTask);

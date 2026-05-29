@@ -98,8 +98,13 @@ export async function assignTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { assignee_id } = req.body;
-    const result = await taskService.assignTask(getParam(req, "id"), assignee_id, req.user?.id);
+    const { assignee_id, override_reason } = req.body;
+    const result = await taskService.assignTask(
+      getParam(req, "id"),
+      assignee_id,
+      req.user?.id,
+      override_reason
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);

@@ -533,6 +533,128 @@ describe("Project & Workflow Tests", () => {
 
       expectError(res, 400, "VALIDATION_ERROR");
     });
+
+    it("should allow adjacent segments, lock when fully claimed, and unlock after abandon", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: translator, token: translatorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 600 });
+
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: translator.id, role: "translation" },
+      });
+
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      const first = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 0, segment_end: 300 },
+        translatorToken
+      );
+      expectSuccess(first, 201);
+
+      const second = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 300, segment_end: 600 },
+        translatorToken
+      );
+      expectSuccess(second, 201);
+
+      const lockedTask = await prisma.task.findUnique({ where: { id: task.id } });
+      expect(lockedTask!.status).toBe("assigned");
+
+      const lockedClaim = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 0, segment_end: 100 },
+        translatorToken
+      );
+      expectError(lockedClaim, 400, "BAD_REQUEST");
+
+      const abandonRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/abandon-segment/${first.body.data.id}`,
+        {},
+        translatorToken
+      );
+      expectSuccess(abandonRes, 200);
+
+      const reopenedTask = await prisma.task.findUnique({ where: { id: task.id } });
+      expect(reopenedTask!.status).toBe("claimable");
+    });
+
+    it("should enforce project max segment length and granted translation tags", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: translator, token: translatorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 600 });
+      const tag = await prisma.roleTag.create({
+        data: { name: "translation", description: "Translation eligibility" },
+      });
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            { role: "translation", maxSegmentLength: 120 },
+          ]),
+        },
+      });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: translator.id, role: "translation" },
+      });
+
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      const noTagRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 0, segment_end: 60 },
+        translatorToken
+      );
+      expectError(noTagRes, 403, "FORBIDDEN");
+
+      await prisma.tagApplication.create({
+        data: {
+          user_id: translator.id,
+          tag_id: tag.id,
+          approved: true,
+          approved_by: owner.id,
+          approved_at: new Date(),
+        },
+      });
+
+      const tooLongRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 0, segment_end: 180 },
+        translatorToken
+      );
+      expectError(tooLongRes, 400, "BAD_REQUEST");
+
+      const allowedRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 0, segment_end: 120 },
+        translatorToken
+      );
+      expectSuccess(allowedRes, 201);
+      expect(allowedRes.body.data.unit_id).toBe(unit.id);
+    });
   });
 
   describe("Task Cancellation and Downstream Freezing", () => {
@@ -871,6 +993,84 @@ describe("Project & Workflow Tests", () => {
       const downstreamTask = await prisma.task.findUnique({ where: { id: task2.id } });
       expect(downstreamTask!.status).toBe("claimable");
     });
+
+    it("should complete source and timing submissions without review and unlock downstream", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: sourceUser, token: sourceToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const sourceTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "in_progress",
+        assignee_id: sourceUser.id,
+        creator_id: owner.id,
+      });
+      const timingTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "pending_publish",
+        creator_id: owner.id,
+      });
+      await prisma.taskDependency.create({
+        data: {
+          task_id: timingTask.id,
+          depends_on_id: sourceTask.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const submitRes = await post(
+        app,
+        `/api/v1/tasks/${sourceTask.id}/submit`,
+        {},
+        sourceToken
+      );
+      expectSuccess(submitRes, 200);
+
+      const completedSource = await prisma.task.findUnique({ where: { id: sourceTask.id } });
+      const unlockedTiming = await prisma.task.findUnique({ where: { id: timingTask.id } });
+      expect(completedSource!.status).toBe("completed");
+      expect(completedSource!.completed_at).not.toBeNull();
+      expect(unlockedTiming!.status).toBe("claimable");
+
+      const reviews = await prisma.review.findMany({ where: { task_id: sourceTask.id } });
+      expect(reviews).toHaveLength(0);
+    });
+
+    it.each(["translation", "post_production", "encoding", "release"] as const)(
+      "should keep %s submissions waiting for supervisor approval",
+      async (role) => {
+        const { user: owner } = await createTestUser();
+        const { user: worker, token: workerToken } = await createTestUser();
+        const project = await createTestProject({ owner_id: owner.id });
+        const unit = await createTestUnit({ project_id: project.id });
+
+        const task = await createTestTask({
+          project_id: project.id,
+          unit_id: unit.id,
+          role,
+          status: "in_progress",
+          assignee_id: worker.id,
+          creator_id: owner.id,
+        });
+
+        const submitRes = await post(
+          app,
+          `/api/v1/tasks/${task.id}/submit`,
+          {},
+          workerToken
+        );
+        expectSuccess(submitRes, 200);
+
+        const submittedTask = await prisma.task.findUnique({ where: { id: task.id } });
+        expect(submittedTask!.status).toBe("submitted");
+        expect(submittedTask!.completed_at).toBeNull();
+      }
+    );
   });
 
   describe("Supervisory Overrides", () => {
@@ -902,6 +1102,102 @@ describe("Project & Workflow Tests", () => {
 
       expectSuccess(assignRes, 200);
       expect(assignRes.body.data.assignee_id).toBe(worker.id);
+    });
+
+    it("should require an override reason when supervisor assigns before dependencies are met", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: owner.id, role: "supervisor", is_lead: true },
+      });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "in_progress",
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const assignRes = await post(
+        app,
+        `/api/v1/tasks/${downstream.id}/assign`,
+        { assignee_id: worker.id },
+        ownerToken
+      );
+
+      expectError(assignRes, 400, "VALIDATION_ERROR");
+    });
+
+    it("should audit supervisor dependency override assignments with a reason", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: owner.id, role: "supervisor", is_lead: true },
+      });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "in_progress",
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const assignRes = await post(
+        app,
+        `/api/v1/tasks/${downstream.id}/assign`,
+        {
+          assignee_id: worker.id,
+          override_reason: "Source will be delivered out-of-band",
+        },
+        ownerToken
+      );
+
+      expectSuccess(assignRes, 200);
+
+      const auditLog = await prisma.auditLog.findFirst({
+        where: {
+          action: "task.override_assign",
+          resource_id: downstream.id,
+        },
+      });
+      expect(auditLog).toBeDefined();
+      expect(auditLog!.new_value).toContain("Source will be delivered out-of-band");
     });
   });
 

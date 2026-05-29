@@ -79,6 +79,138 @@ function parseMetadata(metadata: string | null | undefined): Record<string, unkn
   }
 }
 
+function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseJsonArray(value: string | null | undefined): unknown[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function numberFromRecord(record: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+async function canSupervisorOverride(projectId: string, actorId?: string): Promise<boolean> {
+  if (!actorId) {
+    return false;
+  }
+
+  const [actor, project, membership] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: actorId },
+      select: { role: true },
+    }),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { owner_id: true },
+    }),
+    prisma.projectMember.findUnique({
+      where: {
+        project_id_user_id: {
+          project_id: projectId,
+          user_id: actorId,
+        },
+      },
+      select: { role: true, is_lead: true },
+    }),
+  ]);
+
+  return Boolean(
+    actor?.role === "super_admin" ||
+    actor?.role === "group_admin" ||
+    actor?.role === "supervisor" ||
+    project?.owner_id === actorId ||
+    membership?.role === "supervisor" ||
+    membership?.is_lead
+  );
+}
+
+async function getTaskRoleMaxSegmentLength(
+  projectId: string,
+  role: TaskRole
+): Promise<number | undefined> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      workflow_config: true,
+      template: { select: { roles: true } },
+    },
+  });
+
+  const roleEntries = [
+    ...parseJsonArray(project?.workflow_config),
+    ...parseJsonArray(project?.template?.roles),
+  ];
+
+  for (const entry of roleEntries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (record.role === role) {
+      return numberFromRecord(record, "maxSegmentLength", "max_segment_length");
+    }
+  }
+
+  const configObject = parseJsonObject(project?.workflow_config);
+  const roleConfig = configObject[role];
+  if (roleConfig && typeof roleConfig === "object" && !Array.isArray(roleConfig)) {
+    return numberFromRecord(roleConfig as Record<string, unknown>, "maxSegmentLength", "max_segment_length");
+  }
+
+  return undefined;
+}
+
+async function hasRequiredRoleTag(userId: string, role: TaskRole): Promise<boolean> {
+  const tag = await prisma.roleTag.findFirst({
+    where: {
+      name: { equals: role },
+    },
+    select: { id: true },
+  });
+
+  if (!tag) {
+    return true;
+  }
+
+  const approved = await prisma.tagApplication.findFirst({
+    where: {
+      user_id: userId,
+      tag_id: tag.id,
+      approved: true,
+    },
+  });
+
+  return Boolean(approved);
+}
+
 async function getWorkflowReviewerIds(projectId: string): Promise<string[]> {
   const [project, supervisors] = await Promise.all([
     prisma.project.findUnique({
@@ -693,6 +825,14 @@ export async function claimTask(
     );
   }
 
+  if (membership?.role !== "supervisor" && !(await hasRequiredRoleTag(userId, task.role))) {
+    throw new AppError(
+      `You need a granted ${task.role} role tag to claim this task`,
+      "FORBIDDEN",
+      403
+    );
+  }
+
   const updated = await prisma.task.update({
     where: { id: taskId },
     data: {
@@ -734,7 +874,8 @@ export async function claimTask(
 export async function assignTask(
   taskId: string,
   assigneeId: string,
-  actorId?: string
+  actorId?: string,
+  overrideReason?: string | null
 ) {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
@@ -766,11 +907,22 @@ export async function assignTask(
   // Check dependencies
   const depsMet = await checkDependenciesMet(taskId);
   if (!depsMet) {
-    throw new AppError(
-      "Cannot assign task: dependencies not met",
-      "DEPENDENCY_NOT_MET",
-      400
-    );
+    const canOverride = await canSupervisorOverride(task.project_id, actorId);
+    if (!canOverride) {
+      throw new AppError(
+        "Cannot assign task: dependencies not met",
+        "DEPENDENCY_NOT_MET",
+        400
+      );
+    }
+
+    if (!overrideReason || !overrideReason.trim()) {
+      throw new AppError(
+        "Override reason is required when assigning before dependencies are complete",
+        "VALIDATION_ERROR",
+        400
+      );
+    }
   }
 
   const previousAssigneeId = task.assignee_id;
@@ -824,10 +976,11 @@ export async function assignTask(
 
   await auditService.log({
     user_id: actorId,
-    action: "task.assign",
+    action: depsMet ? "task.assign" : "task.override_assign",
     resource_type: "task",
     resource_id: taskId,
-    new_value: updated,
+    old_value: task,
+    new_value: depsMet ? updated : { ...updated, override_reason: overrideReason },
   });
 
   return updated;
@@ -1002,24 +1155,28 @@ export async function submitTask(
     throw new AppError("Only the assigned member can submit this task", "FORBIDDEN", 403);
   }
 
+  const requiresReview = REVIEW_REQUIRED_ROLES.includes(task.role);
   const updated = await prisma.task.update({
     where: { id: taskId },
     data: {
-      status: "submitted",
-      submitted_at: new Date(),
+      status: requiresReview ? "submitted" : "completed",
+      submitted_at: requiresReview ? new Date() : null,
+      completed_at: requiresReview ? null : new Date(),
     },
   });
 
   await timelineService.createTimelineEvent({
     project_id: task.project_id,
-    event_type: TimelineEventType.task_submitted,
-    title: "Task submitted for review",
-    description: `Task "${task.title}" was submitted for review`,
+    event_type: requiresReview ? TimelineEventType.task_submitted : TimelineEventType.task_completed,
+    title: requiresReview ? "Task submitted for review" : "Task completed",
+    description: requiresReview
+      ? `Task "${task.title}" was submitted for review`
+      : `Task "${task.title}" was completed`,
     actor_id: userId,
     metadata: { task_id: taskId },
   });
 
-  if (REVIEW_REQUIRED_ROLES.includes(task.role)) {
+  if (requiresReview) {
     const reviewerIds = (await getWorkflowReviewerIds(task.project_id))
       .filter((reviewerId) => reviewerId !== userId);
     const projectName = await getProjectDisplayName(task.project_id);
@@ -1043,6 +1200,18 @@ export async function submitTask(
         projectName,
         extra: { review_id: review.id },
       });
+    }
+  } else {
+    const downstream = await getDownstreamTasks(taskId);
+    for (const downTask of downstream) {
+      const downDepsMet = await checkDependenciesMet(downTask.id);
+      if (downDepsMet && downTask.status === "pending_publish") {
+        await prisma.task.update({
+          where: { id: downTask.id },
+          data: { status: "claimable" },
+        });
+        await notifyUnlockedDownstreamTask(downTask, userId);
+      }
     }
   }
 
@@ -1450,10 +1619,58 @@ export async function claimTranslationSegment(
     );
   }
 
+  if (task.status !== "claimable") {
+    throw new AppError(
+      `Translation segments cannot be claimed. Current status: ${task.status}`,
+      "BAD_REQUEST",
+      400
+    );
+  }
+
+  const membership = await prisma.projectMember.findUnique({
+    where: {
+      project_id_user_id: {
+        project_id: task.project_id,
+        user_id: userId,
+      },
+    },
+  });
+
+  const canClaim =
+    membership &&
+    !membership.left_at &&
+    (membership.role === "translation" || membership.role === "supervisor");
+
+  if (!canClaim) {
+    throw new AppError(
+      "You must be a project translator to claim translation segments",
+      "FORBIDDEN",
+      403
+    );
+  }
+
+  if (!(await hasRequiredRoleTag(userId, "translation"))) {
+    throw new AppError(
+      "You need a granted translation role tag before claiming translation work",
+      "FORBIDDEN",
+      403
+    );
+  }
+
   if (data.segment_start >= data.segment_end) {
     throw new AppError(
       "Segment end must be greater than segment start",
       "VALIDATION_ERROR",
+      400
+    );
+  }
+
+  const segmentLength = data.segment_end - data.segment_start;
+  const maxSegmentLength = await getTaskRoleMaxSegmentLength(task.project_id, "translation");
+  if (maxSegmentLength !== undefined && segmentLength > maxSegmentLength) {
+    throw new AppError(
+      `Segment length exceeds maximum allowed ${maxSegmentLength}s`,
+      "BAD_REQUEST",
       400
     );
   }
@@ -1491,19 +1708,9 @@ export async function claimTranslationSegment(
     where: {
       task_id: taskId,
       status: { in: ["pending", "active"] },
-      OR: [
-        {
-          segment_start: { lte: data.segment_start },
-          segment_end: { gte: data.segment_start },
-        },
-        {
-          segment_start: { lte: data.segment_end },
-          segment_end: { gte: data.segment_end },
-        },
-        {
-          segment_start: { gte: data.segment_start },
-          segment_end: { lte: data.segment_end },
-        },
+      AND: [
+        { segment_start: { lt: data.segment_end } },
+        { segment_end: { gt: data.segment_start } },
       ],
     },
   });
@@ -1519,6 +1726,7 @@ export async function claimTranslationSegment(
   const claim = await prisma.translationClaim.create({
     data: {
       task_id: taskId,
+      unit_id: task.unit_id,
       user_id: userId,
       segment_start: data.segment_start,
       segment_end: data.segment_end,
@@ -1606,6 +1814,14 @@ export async function abandonTranslationSegment(
     data: {
       status: "abandoned",
     },
+  });
+
+  await prisma.task.updateMany({
+    where: {
+      id: claim.task_id,
+      status: "assigned",
+    },
+    data: { status: "claimable" },
   });
 
   await auditService.log({
