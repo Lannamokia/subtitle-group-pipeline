@@ -85,7 +85,6 @@ async function cascadeResetDownstream(
         // (In a real system, you might delete or archive them)
       }
 
-      const oldStatus = downTask.status;
       await prisma.task.update({
         where: { id: downTask.id },
         data: {
@@ -103,6 +102,16 @@ async function cascadeResetDownstream(
         actor_id: actorId,
         metadata: { task_id: downTask.id, upstream_task_id: taskId },
       });
+
+      // Notify downstream assignee
+      if (downTask.assignee_id) {
+        await notificationService.createNotification(downTask.assignee_id, "downstream_reset", {
+          projectId: downTask.project_id,
+          taskId: downTask.id,
+          taskName: downTask.title,
+          actorId,
+        });
+      }
 
       // Recursively cascade
       await cascadeResetDownstream(downTask.id, actorId);
@@ -144,8 +153,28 @@ async function freezeDownstreamTasks(
         actor_id: actorId,
         metadata: { task_id: downTask.id },
       });
+
+      // Notify downstream assignee of freeze
+      if (downTask.assignee_id) {
+        await notificationService.createNotification(downTask.assignee_id, "task_cancelled", {
+          projectId: downTask.project_id,
+          taskId: downTask.id,
+          taskName: downTask.title,
+          actorId,
+        });
+      }
     } else if (downTask.status === "in_progress") {
       warned.push(downTask.id);
+
+      // Warn in-progress downstream assignee
+      if (downTask.assignee_id) {
+        await notificationService.createNotification(downTask.assignee_id, "task_cancelled", {
+          projectId: downTask.project_id,
+          taskId: downTask.id,
+          taskName: downTask.title,
+          actorId,
+        });
+      }
     }
 
     // Recursively freeze further downstream
