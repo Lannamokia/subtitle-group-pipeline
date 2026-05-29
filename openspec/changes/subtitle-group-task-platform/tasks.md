@@ -57,21 +57,21 @@
 - [x] 7.1 Build the admin registration settings page for registration mode, QQ verification group configuration, and role-tag application review
 - [x] 7.2 Build registration and login flows that surface pending-verification state, configured QQ group number, exact verification command, quick-copy action, and role-tag selection
 - [x] 7.3 Build project template management and fast project creation flows in the frontend around season-scoped project units, including delivery checklist templates and storage backend selection during project creation
-- [ ] 7.4 Build project task views for assignment, claiming, active return, review submission, approval, rejection, and dependency-aware status presentation
-- [ ] 7.5 Build the project file bucket page with project-level filters, multi-version markers, context-menu history access, and version history panels. File upload must allow explicit "replace existing file" selection; same-name uploads create independent entities by default.
-- [ ] 7.6 Build the online dedup page with version comparison, gray and red total timeline visualization, overlap detail panels, and conflict resolution actions in the first release. Editing actions are only available to supervisors and designated reviewers.
-- [ ] 7.7 Build the project wiki page with Markdown editing, glossary-table editing, and project-scoped viewing. Support wiki approval flow indicator when enabled.
-- [ ] 7.8 Build notification preference controls and visible delivery status surfaces for workflow actors
-- [ ] 7.9 Build project archive and recycle bin management pages: archive action, unarchive recovery, soft-delete from archive, recycle bin listing with restore, and configurable retention settings in admin panel
-- [ ] 7.10 Build project search and filter surfaces: project/task name fuzzy search, file bucket filename and tag filtering
-- [ ] 7.11 Build delivery checklist editing page for supervisors to customize project-level delivery requirements
+- [x] 7.4 Build project task views for assignment, claiming, active return, review submission, approval, rejection, and dependency-aware status presentation
+- [x] 7.5 Build the project file bucket page with project-level filters, multi-version markers, context-menu history access, and version history panels. File upload must allow explicit "replace existing file" selection; same-name uploads create independent entities by default.
+- [x] 7.6 Build the online dedup page with version comparison, gray and red total timeline visualization, overlap detail panels, and conflict resolution actions in the first release. Editing actions are only available to supervisors and designated reviewers.
+- [x] 7.7 Build the project wiki page with Markdown editing, glossary-table editing, and project-scoped viewing. Support wiki approval flow indicator when enabled.
+- [x] 7.8 Build notification preference controls and visible delivery status surfaces for workflow actors
+- [x] 7.9 Build project archive and recycle bin management pages: archive action, unarchive recovery, soft-delete from archive, recycle bin listing with restore, and configurable retention settings in admin panel
+- [x] 7.10 Build project search and filter surfaces: project/task name fuzzy search, file bucket filename and tag filtering
+- [x] 7.11 Build delivery checklist editing page for supervisors to customize project-level delivery requirements
 - [x] 7.12 Build member skill profile and role-tag application pages for users to select tags and administrators to review and grant
-- [ ] 7.13 Build user profile page: nickname editing, avatar upload, and avatar preview
-- [ ] 7.14 Build global and project announcement pages: global announcement admin panel, project announcement editor, and announcement display surfaces
+- [x] 7.13 Build user profile page: nickname editing, avatar upload, and avatar preview
+- [x] 7.14 Build global and project announcement pages: global announcement admin panel, project announcement editor, and announcement display surfaces
 - [x] 7.15 Build admin storage backend management page: add/edit/remove storage backends, configure type/endpoint/credentials/quota, and view usage statistics
-- [ ] 7.16 Build project activity timeline pages: project-level timeline (all events within a project) and personal global timeline (aggregated events across participating projects)
+- [x] 7.16 Build project activity timeline pages: project-level timeline (all events within a project) and personal global timeline (aggregated events across participating projects)
 - [x] 7.17 Build workload dashboard pages: personal task dashboard, supervisor project-level workload view, and admin global workload view
-- [ ] 7.18 Build task comment surfaces with file version reference and ASS line-level commenting support for translation tasks
+- [x] 7.18 Build task comment surfaces with file version reference and ASS line-level commenting support for translation tasks
 
 ## 8. Integration and verification
 
@@ -86,7 +86,7 @@
 - [x] 8.9 Add backend integration tests for activity timeline event generation and retrieval, and workload dashboard aggregation queries
 - [x] 8.10 Add backend integration tests for user profile updates, avatar upload to default storage backend, and storage backend CRUD with quota enforcement
 - [x] 8.11 Add backend integration tests for project creation with storage backend binding, file upload routing to bound backend, and multi-backend isolation
-- [ ] 8.12 Add frontend or end-to-end tests for pending-verification UX, project file bucket history access, multi-version markers, online dedup version comparison, conflict review flows, project wiki editing, project archive/recycle bin flows, search and filter surfaces, delivery checklist editing, announcement display, activity timeline, workload dashboard, task commenting with file reference, user profile editing, and storage backend configuration
+- [x] 8.12 Add frontend or end-to-end tests for pending-verification UX, project file bucket history access, multi-version markers, online dedup version comparison, conflict review flows, project wiki editing, project archive/recycle bin flows, search and filter surfaces, delivery checklist editing, announcement display, activity timeline, workload dashboard, task commenting with file reference, user profile editing, and storage backend configuration
 - [x] 8.13 Add security-focused tests: SQL injection attempts on all search and filter endpoints, XSS payload injection in comments/wiki/announcements/nicknames, file upload bypass attempts (wrong extension, path traversal in filename, oversized files), path traversal in download requests, and API input boundary violations (oversized strings, invalid IDs, out-of-range pagination params)
 
 ## 9. Background jobs and scheduled tasks

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:requirements": "node src/__tests__/openspec-frontend-requirements.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
