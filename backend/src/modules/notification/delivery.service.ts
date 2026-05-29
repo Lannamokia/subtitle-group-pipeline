@@ -1,7 +1,7 @@
 import { prisma } from "../../config/database";
 import { NotificationChannel, DeliveryStatus, type NotificationType } from "@prisma/client";
 import { sendEmail, type EmailPayload } from "./adapters/email.adapter";
-import { sendGroupMessage, sendPrivateMessage, formatTaskNotification } from "./adapters/qq.adapter";
+import { sendGroupMessage, sendPrivateMessage } from "./adapters/qq.adapter";
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [5000, 15000, 45000]; // exponential backoff in ms
@@ -92,11 +92,22 @@ export async function executeDelivery(attempt: DeliveryAttempt): Promise<Deliver
         if (!attempt.recipient.qqNumber) {
           throw new Error("User has no QQ number");
         }
-        // Try private message first, fallback to group if configured
-        result = await sendPrivateMessage({
-          userId: attempt.recipient.qqNumber,
-          content: `${attempt.payload.subject}\n${attempt.payload.body}`,
-        });
+        {
+          const groupId = attempt.payload.groupId ||
+            process.env.QQ_DEFAULT_GROUP_ID ||
+            process.env.NONEBOT_QQ_GROUP_ID;
+          const content = `${attempt.payload.subject}\n${attempt.payload.body}`;
+          result = groupId
+            ? await sendGroupMessage({
+                groupId,
+                content,
+                atUsers: [attempt.recipient.qqNumber],
+              })
+            : await sendPrivateMessage({
+                userId: attempt.recipient.qqNumber,
+                content,
+              });
+        }
         break;
 
       case NotificationChannel.in_site:

@@ -11,6 +11,9 @@ import {
 } from "./setup";
 import { post, get, put, expectSuccess } from "./helpers";
 import * as notificationService from "../modules/notification/notification.service";
+import { executeDelivery } from "../modules/notification/delivery.service";
+import { buildGroupMessageContent } from "../modules/notification/adapters/qq.adapter";
+import { NotificationChannel } from "@prisma/client";
 import type { Application } from "express";
 
 describe("Notification Tests", () => {
@@ -158,6 +161,18 @@ describe("Notification Tests", () => {
   });
 
   describe("QQ Group @ Payload Generation", () => {
+    it("should build CQ group payload with @ mentions and escaped content", () => {
+      const message = buildGroupMessageContent({
+        groupId: "123456789",
+        content: "Task [A], check & confirm",
+        atUsers: ["987654321", "111222333"],
+      });
+
+      expect(message).toBe(
+        "[CQ:at,qq=987654321] [CQ:at,qq=111222333]\nTask &#91;A&#93;&#44; check &amp; confirm"
+      );
+    });
+
     it("should format QQ group notification with @ mentions", async () => {
       const result = await notificationService.sendQQGroupNotification(
         "123456789",
@@ -167,8 +182,45 @@ describe("Notification Tests", () => {
 
       // The function returns a delivery status
       expect(result).toBeDefined();
-      // Since QQ adapter may not be configured in test, it might return failed
-      expect(["sent", "failed"]).toContain(result);
+      expect(result).toBe("sent");
+    });
+
+    it("should deliver QQ notifications through group message with targeted @ mention when group is configured", async () => {
+      const { user } = await createTestUser({ qq_number: "987654321" });
+      const notification = await createTestNotification({
+        user_id: user.id,
+        type: "task_assigned",
+        title: "Task assigned",
+        content: "Please handle timing",
+      });
+
+      const status = await executeDelivery({
+        notificationId: notification.id,
+        channel: NotificationChannel.qq,
+        recipient: {
+          userId: user.id,
+          qqNumber: user.qq_number,
+        },
+        payload: {
+          subject: notification.title,
+          body: notification.content || "",
+          groupId: "123456789",
+          notificationType: notification.type,
+        },
+      });
+
+      expect(status).toBe("sent");
+
+      const delivery = await prisma.notificationDelivery.findFirst({
+        where: {
+          notification_id: notification.id,
+          channel: "qq",
+        },
+        orderBy: { created_at: "desc" },
+      });
+      expect(delivery).toBeDefined();
+      expect(delivery!.status).toBe("sent");
+      expect(delivery!.external_id).toContain("mock-qq");
     });
   });
 

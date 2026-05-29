@@ -40,7 +40,7 @@
 ## 5. Workflow notifications
 
 - [ ] 5.1 Implement workflow event hooks and recipient resolution for assignments, reviews, join approvals, merge outcomes, dependency unlocks, and downstream cascade-resets. Include task-reassignment notifications sent to the previous assignee.
-- [ ] 5.2 Implement email and QQ NoneBot notification adapters with shared message templates, QQ group-message delivery, and @ mentions for targeted recipients. Support channel escalation: in-site unread N hours triggers email, email unread N hours triggers QQ.
+- [x] 5.2 Implement email and QQ NoneBot notification adapters with shared message templates, QQ group-message delivery, and @ mentions for targeted recipients. Support channel escalation: in-site unread N hours triggers email, email unread N hours triggers QQ.
 - [x] 5.3 Implement notification preferences, delivery logs, retry handling, and failure recording for each channel attempt. Task comments do not trigger notifications by default; only @ mentions generate directed notifications.
 - [x] 5.4 Implement announcement management backend: global announcements (admin CRUD, visible to all users) and project announcements (supervisor or admin CRUD, visible to project members only). Include read tracking if needed for unread badges.
 

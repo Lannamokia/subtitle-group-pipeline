@@ -141,6 +141,7 @@ export interface NotificationContext {
   projectId?: string;
   taskId?: string;
   actorId?: string;
+  groupId?: string;
   taskName?: string;
   projectName?: string;
   actorName?: string;
@@ -260,6 +261,7 @@ async function deliverToChannels(
         payload: {
           subject: title,
           body: content,
+          groupId: context.groupId || (typeof context.extra?.qq_group_id === "string" ? context.extra.qq_group_id : undefined),
           notificationType: type,
         },
       });

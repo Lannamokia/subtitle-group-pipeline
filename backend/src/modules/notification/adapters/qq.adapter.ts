@@ -26,10 +26,21 @@ function formatAtMention(qqNumber: string): string {
 
 function escapeCQCode(text: string): string {
   return text
+    .replace(/&/g, "&amp;")
     .replace(/\[/g, "&#91;")
     .replace(/\]/g, "&#93;")
-    .replace(/,/g, "&#44;")
-    .replace(/&/g, "&amp;");
+    .replace(/,/g, "&#44;");
+}
+
+export function buildGroupMessageContent(payload: QQMessagePayload): string {
+  let message = escapeCQCode(payload.content);
+
+  if (payload.atUsers && payload.atUsers.length > 0) {
+    const atPrefix = payload.atUsers.map(formatAtMention).join(" ");
+    message = `${atPrefix}\n${message}`;
+  }
+
+  return message;
 }
 
 async function sendNoneBotRequest(
@@ -71,7 +82,7 @@ async function sendNoneBotRequest(
 }
 
 export async function sendGroupMessage(payload: QQMessagePayload): Promise<QQResult> {
-  if (env.NODE_ENV === "development" && !process.env.NONEBOT_HTTP_API) {
+  if ((env.NODE_ENV === "development" || env.NODE_ENV === "test") && !process.env.NONEBOT_HTTP_API) {
     console.log(
       `[QQAdapter] Would send group message to ${payload.groupId}: ${payload.content}` +
         (payload.atUsers?.length ? ` (at: ${payload.atUsers.join(", ")})` : "")
@@ -79,16 +90,9 @@ export async function sendGroupMessage(payload: QQMessagePayload): Promise<QQRes
     return { success: true, messageId: `mock-qq-${Date.now()}` };
   }
 
-  let message = escapeCQCode(payload.content);
-
-  if (payload.atUsers && payload.atUsers.length > 0) {
-    const atPrefix = payload.atUsers.map(formatAtMention).join(" ");
-    message = `${atPrefix}\n${message}`;
-  }
-
   return sendNoneBotRequest("/send_group_msg", {
     group_id: payload.groupId,
-    message,
+    message: buildGroupMessageContent(payload),
     auto_escape: false,
   });
 }
@@ -106,7 +110,7 @@ export async function sendAtMention(
 }
 
 export async function sendPrivateMessage(payload: QQPrivatePayload): Promise<QQResult> {
-  if (env.NODE_ENV === "development" && !process.env.NONEBOT_HTTP_API) {
+  if ((env.NODE_ENV === "development" || env.NODE_ENV === "test") && !process.env.NONEBOT_HTTP_API) {
     console.log(`[QQAdapter] Would send private message to ${payload.userId}: ${payload.content}`);
     return { success: true, messageId: `mock-qq-private-${Date.now()}` };
   }
