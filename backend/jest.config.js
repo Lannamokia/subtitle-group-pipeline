@@ -4,6 +4,7 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/*.test.ts'],
+  setupFiles: ['<rootDir>/src/tests/env.setup.ts'],
   setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   transform: {
@@ -20,6 +21,7 @@ module.exports = {
   coverageReporters: ['text', 'lcov', 'html'],
   verbose: true,
   testTimeout: 30000,
+  maxWorkers: 1,
   clearMocks: true,
   restoreMocks: true,
 };

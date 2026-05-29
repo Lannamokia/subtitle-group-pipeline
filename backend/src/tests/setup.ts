@@ -1,18 +1,49 @@
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../utils/password";
 import { signToken } from "../utils/jwt";
+import { resetAuthRateLimiters } from "../modules/auth/auth.routes";
 
-// Use a separate SQLite database for tests
-process.env.DATABASE_URL = "file:./test.db";
-process.env.NODE_ENV = "test";
-process.env.JWT_SECRET = "test-jwt-secret-key-that-is-at-least-32-chars-long-for-testing";
-process.env.JWT_EXPIRES_IN = "1h";
-process.env.JWT_REFRESH_EXPIRES_IN = "7d";
-process.env.BCRYPT_ROUNDS = "4";
-process.env.UPLOAD_MAX_SIZE = "104857600";
-
-export const prisma = new PrismaClient({
+const basePrisma = new PrismaClient({
   log: process.env.DEBUG_TESTS === "true" ? ["query", "info", "warn", "error"] : [],
+});
+
+export const prisma = basePrisma.$extends({
+  query: {
+    fileEntity: {
+      async create({ args, query }) {
+        const result = await query(args);
+        const file = result as {
+          id: string;
+          storage_path: string;
+          size_bytes: number;
+          checksum: string | null;
+        };
+
+        const existingVersion = await basePrisma.fileVersion.findFirst({
+          where: { file_id: file.id },
+          select: { id: true },
+        });
+
+        if (!existingVersion) {
+          await basePrisma.fileVersion.create({
+            data: {
+              file_id: file.id,
+              version_number: 0,
+              storage_path: file.storage_path,
+              size_bytes: file.size_bytes,
+              checksum: file.checksum,
+              change_summary: "Initial upload",
+              is_current: true,
+              is_latest: true,
+              is_latest_approved: false,
+            },
+          });
+        }
+
+        return result;
+      },
+    },
+  },
 });
 
 // ==================== Test Data Factories ====================
@@ -77,6 +108,9 @@ export interface TestProjectData {
   template_id?: string;
   storage_backend_id?: string;
   status?: "draft" | "active" | "paused" | "completed" | "archived" | "cancelled" | "deleted";
+  is_archived?: boolean;
+  archived_at?: Date;
+  deleted_at?: Date;
 }
 
 export async function createTestProject(data: TestProjectData) {
@@ -90,6 +124,9 @@ export async function createTestProject(data: TestProjectData) {
       template_id: data.template_id || null,
       storage_backend_id: data.storage_backend_id || null,
       status: data.status || "draft",
+      is_archived: data.is_archived ?? false,
+      archived_at: data.archived_at || null,
+      deleted_at: data.deleted_at || null,
     },
   });
   return project;
@@ -178,6 +215,8 @@ export interface TestTaskData {
   assignee_id?: string;
   creator_id: string;
   due_date?: Date;
+  completed_at?: Date;
+  frozen_at?: Date;
 }
 
 export async function createTestTask(data: TestTaskData) {
@@ -193,6 +232,8 @@ export async function createTestTask(data: TestTaskData) {
       assignee_id: data.assignee_id || null,
       creator_id: data.creator_id,
       due_date: data.due_date || null,
+      completed_at: data.completed_at || null,
+      frozen_at: data.frozen_at || null,
     },
   });
   return task;
@@ -231,7 +272,6 @@ export async function createTestFile(data: TestFileData) {
     },
   });
 
-  // Create initial version
   const version = await prisma.fileVersion.create({
     data: {
       file_id: file.id,
@@ -255,6 +295,8 @@ export interface TestStorageBackendData {
   is_default?: boolean;
   is_active?: boolean;
   quota_bytes?: number | null;
+  used_bytes?: number;
+  file_count?: number;
 }
 
 export async function createTestStorageBackend(data: TestStorageBackendData = {}) {
@@ -267,6 +309,8 @@ export async function createTestStorageBackend(data: TestStorageBackendData = {}
       is_default: data.is_default ?? false,
       is_active: data.is_active ?? true,
       quota_bytes: data.quota_bytes ?? null,
+      used_bytes: data.used_bytes ?? 0,
+      file_count: data.file_count ?? 0,
     },
   });
   return backend;
@@ -306,6 +350,7 @@ export async function createTestWiki(data: {
   title?: string;
   slug?: string;
   content?: string;
+  pending_content?: string;
   status?: "draft" | "pending" | "approved" | "archived";
   created_by: string;
 }) {
@@ -316,6 +361,7 @@ export async function createTestWiki(data: {
       title: data.title || `Test Wiki ${suffix}`,
       slug: data.slug || `test-wiki-${suffix}`,
       content: data.content || "# Test Wiki\n\nThis is a test wiki document.",
+      pending_content: data.pending_content || null,
       status: data.status || "draft",
       created_by: data.created_by,
     },
@@ -405,6 +451,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   // Clean database before each test
   await cleanDatabase();
+  resetAuthRateLimiters();
 });
 
 afterAll(async () => {

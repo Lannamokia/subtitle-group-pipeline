@@ -6,6 +6,7 @@ import {
   createTestTemplate,
   createTestUnit,
   createTestTask,
+  createTestFile,
   cleanDatabase,
 } from "./setup";
 import { post, get, put, del, expectSuccess, expectError } from "./helpers";

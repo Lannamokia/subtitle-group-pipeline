@@ -4,7 +4,9 @@ import { post, get, put, expectSuccess, expectError } from "./helpers";
 import type { Application } from "express";
 
 function unique(prefix: string): string {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).substring(2, 6)}`;
+  const trimmedPrefix = prefix.substring(0, Math.max(1, 29 - suffix.length));
+  return `${trimmedPrefix}_${suffix}`;
 }
 
 describe("Auth & Registration Tests", () => {
