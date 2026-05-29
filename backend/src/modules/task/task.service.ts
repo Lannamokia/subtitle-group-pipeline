@@ -3,6 +3,7 @@ import { AppError } from "../../utils/response";
 import { TaskStatus, TaskRole, TimelineEventType, ReviewStatus } from "@prisma/client";
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
+import * as notificationService from "../notification/notification.service";
 import type {
   CreateTaskInput,
   UpdateTaskInput,
@@ -602,6 +603,8 @@ export async function assignTask(
     );
   }
 
+  const previousAssigneeId = task.assignee_id;
+
   const updated = await prisma.task.update({
     where: { id: taskId },
     data: {
@@ -628,6 +631,26 @@ export async function assignTask(
     actor_id: actorId,
     metadata: { task_id: taskId, assignee_id: assigneeId },
   });
+
+  // Notify previous assignee if task was reassigned
+  if (previousAssigneeId && previousAssigneeId !== assigneeId) {
+    await notificationService.createNotification(previousAssigneeId, "task_reassigned", {
+      projectId: task.project_id,
+      taskId: taskId,
+      taskName: task.title,
+      actorId,
+    });
+  }
+
+  // Notify new assignee
+  if (assigneeId !== actorId) {
+    await notificationService.createNotification(assigneeId, "task_assigned", {
+      projectId: task.project_id,
+      taskId: taskId,
+      taskName: task.title,
+      actorId,
+    });
+  }
 
   await auditService.log({
     user_id: actorId,

@@ -3,6 +3,7 @@ import { AppError } from "../../utils/response";
 import { TimelineEventType } from "@prisma/client";
 import * as timelineService from "../timeline/timeline.service";
 import * as auditService from "../audit/audit.service";
+import * as notificationService from "../notification/notification.service";
 import type {
   CreateWikiInput,
   UpdateWikiInput,
@@ -502,7 +503,61 @@ export async function createComment(
     },
   });
 
+  // Trigger @ mention notifications asynchronously (don't block response)
+  processMentions(userId, data.content, data.task_id, data.wiki_id).catch(() => {
+    // Silently fail - mention notifications are best-effort
+  });
+
   return comment;
+}
+
+async function processMentions(
+  actorId: string,
+  content: string,
+  taskId?: string | null,
+  wikiId?: string | null
+) {
+  // Extract @username mentions from content
+  const mentionRegex = /@([a-zA-Z0-9_\-]+)/g;
+  const usernames: string[] = [];
+  let match;
+  while ((match = mentionRegex.exec(content)) !== null) {
+    usernames.push(match[1]);
+  }
+
+  if (usernames.length === 0) return;
+
+  const mentionedUsers = await prisma.user.findMany({
+    where: {
+      username: { in: usernames },
+      id: { not: actorId },
+    },
+    select: { id: true, username: true },
+  });
+
+  let projectId: string | undefined;
+
+  if (taskId) {
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { project_id: true, title: true },
+    });
+    projectId = task?.project_id;
+  } else if (wikiId) {
+    const wiki = await prisma.wikiDocument.findUnique({
+      where: { id: wikiId },
+      select: { project_id: true, title: true },
+    });
+    projectId = wiki?.project_id ?? undefined;
+  }
+
+  for (const user of mentionedUsers) {
+    await notificationService.createNotification(user.id, "mention", {
+      projectId,
+      taskId: taskId ?? undefined,
+      actorId,
+    });
+  }
 }
 
 export async function getComments(wikiId: string) {
