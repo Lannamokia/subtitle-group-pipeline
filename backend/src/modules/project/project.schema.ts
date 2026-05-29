@@ -82,6 +82,13 @@ export const updateJoinRequestSchema = z.object({
   approved: z.boolean(),
 });
 
+export const createProjectAnnouncementSchema = z.object({
+  title: z.string().min(1, "Title is required").max(500),
+  content: z.string().min(1, "Content is required").max(10000),
+  is_pinned: z.boolean().default(false),
+  expires_at: z.string().datetime().optional().nullable(),
+});
+
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type CreateProjectFromTemplateInput = z.infer<typeof createProjectFromTemplateSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;

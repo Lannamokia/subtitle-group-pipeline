@@ -3,6 +3,8 @@ import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as projectService from "./project.service";
 import * as subtitleService from "../subtitle/subtitle.service";
+import * as announcementService from "../announcement/announcement.service";
+import * as wikiService from "../wiki/wiki.service";
 import type { ResolveConflictInput } from "../subtitle/subtitle.schema";
 
 function getParam(req: Request, name: string): string {
@@ -267,6 +269,104 @@ export async function getJoinRequests(
   try {
     const result = await projectService.getJoinRequests(getParam(req, "id"));
     successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Compatibility wrappers for frontend approve/reject paths
+export async function approveJoinRequest(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.respondToJoinRequest(
+      getParam(req, "requestId"),
+      req.user!.id,
+      { approved: true }
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function rejectJoinRequest(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.respondToJoinRequest(
+      getParam(req, "requestId"),
+      req.user!.id,
+      { approved: false }
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Project-scoped announcement creation
+export async function createProjectAnnouncement(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await announcementService.createProjectAnnouncement(req.user!.id, {
+      type: "project",
+      project_id: getParam(req, "id"),
+      title: req.body.title,
+      content: req.body.content,
+      is_pinned: req.body.is_pinned ?? false,
+      expires_at: req.body.expires_at ?? null,
+    });
+    successResponse(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Project-scoped wiki update (by project_id)
+export async function updateProjectWiki(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const projectId = getParam(req, "id");
+
+    // Find existing wiki by project_id, or create one
+    let wiki = await wikiService.getWikiByProjectId(projectId);
+
+    const updateData: {
+      title: string;
+      content: string;
+    } = {
+      title: req.body.title ?? (wiki?.title || "项目Wiki"),
+      content: typeof req.body.blocks === "string"
+        ? req.body.blocks
+        : JSON.stringify(req.body.blocks ?? []),
+    };
+
+    if (wiki) {
+      const result = await wikiService.updateWiki(wiki.id, updateData, req.user?.id);
+      successResponse(res, result);
+    } else {
+      // Create new wiki document for this project
+      const result = await wikiService.createWiki(req.user!.id, {
+        project_id: projectId,
+        title: updateData.title,
+        slug: `project-${projectId.slice(0, 8)}`,
+        content: updateData.content,
+        status: "draft",
+        require_approval: false,
+      });
+      successResponse(res, result, 201);
+    }
   } catch (error) {
     next(error);
   }

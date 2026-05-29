@@ -12,6 +12,7 @@ import {
   createUnitSchema,
   joinRequestSchema,
   updateJoinRequestSchema,
+  createProjectAnnouncementSchema,
 } from "./project.schema";
 import { conflictQuerySchema, resolveConflictSchema } from "../subtitle/subtitle.schema";
 import { z } from "zod";
@@ -58,6 +59,37 @@ router.get("/:id/join-requests", authenticate, validateParams(idParamSchema), co
 router.post("/:id/join", authenticate, validateParams(idParamSchema), validateBody(joinRequestSchema), controller.joinRequest);
 router.post("/join-requests/:requestId/respond", authenticate, validateParams(requestIdParamSchema), validateBody(updateJoinRequestSchema), controller.respondJoinRequest);
 router.post("/:id/join-requests/:requestId/respond", authenticate, validateParams(z.object({ id: z.string().uuid(), requestId: z.string().uuid() })), validateBody(updateJoinRequestSchema), controller.respondJoinRequest);
+
+// Compatibility: frontend uses /approve and /reject paths
+router.post(
+  "/:id/join-requests/:requestId/approve",
+  authenticate,
+  validateParams(z.object({ id: z.string().uuid(), requestId: z.string().uuid() })),
+  controller.approveJoinRequest
+);
+router.post(
+  "/:id/join-requests/:requestId/reject",
+  authenticate,
+  validateParams(z.object({ id: z.string().uuid(), requestId: z.string().uuid() })),
+  controller.rejectJoinRequest
+);
+
+// Project-scoped announcements
+router.post(
+  "/:id/announcements",
+  authenticate,
+  validateParams(idParamSchema),
+  validateBody(createProjectAnnouncementSchema),
+  controller.createProjectAnnouncement
+);
+
+// Project-scoped wiki (by project_id)
+router.put(
+  "/:id/wiki",
+  authenticate,
+  validateParams(idParamSchema),
+  controller.updateProjectWiki
+);
 
 // Subtitle conflicts (project-scoped)
 router.get(

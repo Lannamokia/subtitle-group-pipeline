@@ -2,18 +2,17 @@ import { useState } from "react";
 import { useForm, Controller, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   Form,
 } from "@/components/ui/form";
 import { useNotificationStore } from "@/stores/notificationStore";
-import type { NotificationType, NotificationChannel } from "@/types";
+import type { NotificationType } from "@/types";
 import {
   Bell,
   Mail,
@@ -24,9 +23,6 @@ import {
   FileText,
   AtSign,
   Info,
-  Check,
-  AlertTriangle,
-  X,
   Save,
 } from "lucide-react";
 
@@ -57,23 +53,6 @@ const typeLabels: Record<NotificationType, string> = {
   mention: "@提及",
 };
 
-const channelIcons: Record<NotificationChannel, React.ReactNode> = {
-  in_site: <Bell className="w-3.5 h-3.5" />,
-  email: <Mail className="w-3.5 h-3.5" />,
-  qq: <MessageCircle className="w-3.5 h-3.5" />,
-};
-
-const channelLabels: Record<NotificationChannel, string> = {
-  in_site: "站内",
-  email: "邮件",
-  qq: "QQ",
-};
-
-const statusConfig: Record<string, { label: string; className: string; icon: React.ReactNode }> = {
-  delivered: { label: "已送达", className: "bg-green-100 text-green-700 border-green-300", icon: <Check className="w-3 h-3" /> },
-  pending: { label: "发送中", className: "bg-yellow-100 text-yellow-700 border-yellow-300", icon: <AlertTriangle className="w-3 h-3" /> },
-  failed: { label: "失败", className: "bg-red-100 text-red-700 border-red-300", icon: <X className="w-3 h-3" /> },
-};
 
 export function NotificationSettingsPage() {
   const { preferences, setPreferences } = useNotificationStore();
