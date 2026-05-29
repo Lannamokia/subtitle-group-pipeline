@@ -514,6 +514,9 @@ export async function updateProject(
   if (data.download_link_ttl_seconds !== undefined) {
     updateData.download_link_ttl_seconds = data.download_link_ttl_seconds;
   }
+  if (data.wiki_approval_required !== undefined) {
+    updateData.wiki_approval_required = data.wiki_approval_required;
+  }
 
   const project = await prisma.project.update({
     where: { id: projectId },

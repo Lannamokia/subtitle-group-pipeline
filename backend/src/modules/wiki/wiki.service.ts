@@ -12,6 +12,47 @@ import type {
   CreateCommentInput,
 } from "./wiki.schema";
 
+type WikiWithPresentation<T extends { content: string; pending_content: string | null; status: string }> =
+  T & {
+    display_content: string;
+    pending_diff: { from: string; to: string } | null;
+    approval_required: boolean;
+  };
+
+async function isWikiApprovalRequired(projectId: string | null | undefined): Promise<boolean> {
+  if (projectId) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { wiki_approval_required: true },
+    });
+
+    if (project?.wiki_approval_required !== null && project?.wiki_approval_required !== undefined) {
+      return project.wiki_approval_required;
+    }
+  }
+
+  const settings = await prisma.dataRetentionSettings.findFirst({
+    orderBy: { updated_at: "desc" },
+    select: { wiki_approval_required: true },
+  });
+
+  return settings?.wiki_approval_required ?? false;
+}
+
+async function withWikiPresentation<T extends { project_id: string | null; content: string; pending_content: string | null; status: string }>(
+  wiki: T
+): Promise<WikiWithPresentation<T>> {
+  const approvalRequired = await isWikiApprovalRequired(wiki.project_id);
+  return {
+    ...wiki,
+    display_content: wiki.status === "approved" ? wiki.content : "",
+    pending_diff: wiki.pending_content
+      ? { from: wiki.content, to: wiki.pending_content }
+      : null,
+    approval_required: approvalRequired,
+  };
+}
+
 export async function createWiki(
   creatorId: string,
   data: CreateWikiInput
@@ -69,7 +110,7 @@ export async function createWiki(
     new_value: wiki,
   });
 
-  return wiki;
+  return withWikiPresentation(wiki);
 }
 
 export async function getWikis(query: WikiQueryInput) {
@@ -118,7 +159,7 @@ export async function getWikis(query: WikiQueryInput) {
   ]);
 
   return {
-    wikis,
+    wikis: await Promise.all(wikis.map((wiki) => withWikiPresentation(wiki))),
     meta: {
       page,
       pageSize,
@@ -159,7 +200,7 @@ export async function getWikiById(wikiId: string) {
     throw new AppError("Wiki document not found", "NOT_FOUND", 404);
   }
 
-  return wiki;
+  return withWikiPresentation(wiki);
 }
 
 export async function getWikiBySlug(
@@ -199,7 +240,7 @@ export async function getWikiBySlug(
     throw new AppError("Wiki document not found", "NOT_FOUND", 404);
   }
 
-  return wiki;
+  return withWikiPresentation(wiki);
 }
 
 export async function getWikiByProjectId(projectId: string) {
@@ -231,7 +272,7 @@ export async function getWikiByProjectId(projectId: string) {
     },
   });
 
-  return wiki;
+  return wiki ? withWikiPresentation(wiki) : null;
 }
 
 export async function updateWiki(
@@ -251,8 +292,11 @@ export async function updateWiki(
 
   if (data.title !== undefined) updateData.title = data.title;
 
-  // If approval flow is enabled (document is approved), save to pending_content
+  const approvalRequired = await isWikiApprovalRequired(existing.project_id);
+
+  // If approval flow is enabled, edits to approved content become pending patches.
   const isApprovedEdit =
+    approvalRequired &&
     existing.status === "approved" &&
     data.content !== undefined &&
     data.content !== existing.content;
@@ -294,7 +338,7 @@ export async function updateWiki(
     new_value: wiki,
   });
 
-  return wiki;
+  return withWikiPresentation(wiki);
 }
 
 export async function approveWikiChange(
@@ -341,7 +385,7 @@ export async function approveWikiChange(
       new_value: updated,
     });
 
-    return { approved: true, wiki: updated };
+    return { approved: true, wiki: await withWikiPresentation(updated) };
   } else {
     // Reject: keep pending_content but change status back to draft
     const updated = await prisma.wikiDocument.update({
@@ -369,7 +413,7 @@ export async function approveWikiChange(
       new_value: updated,
     });
 
-    return { approved: false, reason: data.rejection_reason, wiki: updated };
+    return { approved: false, reason: data.rejection_reason, wiki: await withWikiPresentation(updated) };
   }
 }
 
@@ -411,7 +455,7 @@ export async function rejectWikiChange(
     new_value: updated,
   });
 
-  return { approved: false, reason, wiki: updated };
+  return { approved: false, reason, wiki: await withWikiPresentation(updated) };
 }
 
 export async function deleteWiki(wikiId: string, actorId?: string) {

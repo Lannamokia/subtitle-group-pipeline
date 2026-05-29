@@ -307,8 +307,82 @@ const x = 1;
   });
 
   describe("Wiki Approval Flow Configuration", () => {
+    it("should apply global wiki approval setting to approved document edits", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      await prisma.dataRetentionSettings.create({
+        data: { wiki_approval_required: true },
+      });
+      const wiki = await createTestWiki({
+        project_id: project.id,
+        title: "Global Approval Test",
+        slug: "global-approval-test",
+        content: "Approved content",
+        status: "approved",
+        created_by: user.id,
+      });
+
+      const res = await put(
+        app,
+        `/api/v1/wiki/${wiki.id}`,
+        { content: "Pending by global config" },
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.approval_required).toBe(true);
+      expect(res.body.data.display_content).toBe("");
+      expect(res.body.data.pending_diff).toEqual({
+        from: "Approved content",
+        to: "Pending by global config",
+      });
+
+      const updated = await prisma.wikiDocument.findUnique({ where: { id: wiki.id } });
+      expect(updated!.content).toBe("Approved content");
+      expect(updated!.pending_content).toBe("Pending by global config");
+      expect(updated!.status).toBe("pending");
+    });
+
+    it("should allow project wiki approval override to disable global approval", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      await prisma.dataRetentionSettings.create({
+        data: { wiki_approval_required: true },
+      });
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { wiki_approval_required: false },
+      });
+      const wiki = await createTestWiki({
+        project_id: project.id,
+        title: "Override Approval Test",
+        slug: "override-approval-test",
+        content: "Approved content",
+        status: "approved",
+        created_by: user.id,
+      });
+
+      const res = await put(
+        app,
+        `/api/v1/wiki/${wiki.id}`,
+        { content: "Direct edit via project override" },
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.approval_required).toBe(false);
+
+      const updated = await prisma.wikiDocument.findUnique({ where: { id: wiki.id } });
+      expect(updated!.content).toBe("Direct edit via project override");
+      expect(updated!.pending_content).toBeNull();
+      expect(updated!.status).toBe("approved");
+    });
+
     it("should save approved edit to pending_content", async () => {
       const { user, token } = await createTestUser();
+      await prisma.dataRetentionSettings.create({
+        data: { wiki_approval_required: true },
+      });
       const wiki = await createTestWiki({
         title: "Approval Test",
         slug: "approval-test",

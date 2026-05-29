@@ -33,6 +33,7 @@ export const updateProjectSchema = z.object({
   current_season: z.number().int().min(1).optional(),
   delivery_checklist: z.array(deliveryItemSchema).optional(),
   download_link_ttl_seconds: z.number().int().min(90).optional().nullable(),
+  wiki_approval_required: z.boolean().optional().nullable(),
 });
 
 export const projectQuerySchema = z.object({
