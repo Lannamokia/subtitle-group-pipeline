@@ -20,7 +20,8 @@ const slugParamSchema = z.object({ slug: z.string().min(1) });
 router.get("/", validateQuery(wikiQuerySchema), controller.getWikis);
 router.get("/by-slug/:slug", validateParams(slugParamSchema), controller.getWikiBySlug);
 router.get("/slug/:slug", validateParams(slugParamSchema), controller.getWikiBySlug);
-router.get("/:id", validateParams(idParamSchema), controller.getWiki);
+// Smart handler: tries project_id first, then falls back to wiki id lookup
+router.get("/:id", controller.getWikiOrByProjectId);
 router.post("/", authenticate, validateBody(createWikiSchema), controller.createWiki);
 router.patch("/:id", authenticate, validateParams(idParamSchema), validateBody(updateWikiSchema), controller.updateWiki);
 router.put("/:id", authenticate, validateParams(idParamSchema), validateBody(updateWikiSchema), controller.updateWiki);

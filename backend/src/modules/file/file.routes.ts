@@ -172,6 +172,13 @@ router.get(
 // Actual download (token-based, no auth required for the link itself)
 router.get("/download/:token", controller.downloadByToken);
 
+// Compatibility routes for frontend calling /links directly
+router.post("/links", authenticate, validateBody(createLinkSchema), controller.createLink);
+router.delete("/links/:linkId", authenticate, validateParams(z.object({ linkId: z.string().uuid("Invalid link ID") })), controller.deleteLink);
+
+// Compatibility route: POST /files/:fileId/download (frontend uses POST)
+router.post("/files/:fileId/download", authenticate, validateParams(fileIdParamSchema), controller.getDownloadLink);
+
 // Link asset routes
 router.post(
   "/projects/:projectId/links",

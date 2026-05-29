@@ -49,4 +49,7 @@ router.delete("/backends/:id", authenticate, requireRole("super_admin", "group_a
 // Avatar upload endpoint
 router.post("/avatar", authenticate, upload.single("avatar"), controller.uploadAvatar);
 
+// Storage stats endpoint
+router.get("/stats", authenticate, controller.getStorageStats);
+
 export default router;

@@ -37,6 +37,7 @@ router.post(
 
 // Project management
 router.patch("/:id", authenticate, validateParams(idParamSchema), validateBody(updateProjectSchema), controller.updateProject);
+router.put("/:id", authenticate, validateParams(idParamSchema), validateBody(updateProjectSchema), controller.updateProject);
 router.post("/:id/archive", authenticate, validateParams(idParamSchema), controller.archiveProject);
 router.post("/:id/unarchive", authenticate, validateParams(idParamSchema), controller.unarchiveProject);
 router.post("/:id/delete", authenticate, validateParams(idParamSchema), controller.softDeleteProject);

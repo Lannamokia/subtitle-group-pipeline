@@ -65,6 +65,28 @@ export async function getWikiBySlug(
   }
 }
 
+// Smart handler for GET /wiki/:id - tries project_id first, then falls back to wiki id
+export async function getWikiOrByProjectId(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const param = getParam(req, "id");
+    // Try to find by project_id first (for frontend compatibility)
+    const byProject = await wikiService.getWikiByProjectId(param);
+    if (byProject) {
+      successResponse(res, byProject);
+      return;
+    }
+    // Fall back to wiki id lookup
+    const result = await wikiService.getWikiById(param);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function updateWiki(
   req: AuthenticatedRequest,
   res: Response,

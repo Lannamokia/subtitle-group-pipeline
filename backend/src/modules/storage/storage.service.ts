@@ -471,3 +471,24 @@ export async function uploadAvatar(
 
   return { avatarUrl, size };
 }
+
+export async function getStorageStats() {
+  const backends = await prisma.storageBackend.findMany({
+    select: {
+      id: true,
+      quota_bytes: true,
+      used_bytes: true,
+      file_count: true,
+    },
+  });
+
+  const totalQuota = backends.reduce((sum, b) => sum + (b.quota_bytes || 0), 0);
+  const totalUsed = backends.reduce((sum, b) => sum + b.used_bytes, 0);
+  const backendCount = backends.length;
+
+  return {
+    totalQuota,
+    totalUsed,
+    backendCount,
+  };
+}

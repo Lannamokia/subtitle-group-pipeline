@@ -241,3 +241,42 @@ export async function reviewTagApplication(
     next(error);
   }
 }
+
+export async function getAllUsers(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.getAllUsers();
+    successResponse(res, { items: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateUserRole(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.updateUserRole(String(req.params.id), req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateUserStatus(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.updateUserStatus(String(req.params.id), req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}

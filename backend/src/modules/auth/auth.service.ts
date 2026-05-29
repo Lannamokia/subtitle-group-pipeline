@@ -13,6 +13,8 @@ import type {
   UpdateRoleTagInput,
   CreateTagApplicationInput,
   ReviewTagApplicationInput,
+  UpdateUserRoleInput,
+  UpdateUserStatusInput,
 } from "./auth.schema";
 
 function generateVerificationCode(): string {
@@ -642,6 +644,64 @@ export async function reviewTagApplication(adminId: string, data: ReviewTagAppli
     include: {
       tag: true,
       user: { select: { id: true, username: true, nickname: true } },
+    },
+  });
+}
+
+export async function getAllUsers() {
+  return prisma.user.findMany({
+    select: {
+      id: true,
+      username: true,
+      nickname: true,
+      avatar_url: true,
+      role: true,
+      status: true,
+      qq_number: true,
+      created_at: true,
+    },
+    orderBy: { created_at: "desc" },
+  });
+}
+
+export async function updateUserRole(userId: string, data: UpdateUserRoleInput) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+  return prisma.user.update({
+    where: { id: userId },
+    data: { role: data.role },
+    select: {
+      id: true,
+      username: true,
+      nickname: true,
+      avatar_url: true,
+      role: true,
+      status: true,
+    },
+  });
+}
+
+export async function updateUserStatus(userId: string, data: UpdateUserStatusInput) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+  return prisma.user.update({
+    where: { id: userId },
+    data: { status: data.status },
+    select: {
+      id: true,
+      username: true,
+      nickname: true,
+      avatar_url: true,
+      role: true,
+      status: true,
     },
   });
 }

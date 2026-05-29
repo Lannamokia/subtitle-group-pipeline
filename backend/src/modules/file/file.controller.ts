@@ -291,6 +291,20 @@ export async function deleteFile(
   }
 }
 
+// DELETE /links/:linkId - Delete a link asset
+export async function deleteLink(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await fileService.deleteLinkAsset(getParam(req, "linkId"));
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 // GET /upload-policy
 export async function getUploadPolicy(
   req: Request,

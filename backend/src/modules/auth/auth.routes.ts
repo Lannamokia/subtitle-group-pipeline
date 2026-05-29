@@ -14,6 +14,8 @@ import {
   updateRoleTagSchema,
   createTagApplicationSchema,
   reviewTagApplicationSchema,
+  updateUserRoleSchema,
+  updateUserStatusSchema,
 } from "./auth.schema";
 
 const router = Router();
@@ -125,5 +127,11 @@ router.post("/tag-applications", authenticate, validateBody(createTagApplication
 router.get("/tag-applications/my", authenticate, controller.getMyTagApplications);
 router.get("/tag-applications/pending", authenticate, requireRole("super_admin", "group_admin"), controller.getPendingTagApplications);
 router.post("/tag-applications/review", authenticate, requireRole("super_admin", "group_admin"), validateBody(reviewTagApplicationSchema), controller.reviewTagApplication);
+
+// Member management routes (compatibility for /members and /users)
+router.get("/members", authenticate, controller.getAllUsers);
+router.get("/users", authenticate, controller.getAllUsers);
+router.put("/members/:id/role", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserRoleSchema), controller.updateUserRole);
+router.put("/members/:id/status", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserStatusSchema), controller.updateUserStatus);
 
 export default router;

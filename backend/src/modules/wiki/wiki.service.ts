@@ -201,6 +201,38 @@ export async function getWikiBySlug(
   return wiki;
 }
 
+export async function getWikiByProjectId(projectId: string) {
+  const wiki = await prisma.wikiDocument.findFirst({
+    where: {
+      project_id: projectId,
+    },
+    include: {
+      creator: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+        },
+      },
+      comments: {
+        where: { deleted_at: null },
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              nickname: true,
+            },
+          },
+        },
+        orderBy: { created_at: "asc" },
+      },
+    },
+  });
+
+  return wiki;
+}
+
 export async function updateWiki(
   wikiId: string,
   data: UpdateWikiInput,

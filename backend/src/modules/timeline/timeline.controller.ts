@@ -20,7 +20,7 @@ export async function getProjectTimeline(
       pageSize: Number(req.query.pageSize) || 50,
       event_type: req.query.event_type as TimelineEventType | undefined,
     });
-    successResponse(res, result.events, 200, result.meta);
+    successResponse(res, { events: result.events }, 200, result.meta);
   } catch (error) {
     next(error);
   }
@@ -36,7 +36,7 @@ export async function getGlobalTimeline(
       page: Number(req.query.page) || 1,
       pageSize: Number(req.query.pageSize) || 50,
     });
-    successResponse(res, result.events, 200, result.meta);
+    successResponse(res, { events: result.events }, 200, result.meta);
   } catch (error) {
     next(error);
   }

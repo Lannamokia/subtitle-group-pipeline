@@ -829,6 +829,22 @@ export async function getLinkHistory(projectId: string) {
   return links;
 }
 
+export async function deleteLinkAsset(linkId: string) {
+  const link = await prisma.linkHistory.findUnique({
+    where: { id: linkId },
+  });
+
+  if (!link) {
+    throw new AppError("Link not found", "NOT_FOUND", 404);
+  }
+
+  await prisma.linkHistory.delete({
+    where: { id: linkId },
+  });
+
+  return { success: true };
+}
+
 // ============ Batch Operations ============
 
 export async function batchAssignTasks(

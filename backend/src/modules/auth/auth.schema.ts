@@ -75,6 +75,14 @@ export const reviewTagApplicationSchema = z.object({
   rejection_reason: z.string().max(500).optional(),
 });
 
+export const updateUserRoleSchema = z.object({
+  role: z.enum(["super_admin", "group_admin", "supervisor", "member"]),
+});
+
+export const updateUserStatusSchema = z.object({
+  status: z.enum(["active", "disabled", "pending_verification"]),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
@@ -86,3 +94,5 @@ export type CreateRoleTagInput = z.infer<typeof createRoleTagSchema>;
 export type UpdateRoleTagInput = z.infer<typeof updateRoleTagSchema>;
 export type CreateTagApplicationInput = z.infer<typeof createTagApplicationSchema>;
 export type ReviewTagApplicationInput = z.infer<typeof reviewTagApplicationSchema>;
+export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
+export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;

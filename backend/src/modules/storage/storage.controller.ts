@@ -114,3 +114,16 @@ export async function uploadAvatar(
     next(error);
   }
 }
+
+export async function getStorageStats(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await storageService.getStorageStats();
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
