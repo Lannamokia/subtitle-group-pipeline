@@ -30,7 +30,7 @@ export async function getWikis(
     const result = await wikiService.getWikis(
       req.query as unknown as Parameters<typeof wikiService.getWikis>[0]
     );
-    successResponse(res, result.wikis, 200, result.meta);
+    successResponse(res, { wikis: result.wikis }, 200, result.meta);
   } catch (error) {
     next(error);
   }
@@ -125,7 +125,11 @@ export async function createComment(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.createComment(req.user!.id, req.body);
+    const wikiId = req.params.wikiId as string | undefined;
+    const result = await wikiService.createComment(req.user!.id, {
+      ...req.body,
+      wiki_id: req.body.wiki_id ?? wikiId,
+    });
     successResponse(res, result, 201);
   } catch (error) {
     next(error);

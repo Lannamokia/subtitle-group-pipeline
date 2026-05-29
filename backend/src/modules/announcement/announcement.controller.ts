@@ -33,7 +33,7 @@ export async function getAnnouncements(
     const result = await announcementService.getAnnouncements(
       req.query as unknown as Parameters<typeof announcementService.getAnnouncements>[0]
     );
-    successResponse(res, result.announcements, 200, result.meta);
+    successResponse(res, { announcements: result.announcements }, 200, result.meta);
   } catch (error) {
     next(error);
   }

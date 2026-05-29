@@ -26,6 +26,42 @@ function getParam(req: Request, name: string): string {
   return Array.isArray(val) ? val[0] : val;
 }
 
+function getProjectId(req: Request): string {
+  const paramProjectId = getParam(req, "projectId");
+  if (paramProjectId) {
+    return paramProjectId;
+  }
+
+  const queryProjectId = req.query.project_id;
+  if (typeof queryProjectId === "string") {
+    return queryProjectId;
+  }
+
+  if (Array.isArray(queryProjectId)) {
+    return typeof queryProjectId[0] === "string" ? queryProjectId[0] : "";
+  }
+
+  return "";
+}
+
+function getRequestedTtl(req: Request): number {
+  const queryTtl = req.query.ttl;
+  if (typeof queryTtl === "string") {
+    return parseInt(queryTtl, 10);
+  }
+
+  const bodyTtl = (req.body as { ttl?: unknown } | undefined)?.ttl;
+  if (typeof bodyTtl === "number") {
+    return bodyTtl;
+  }
+
+  if (typeof bodyTtl === "string") {
+    return parseInt(bodyTtl, 10);
+  }
+
+  return 300;
+}
+
 // POST /projects/:projectId/files - Upload new file
 export async function uploadFile(
   req: AuthenticatedRequest,
@@ -66,7 +102,7 @@ export async function getProjectFiles(
 ): Promise<void> {
   try {
     const result = await fileService.getProjectFiles(
-      getParam(req, "projectId"),
+      getProjectId(req),
       req.query as unknown as Parameters<typeof fileService.getProjectFiles>[1]
     );
     successResponse(res, { files: result.files, links: result.links }, 200, result.meta);
@@ -128,7 +164,7 @@ export async function getDownloadLink(
   next: NextFunction
 ): Promise<void> {
   try {
-    const ttl = req.query.ttl ? parseInt(req.query.ttl as string, 10) : 300;
+    const ttl = getRequestedTtl(req);
     const result = await fileService.getDownloadLink(
       getParam(req, "fileId"),
       req.user!.id,
@@ -234,7 +270,7 @@ export async function getLinks(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await fileService.getLinkHistory(getParam(req, "projectId"));
+    const result = await fileService.getLinkHistory(getProjectId(req));
     successResponse(res, result);
   } catch (error) {
     next(error);

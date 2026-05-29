@@ -1,2 +1,18 @@
 node_modules
 backend/node_modules
+
+# Backend build artifacts
+backend/dist/
+backend/coverage/
+*.tsbuildinfo
+
+# Local SQLite files
+backend/prisma/*.db
+backend/prisma/*.db-*
+
+# Local review notes
+/TEST_REVIEW_NOTES_2026-05-29.md
+/AGENT_HANDOFF_REPORT_2026-05-29.md
+
+# Test artifacts
+backend/uploads/

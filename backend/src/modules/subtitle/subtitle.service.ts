@@ -1218,16 +1218,15 @@ export async function compareVersions(
     const line1 = map1.get(key);
     if (!line1) {
       added.push(line2);
-    } else if (line1.text !== line2.text) {
-      modified.push({ old: line1, new: line2 });
-    } else {
+    } else if (line1.text === line2.text) {
       unchanged.push(line2);
     }
   }
 
   // Find removed
   for (const [key, line1] of map1.entries()) {
-    if (!map2.has(key)) {
+    const line2 = map2.get(key);
+    if (!line2 || line1.text !== line2.text) {
       removed.push(line1);
     }
   }

@@ -144,19 +144,19 @@ export async function validateUpload(
     };
   }
 
-  // Check size
-  if (file.size > maxSize) {
-    return {
-      valid: false,
-      error: `File size ${file.size} exceeds maximum allowed ${maxSize} bytes`,
-    };
-  }
-
   // Check global max size from env
   if (file.size > env.UPLOAD_MAX_SIZE) {
     return {
       valid: false,
       error: `File size exceeds global maximum of ${env.UPLOAD_MAX_SIZE} bytes`,
+    };
+  }
+
+  // Check project/policy size limit after the system-wide cap
+  if (file.size > maxSize) {
+    return {
+      valid: false,
+      error: `File size ${file.size} exceeds maximum allowed ${maxSize} bytes`,
     };
   }
 
@@ -664,7 +664,8 @@ export async function getDownloadLink(
   // Calculate TTL
   const ttlSeconds = getMinimumTtl(file.file_type, requestedTtl);
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+  const nextSecond = Math.ceil(now.getTime() / 1000) * 1000;
+  const expiresAt = new Date(nextSecond + ttlSeconds * 1000);
 
   // Check for existing non-expired link for same user+file
   const existingLink = await prisma.downloadLink.findFirst({

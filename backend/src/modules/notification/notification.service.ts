@@ -10,6 +10,8 @@ import type {
 import { renderNotificationTemplate, getNotificationTypePreferenceKey } from "./templates";
 import { executeDelivery, retryFailedDelivery, sendQQGroupNotification } from "./delivery.service";
 
+export { sendQQGroupNotification };
+
 // ==================== Core Notification CRUD ====================
 
 export async function getNotifications(
@@ -147,6 +149,26 @@ export interface NotificationContext {
   extra?: Record<string, unknown>;
 }
 
+async function resolveNotificationReferenceIds(context: NotificationContext) {
+  const [project, task, actor] = await Promise.all([
+    context.projectId
+      ? prisma.project.findUnique({ where: { id: context.projectId }, select: { id: true } })
+      : Promise.resolve(null),
+    context.taskId
+      ? prisma.task.findUnique({ where: { id: context.taskId }, select: { id: true } })
+      : Promise.resolve(null),
+    context.actorId
+      ? prisma.user.findUnique({ where: { id: context.actorId }, select: { id: true } })
+      : Promise.resolve(null),
+  ]);
+
+  return {
+    projectId: project?.id,
+    taskId: task?.id,
+    actorId: actor?.id,
+  };
+}
+
 export async function createNotification(
   userId: string,
   type: NotificationType,
@@ -160,15 +182,17 @@ export async function createNotification(
     reason: context.reason,
   });
 
+  const referenceIds = await resolveNotificationReferenceIds(context);
+
   const notification = await prisma.notification.create({
     data: {
       user_id: userId,
       type,
       title,
       content,
-      project_id: context.projectId,
-      task_id: context.taskId,
-      actor_id: context.actorId,
+      project_id: referenceIds.projectId,
+      task_id: referenceIds.taskId,
+      actor_id: referenceIds.actorId,
       channels: JSON.stringify([NotificationChannel.in_site]),
     },
   });
@@ -336,6 +360,14 @@ export async function resolveRecipients(
         for (const m of members) {
           if (m.user_id !== context.actorId) recipients.push(m.user_id);
         }
+
+        const project = await prisma.project.findUnique({
+          where: { id: context.projectId },
+          select: { owner_id: true },
+        });
+        if (project?.owner_id && project.owner_id !== context.actorId) {
+          recipients.push(project.owner_id);
+        }
       }
       break;
 
@@ -393,6 +425,14 @@ export async function resolveRecipients(
           select: { user_id: true },
         });
         for (const s of supervisors) recipients.push(s.user_id);
+
+        const project = await prisma.project.findUnique({
+          where: { id: context.projectId },
+          select: { owner_id: true },
+        });
+        if (project?.owner_id) {
+          recipients.push(project.owner_id);
+        }
       }
       break;
 
@@ -429,6 +469,14 @@ export async function resolveRecipients(
             if (!recipients.includes(s.user_id)) {
               recipients.push(s.user_id);
             }
+          }
+
+          const project = await prisma.project.findUnique({
+            where: { id: task.project_id },
+            select: { owner_id: true },
+          });
+          if (project?.owner_id && !recipients.includes(project.owner_id)) {
+            recipients.push(project.owner_id);
           }
         }
       }

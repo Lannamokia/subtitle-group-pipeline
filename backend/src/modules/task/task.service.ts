@@ -1215,6 +1215,23 @@ export async function claimTranslationSegment(
     );
   }
 
+  // Check per-user max segment limit (default: 3 segments per task per user)
+  const userClaimCount = await prisma.translationClaim.count({
+    where: {
+      task_id: taskId,
+      user_id: userId,
+      status: { in: ["pending", "active"] },
+    },
+  });
+
+  if (userClaimCount >= 3) {
+    throw new AppError(
+      "You have reached the maximum number of segments (3) for this task",
+      "BAD_REQUEST",
+      400
+    );
+  }
+
   // Validate within episode length if available
   if (task.unit?.episode_length) {
     if (data.segment_end > task.unit.episode_length) {
@@ -1253,23 +1270,6 @@ export async function claimTranslationSegment(
       "These segments are already claimed",
       "CONFLICT",
       409
-    );
-  }
-
-  // Check per-user max segment limit (default: 3 segments per task per user)
-  const userClaimCount = await prisma.translationClaim.count({
-    where: {
-      task_id: taskId,
-      user_id: userId,
-      status: { in: ["pending", "active"] },
-    },
-  });
-
-  if (userClaimCount >= 3) {
-    throw new AppError(
-      "You have reached the maximum number of segments (3) for this task",
-      "BAD_REQUEST",
-      400
     );
   }
 

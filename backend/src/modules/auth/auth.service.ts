@@ -284,11 +284,20 @@ export async function verifyByQQ(data: VerifyQQInput) {
   }
 
   // Activate the user
-  await prisma.user.update({
+  const activatedUser = await prisma.user.update({
     where: { id: userId },
     data: {
       status: "active",
       qq_number: data.qq_number || user.qq_number,
+    },
+    select: {
+      id: true,
+      username: true,
+      nickname: true,
+      email: true,
+      role: true,
+      status: true,
+      avatar_url: true,
     },
   });
 
@@ -315,14 +324,7 @@ export async function verifyByQQ(data: VerifyQQInput) {
 
   return {
     success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      nickname: user.nickname,
-      email: user.email,
-      role: user.role,
-      avatar_url: user.avatar_url,
-    },
+    user: activatedUser,
     token,
     refreshToken,
   };

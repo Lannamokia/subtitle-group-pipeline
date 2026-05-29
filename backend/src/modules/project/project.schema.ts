@@ -27,8 +27,8 @@ export const updateProjectSchema = z.object({
 });
 
 export const projectQuerySchema = z.object({
-  page: z.string().optional().transform(Number).default("1"),
-  pageSize: z.string().optional().transform(Number).default("20"),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
   status: z.nativeEnum(ProjectStatus).optional(),
   project_type: z.nativeEnum(ProjectType).optional(),
   supervisor_id: z.string().uuid().optional(),

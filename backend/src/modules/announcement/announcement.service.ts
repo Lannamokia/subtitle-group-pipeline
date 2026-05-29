@@ -14,6 +14,20 @@ export async function createGlobalAnnouncement(
     throw new AppError("Use createProjectAnnouncement for project announcements", "BAD_REQUEST", 400);
   }
 
+  const creator = await prisma.user.findUnique({
+    where: { id: creatorId },
+    select: { role: true },
+  });
+
+  const canCreateGlobal =
+    creator?.role === "super_admin" ||
+    creator?.role === "group_admin" ||
+    creator?.role === "supervisor";
+
+  if (!canCreateGlobal) {
+    throw new AppError("Only supervisors or admins can create global announcements", "FORBIDDEN", 403);
+  }
+
   const announcement = await prisma.announcement.create({
     data: {
       type: "global",
@@ -64,10 +78,16 @@ export async function createProjectAnnouncement(
     select: { role: true },
   });
 
+  const project = await prisma.project.findUnique({
+    where: { id: data.project_id },
+    select: { owner_id: true },
+  });
+
   const isSupervisor = membership?.is_lead || membership?.role === "supervisor";
   const isAdmin = creator?.role === "super_admin" || creator?.role === "group_admin";
+  const isOwner = project?.owner_id === creatorId;
 
-  if (!isSupervisor && !isAdmin) {
+  if (!isSupervisor && !isAdmin && !isOwner) {
     throw new AppError("Only project supervisors or admins can create project announcements", "FORBIDDEN", 403);
   }
 

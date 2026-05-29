@@ -390,6 +390,36 @@ export async function deleteWiki(wikiId: string, actorId?: string) {
     throw new AppError("Wiki document not found", "NOT_FOUND", 404);
   }
 
+  if (!actorId) {
+    throw new AppError("Authentication required", "FORBIDDEN", 403);
+  }
+
+  const actor = await prisma.user.findUnique({
+    where: { id: actorId },
+    select: { role: true },
+  });
+
+  const isAdmin = actor?.role === "super_admin" || actor?.role === "group_admin";
+  const isOwner = existing.created_by === actorId;
+
+  let isProjectSupervisor = false;
+  if (existing.project_id && !isAdmin && !isOwner) {
+    const membership = await prisma.projectMember.findUnique({
+      where: {
+        project_id_user_id: {
+          project_id: existing.project_id,
+          user_id: actorId,
+        },
+      },
+      select: { role: true, is_lead: true },
+    });
+    isProjectSupervisor = membership?.is_lead === true || membership?.role === "supervisor";
+  }
+
+  if (!isAdmin && !isOwner && !isProjectSupervisor) {
+    throw new AppError("Not authorized to delete this wiki", "FORBIDDEN", 403);
+  }
+
   await prisma.wikiDocument.delete({
     where: { id: wikiId },
   });
