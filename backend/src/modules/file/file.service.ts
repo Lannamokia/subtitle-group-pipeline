@@ -10,7 +10,7 @@ import type {
   FileQueryInput,
   UpdateUploadPolicyInput,
 } from "./file.schema";
-import type { UserRole, TaskRole } from "@prisma/client";
+import { FileType, TaskRole, UserRole } from "@prisma/client";
 
 // ============ Upload Policy ============
 
@@ -93,6 +93,259 @@ const BLOCKED_MIME_PATTERNS = [
   /^application\/x-sh/,
 ];
 
+type PolicyRule =
+  | string[]
+  | {
+      mime_types?: string[];
+      mimeTypes?: string[];
+      file_types?: string[];
+      fileTypes?: string[];
+      extensions?: string[];
+      allowed_types?: string[];
+      allowedTypes?: string[];
+    };
+
+interface NormalizedPolicyRule {
+  raw: string[];
+  mimeTypes: string[];
+  fileTypes: string[];
+  extensions: string[];
+}
+
+function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizePolicyRule(rule: PolicyRule | unknown): NormalizedPolicyRule {
+  if (Array.isArray(rule)) {
+    const raw = normalizeStringList(rule);
+    return {
+      raw,
+      mimeTypes: raw.filter((value) => value.includes("/") || value === "*" || value === "*/*"),
+      fileTypes: raw.filter((value) => Object.values(FileType).includes(value as FileType)),
+      extensions: raw.filter((value) => value.startsWith(".")),
+    };
+  }
+
+  if (rule && typeof rule === "object") {
+    const obj = rule as Record<string, unknown>;
+    const raw = [
+      ...normalizeStringList(obj.allowed_types),
+      ...normalizeStringList(obj.allowedTypes),
+    ];
+    const mimeTypes = [
+      ...normalizeStringList(obj.mime_types),
+      ...normalizeStringList(obj.mimeTypes),
+    ];
+    const fileTypes = [
+      ...normalizeStringList(obj.file_types),
+      ...normalizeStringList(obj.fileTypes),
+    ];
+    const extensions = normalizeStringList(obj.extensions);
+
+    return {
+      raw: [...raw, ...mimeTypes, ...fileTypes, ...extensions],
+      mimeTypes,
+      fileTypes,
+      extensions,
+    };
+  }
+
+  return { raw: [], mimeTypes: [], fileTypes: [], extensions: [] };
+}
+
+function mergePolicyRules(rules: NormalizedPolicyRule[]): NormalizedPolicyRule {
+  const unique = (values: string[]) => Array.from(new Set(values));
+  return {
+    raw: unique(rules.flatMap((rule) => rule.raw)),
+    mimeTypes: unique(rules.flatMap((rule) => rule.mimeTypes)),
+    fileTypes: unique(rules.flatMap((rule) => rule.fileTypes)),
+    extensions: unique(rules.flatMap((rule) => rule.extensions)),
+  };
+}
+
+function roleRuleFromPolicy(
+  policyConfig: unknown,
+  role: TaskRole | undefined,
+  userRole: UserRole
+): NormalizedPolicyRule | null {
+  if (Array.isArray(policyConfig)) {
+    return normalizePolicyRule(policyConfig);
+  }
+
+  if (!policyConfig || typeof policyConfig !== "object") {
+    return null;
+  }
+
+  const obj = policyConfig as Record<string, unknown>;
+  const globalRuleKeys = ["allowed_types", "allowedTypes", "mime_types", "mimeTypes", "file_types", "fileTypes", "extensions"];
+  if (globalRuleKeys.some((key) => obj[key] !== undefined)) {
+    return normalizePolicyRule(obj);
+  }
+
+  const matrix = (obj.roles && typeof obj.roles === "object"
+    ? obj.roles
+    : obj.byRole && typeof obj.byRole === "object"
+      ? obj.byRole
+      : obj) as Record<string, unknown>;
+
+  if (role && matrix[role]) {
+    return normalizePolicyRule(matrix[role]);
+  }
+
+  if (userRole === "supervisor" && matrix.supervisor) {
+    return normalizePolicyRule(matrix.supervisor);
+  }
+
+  if (userRole === "super_admin" || userRole === "group_admin") {
+    return mergePolicyRules(Object.values(matrix).map((rule) => normalizePolicyRule(rule)));
+  }
+
+  return null;
+}
+
+function matchesAllowedType(
+  rule: NormalizedPolicyRule,
+  mimetype: string,
+  ext: string,
+  fileType?: FileType
+): boolean {
+  const allAllowedValues = [...rule.raw, ...rule.mimeTypes, ...rule.fileTypes, ...rule.extensions];
+  if (allAllowedValues.includes("*") || allAllowedValues.includes("*/*")) {
+    return true;
+  }
+
+  const mimeMatches = [...rule.raw, ...rule.mimeTypes].some((allowed) => {
+    if (allowed === mimetype) {
+      return true;
+    }
+    if (allowed.endsWith("/*")) {
+      return mimetype.startsWith(`${allowed.slice(0, -1)}`);
+    }
+    return false;
+  });
+
+  const fileTypeMatches = fileType
+    ? [...rule.raw, ...rule.fileTypes].includes(fileType)
+    : false;
+  const extensionMatches = ext
+    ? [...rule.raw, ...rule.extensions].includes(ext)
+    : false;
+
+  return mimeMatches || fileTypeMatches || extensionMatches;
+}
+
+async function resolveUploadRole(
+  projectId: string,
+  userRole: UserRole,
+  userId?: string,
+  explicitRole?: TaskRole
+): Promise<TaskRole | undefined> {
+  if (explicitRole) {
+    return explicitRole;
+  }
+
+  if (userId) {
+    const membership = await prisma.projectMember.findFirst({
+      where: {
+        project_id: projectId,
+        user_id: userId,
+        left_at: null,
+      },
+      orderBy: { joined_at: "desc" },
+    });
+
+    if (membership) {
+      return membership.role;
+    }
+  }
+
+  if (userRole === "supervisor") {
+    return "supervisor";
+  }
+
+  return undefined;
+}
+
+function parseMetadata(metadata: string | null | undefined): Record<string, unknown> {
+  const parsed = safeJsonParse<unknown>(metadata, {});
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {};
+}
+
+function metadataStringForUpload(data: UploadFileInput): string | null | undefined {
+  const metadata = parseMetadata(data.metadata);
+  const taskId = data.task_id || data.taskId;
+  const unitId = data.unit_id || data.unitId;
+
+  if (taskId) {
+    metadata.task_id = taskId;
+  }
+  if (unitId) {
+    metadata.unit_id = unitId;
+  }
+  if (data.role) {
+    metadata.role = data.role;
+  }
+
+  return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : data.metadata;
+}
+
+function getMetadataStringValue(metadata: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function parseTagList(tags: string | null | undefined): string[] {
+  if (!tags) {
+    return [];
+  }
+
+  const parsed = safeJsonParse<unknown>(tags, null);
+  if (Array.isArray(parsed)) {
+    return normalizeStringList(parsed);
+  }
+
+  return tags
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function requestedTags(query: FileQueryInput): string[] {
+  return [
+    ...(query.tag ? [query.tag] : []),
+    ...(query.tags ? query.tags.split(",") : []),
+  ]
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
 export interface ValidationResult {
   valid: boolean;
   error?: string;
@@ -105,7 +358,12 @@ export async function validateUpload(
     size: number;
   },
   projectId: string,
-  userRole: UserRole
+  userRole: UserRole,
+  options: {
+    userId?: string;
+    taskRole?: TaskRole;
+    fileType?: FileType;
+  } = {}
 ): Promise<ValidationResult> {
   // Check blocked extensions (security)
   const ext = path.extname(file.originalname).toLowerCase();
@@ -122,17 +380,39 @@ export async function validateUpload(
 
   // Get policy
   const policy = await getUploadPolicy(projectId);
-  const allowedTypes = JSON.parse(policy.allowed_types) as string[];
+  const policyConfig = safeJsonParse<unknown>(policy.allowed_types, []);
+  const taskRole = await resolveUploadRole(
+    projectId,
+    userRole,
+    options.userId,
+    options.taskRole
+  );
+  const allowedRule = roleRuleFromPolicy(policyConfig, taskRole, userRole);
   const maxSize = policy.max_size_bytes;
   const whitelist = policy.extension_whitelist
-    ? (JSON.parse(policy.extension_whitelist) as string[])
+    ? safeJsonParse<string[]>(policy.extension_whitelist, [])
     : null;
 
-  // Check MIME type
-  if (!allowedTypes.includes(file.mimetype) && !allowedTypes.includes("*/*")) {
+  if (!allowedRule || allowedRule.raw.length + allowedRule.mimeTypes.length + allowedRule.fileTypes.length + allowedRule.extensions.length === 0) {
     return {
       valid: false,
-      error: `File type ${file.mimetype} is not allowed. Allowed: ${allowedTypes.join(", ")}`,
+      error: taskRole
+        ? `No upload policy is configured for role ${taskRole}`
+        : "No upload policy is configured for the uploader role",
+    };
+  }
+
+  // Check MIME/file asset type against global or role-specific policy
+  if (!matchesAllowedType(allowedRule, file.mimetype, ext, options.fileType)) {
+    const allowed = [
+      ...allowedRule.raw,
+      ...allowedRule.mimeTypes,
+      ...allowedRule.fileTypes,
+      ...allowedRule.extensions,
+    ];
+    return {
+      valid: false,
+      error: `File type ${file.mimetype}${options.fileType ? `/${options.fileType}` : ""} is not allowed for ${taskRole || userRole}. Allowed: ${Array.from(new Set(allowed)).join(", ")}`,
     };
   }
 
@@ -187,11 +467,40 @@ export async function uploadFile(
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
 
+  const uploader = await prisma.user.findUnique({
+    where: { id: uploaderId },
+    select: { role: true },
+  });
+
+  if (!uploader) {
+    throw new AppError("Uploader not found", "NOT_FOUND", 404);
+  }
+
+  const uploadValidation = await validateUpload(
+    {
+      originalname: data.name,
+      mimetype: data.mime_type,
+      size: data.size_bytes,
+    },
+    data.project_id,
+    uploader.role,
+    {
+      userId: uploaderId,
+      taskRole: data.role,
+      fileType: data.file_type,
+    }
+  );
+
+  if (!uploadValidation.valid) {
+    throw new AppError(uploadValidation.error || "Invalid upload", "VALIDATION_ERROR", 400);
+  }
+
   // Determine storage backend
   const storageBackendId = data.storage_backend_id || project.storage_backend_id;
 
   // Sanitize filename
   const sanitizedName = sanitizeFilename(data.name);
+  const metadata = metadataStringForUpload(data);
 
   // Create file entity
   const file = await prisma.fileEntity.create({
@@ -206,7 +515,7 @@ export async function uploadFile(
       storage_path: data.storage_path,
       storage_backend_id: storageBackendId,
       checksum: data.checksum,
-      metadata: data.metadata,
+      metadata,
       tags: data.tags,
     },
     include: {
@@ -269,6 +578,37 @@ export async function replaceFile(
 
   if (file.is_deleted) {
     throw new AppError("Cannot replace a deleted file", "BAD_REQUEST", 400);
+  }
+
+  const uploader = await prisma.user.findUnique({
+    where: { id: uploaderId },
+    select: { role: true },
+  });
+  if (!uploader) {
+    throw new AppError("Uploader not found", "NOT_FOUND", 404);
+  }
+
+  const metadata = parseMetadata(data.metadata ?? file.metadata);
+  const metadataRole = getMetadataStringValue(metadata, "role", "task_role");
+  const validation = await validateUpload(
+    {
+      originalname: data.name || file.name,
+      mimetype: data.mime_type,
+      size: data.size_bytes,
+    },
+    file.project_id,
+    uploader.role,
+    {
+      userId: uploaderId,
+      taskRole: metadataRole && Object.values(TaskRole).includes(metadataRole as TaskRole)
+        ? metadataRole as TaskRole
+        : undefined,
+      fileType: file.file_type,
+    }
+  );
+
+  if (!validation.valid) {
+    throw new AppError(validation.error || "Invalid upload", "VALIDATION_ERROR", 400);
   }
 
   const latestVersion = file.versions[0];
@@ -380,16 +720,38 @@ export async function getProjectFiles(
   const pageSize = query.pageSize || 20;
   const skip = (page - 1) * pageSize;
 
-  const where: Record<string, unknown> = {
-    project_id: projectId,
-  };
+  const resolvedProjectId = projectId || query.project_id || query.projectId;
+  const resolvedFileType = query.file_type || query.type;
+  const resolvedUnitId = query.unit_id || query.unitId;
+  const resolvedTaskId = query.task_id || query.taskId;
+  const resolvedUploaderId = query.uploader_id || query.uploaderId;
+  const uploadedFrom = query.uploaded_from || query.uploadedFrom;
+  const uploadedTo = query.uploaded_to || query.uploadedTo;
+  const tagFilters = requestedTags(query);
+
+  const where: Record<string, unknown> = {};
+
+  if (resolvedProjectId) {
+    where.project_id = resolvedProjectId;
+  }
 
   if (!query.include_deleted) {
     where.is_deleted = false;
   }
 
-  if (query.file_type) {
-    where.file_type = query.file_type;
+  if (resolvedFileType) {
+    where.file_type = resolvedFileType;
+  }
+
+  if (resolvedUploaderId) {
+    where.uploader_id = resolvedUploaderId;
+  }
+
+  if (uploadedFrom || uploadedTo) {
+    where.created_at = {
+      ...(uploadedFrom ? { gte: new Date(uploadedFrom) } : {}),
+      ...(uploadedTo ? { lte: new Date(uploadedTo) } : {}),
+    };
   }
 
   if (query.search) {
@@ -399,32 +761,80 @@ export async function getProjectFiles(
     ];
   }
 
-  const [files, total] = await Promise.all([
-    prisma.fileEntity.findMany({
-      where,
-      skip,
-      take: pageSize,
-      orderBy: { created_at: "desc" },
-      include: {
-        uploader: {
-          select: {
-            id: true,
-            username: true,
-            nickname: true,
-          },
-        },
-        versions: {
-          orderBy: { version_number: "desc" },
-          take: 5,
+  const files = await prisma.fileEntity.findMany({
+    where,
+    orderBy: { created_at: "desc" },
+    include: {
+      uploader: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
         },
       },
-    }),
-    prisma.fileEntity.count({ where }),
-  ]);
+      versions: {
+        orderBy: { version_number: "desc" },
+        take: 5,
+      },
+      _count: {
+        select: { versions: true },
+      },
+    },
+  });
 
-  // Merge with link history
+  const decorateFile = (file: typeof files[number]) => {
+    const metadata = parseMetadata(file.metadata);
+    const fileTags = parseTagList(file.tags);
+    const currentVersion =
+      file.versions.find((version) => version.is_current) ||
+      file.versions.find((version) => version.is_latest_approved) ||
+      file.versions.find((version) => version.is_latest) ||
+      file.versions[0] ||
+      null;
+
+    return {
+      ...file,
+      metadata_json: metadata,
+      tag_list: fileTags,
+      task_id: getMetadataStringValue(metadata, "task_id", "taskId"),
+      unit_id: getMetadataStringValue(metadata, "unit_id", "unitId"),
+      role: getMetadataStringValue(metadata, "role", "task_role"),
+      current_version: currentVersion,
+      version_count: file._count.versions,
+      has_multiple_versions: file._count.versions > 1,
+      latest_update_at: file.versions[0]?.created_at || file.created_at,
+    };
+  };
+
+  const decoratedFiles = files.map(decorateFile).filter((file) => {
+    if (resolvedUnitId && file.unit_id !== resolvedUnitId) {
+      return false;
+    }
+    if (resolvedTaskId && file.task_id !== resolvedTaskId) {
+      return false;
+    }
+    if (query.role && file.role !== query.role) {
+      return false;
+    }
+    if (tagFilters.length > 0 && !tagFilters.every((tag) => file.tag_list.includes(tag))) {
+      return false;
+    }
+    return true;
+  });
+
+  const linkWhere: Record<string, unknown> = {};
+  if (resolvedProjectId) {
+    linkWhere.project_id = resolvedProjectId;
+  }
+  if (uploadedFrom || uploadedTo) {
+    linkWhere.created_at = {
+      ...(uploadedFrom ? { gte: new Date(uploadedFrom) } : {}),
+      ...(uploadedTo ? { lte: new Date(uploadedTo) } : {}),
+    };
+  }
+
   const linkHistory = await prisma.linkHistory.findMany({
-    where: { project_id: projectId },
+    where: linkWhere,
     orderBy: { created_at: "desc" },
     include: {
       file: {
@@ -432,19 +842,95 @@ export async function getProjectFiles(
           id: true,
           name: true,
           file_type: true,
+          metadata: true,
+          tags: true,
         },
       },
     },
   });
 
+  const creatorIds = Array.from(new Set(linkHistory.map((link) => link.created_by)));
+  const creators = creatorIds.length > 0
+    ? await prisma.user.findMany({
+        where: { id: { in: creatorIds } },
+        select: { id: true, username: true, nickname: true },
+      })
+    : [];
+  const creatorMap = new Map(creators.map((creator) => [creator.id, creator]));
+
+  const decoratedLinks = linkHistory.map((link) => {
+    const metadata = parseMetadata(link.file?.metadata);
+    const linkTags = parseTagList(link.file?.tags);
+    return {
+      ...link,
+      asset_kind: "link" as const,
+      name: link.description || link.file?.name || link.url,
+      file_type: link.file?.file_type || FileType.other,
+      uploader_id: link.created_by,
+      uploader: creatorMap.get(link.created_by) || null,
+      metadata_json: metadata,
+      tag_list: linkTags,
+      task_id: getMetadataStringValue(metadata, "task_id", "taskId"),
+      unit_id: getMetadataStringValue(metadata, "unit_id", "unitId"),
+      role: getMetadataStringValue(metadata, "role", "task_role"),
+      current_version: null,
+      version_count: 1,
+      has_multiple_versions: false,
+      latest_update_at: link.created_at,
+    };
+  }).filter((link) => {
+    if (resolvedFileType && link.file_type !== resolvedFileType) {
+      return false;
+    }
+    if (resolvedUploaderId && link.created_by !== resolvedUploaderId) {
+      return false;
+    }
+    if (resolvedUnitId && link.unit_id !== resolvedUnitId) {
+      return false;
+    }
+    if (resolvedTaskId && link.task_id !== resolvedTaskId) {
+      return false;
+    }
+    if (query.role && link.role !== query.role) {
+      return false;
+    }
+    if (tagFilters.length > 0 && !tagFilters.every((tag) => link.tag_list.includes(tag))) {
+      return false;
+    }
+    if (query.search) {
+      const needle = query.search.toLowerCase();
+      const haystack = [
+        link.name,
+        link.url,
+        link.link_type,
+        link.file?.name,
+      ]
+        .filter((value): value is string => typeof value === "string")
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    }
+    return true;
+  });
+
+  const binaryItems = decoratedFiles.map((file) => ({
+    ...file,
+    asset_kind: "binary" as const,
+  }));
+  const items = [...binaryItems, ...decoratedLinks]
+    .sort((a, b) => b.latest_update_at.getTime() - a.latest_update_at.getTime());
+  const pagedItems = items.slice(skip, skip + pageSize);
+  const itemIds = new Set(pagedItems.map((item) => `${item.asset_kind}:${item.id}`));
+
   return {
-    files,
-    links: linkHistory,
+    files: binaryItems.filter((file) => itemIds.has(`binary:${file.id}`)),
+    links: decoratedLinks.filter((link) => itemIds.has(`link:${link.id}`)),
+    items: pagedItems,
     meta: {
       page,
       pageSize,
-      total,
-      totalPages: Math.ceil(total / pageSize),
+      total: items.length,
+      totalPages: Math.ceil(items.length / pageSize),
     },
   };
 }
@@ -479,6 +965,9 @@ export async function getFileById(fileId: string) {
           },
         },
       },
+      _count: {
+        select: { versions: true },
+      },
     },
   });
 
@@ -486,7 +975,26 @@ export async function getFileById(fileId: string) {
     throw new AppError("File not found", "NOT_FOUND", 404);
   }
 
-  return file;
+  const metadata = parseMetadata(file.metadata);
+  const currentVersion =
+    file.versions.find((version) => version.is_current) ||
+    file.versions.find((version) => version.is_latest_approved) ||
+    file.versions.find((version) => version.is_latest) ||
+    file.versions[0] ||
+    null;
+
+  return {
+    ...file,
+    metadata_json: metadata,
+    tag_list: parseTagList(file.tags),
+    task_id: getMetadataStringValue(metadata, "task_id", "taskId"),
+    unit_id: getMetadataStringValue(metadata, "unit_id", "unitId"),
+    role: getMetadataStringValue(metadata, "role", "task_role"),
+    current_version: currentVersion,
+    version_count: file._count.versions,
+    has_multiple_versions: file._count.versions > 1,
+    latest_update_at: file.versions[0]?.created_at || file.created_at,
+  };
 }
 
 // ============ Get File Versions ============
@@ -601,7 +1109,7 @@ export async function getDownloadLink(
   userId: string,
   userRole: UserRole,
   requestedTtl: number = 300
-): Promise<{ downloadUrl: string; expiresAt: Date }> {
+): Promise<{ downloadUrl: string; url: string; expiresAt: Date }> {
   const file = await prisma.fileEntity.findUnique({
     where: { id: fileId },
     include: {
@@ -686,6 +1194,7 @@ export async function getDownloadLink(
     if (timeUntilExpiry > reuseThreshold) {
       return {
         downloadUrl: `${env.API_PREFIX}/download/${existingLink.token}`,
+        url: `${env.API_PREFIX}/download/${existingLink.token}`,
         expiresAt: existingLink.expires_at,
       };
     }
@@ -726,6 +1235,7 @@ export async function getDownloadLink(
 
   return {
     downloadUrl,
+    url: downloadUrl,
     expiresAt,
   };
 }
@@ -768,8 +1278,13 @@ export async function createLinkAsset(
   creatorId: string,
   data: CreateLinkInput
 ) {
+  const projectId = data.project_id || data.projectId;
+  if (!projectId) {
+    throw new AppError("Project ID is required", "VALIDATION_ERROR", 400);
+  }
+
   const project = await prisma.project.findUnique({
-    where: { id: data.project_id },
+    where: { id: projectId },
   });
 
   if (!project) {
@@ -782,18 +1297,18 @@ export async function createLinkAsset(
       where: { id: data.file_id },
     });
 
-    if (!file || file.project_id !== data.project_id) {
+    if (!file || file.project_id !== projectId) {
       throw new AppError("File not found in project", "NOT_FOUND", 404);
     }
   }
 
   const link = await prisma.linkHistory.create({
     data: {
-      project_id: data.project_id,
+      project_id: projectId,
       file_id: data.file_id,
       url: data.url,
       link_type: data.link_type,
-      description: data.description,
+      description: data.description || data.name,
       expires_at: data.expires_at ? new Date(data.expires_at) : null,
       created_by: creatorId,
     },
@@ -812,8 +1327,13 @@ export async function createLinkAsset(
 }
 
 export async function getLinkHistory(projectId: string) {
+  const where: Record<string, unknown> = {};
+  if (projectId) {
+    where.project_id = projectId;
+  }
+
   const links = await prisma.linkHistory.findMany({
-    where: { project_id: projectId },
+    where,
     orderBy: { created_at: "desc" },
     include: {
       file: {
@@ -926,13 +1446,9 @@ export async function batchArchiveUnits(projectId: string) {
 // ============ Cleanup Expired Links ============
 
 export async function cleanupExpiredLinks(): Promise<number> {
-  const result = await prisma.downloadLink.updateMany({
+  const result = await prisma.downloadLink.deleteMany({
     where: {
-      is_active: true,
       expires_at: { lt: new Date() },
-    },
-    data: {
-      is_active: false,
     },
   });
 

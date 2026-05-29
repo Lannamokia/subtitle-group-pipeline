@@ -14,7 +14,6 @@ export async function cleanupExpiredDownloadLinks(): Promise<void> {
   // Find expired download links
   const expiredLinks = await prisma.downloadLink.findMany({
     where: {
-      is_active: true,
       expires_at: { lt: now },
     },
   });
@@ -44,12 +43,6 @@ export async function cleanupExpiredDownloadLinks(): Promise<void> {
 
   for (const link of expiredLinks) {
     try {
-      // Mark link as inactive
-      await prisma.downloadLink.update({
-        where: { id: link.id },
-        data: { is_active: false },
-      });
-
       // Clean up any associated temp files for local storage
       if (link.file_id) {
         const file = fileMap.get(link.file_id);
@@ -58,15 +51,16 @@ export async function cleanupExpiredDownloadLinks(): Promise<void> {
         }
       }
 
-      console.log(`[DownloadCleanupJob] Deactivated expired link: ${link.token}`);
+      await prisma.downloadLink.delete({
+        where: { id: link.id },
+      });
+
+      console.log(`[DownloadCleanupJob] Deleted expired link: ${link.token}`);
     } catch (error) {
       console.error(`[DownloadCleanupJob] Failed to cleanup link ${link.id}:`, error);
       // Continue with next link - do not crash the scheduler
     }
   }
-
-  // Also hard-delete very old expired links (past double the original expiry)
-  await hardDeleteOldLinks(now);
 
   console.log(`[DownloadCleanupJob] Processed ${expiredLinks.length} expired link(s)`);
 }
@@ -104,21 +98,5 @@ async function cleanupTempFile(storagePath: string): Promise<void> {
     }
   } catch (error) {
     console.warn(`[DownloadCleanupJob] Failed to delete temp file ${fullPath}:`, error);
-  }
-}
-
-async function hardDeleteOldLinks(now: Date): Promise<void> {
-  // Hard delete links that expired more than 24 hours ago
-  const hardDeleteCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-  const result = await prisma.downloadLink.deleteMany({
-    where: {
-      is_active: false,
-      expires_at: { lt: hardDeleteCutoff },
-    },
-  });
-
-  if (result.count > 0) {
-    console.log(`[DownloadCleanupJob] Hard-deleted ${result.count} old expired link(s)`);
   }
 }

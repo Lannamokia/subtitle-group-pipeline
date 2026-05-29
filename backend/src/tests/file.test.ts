@@ -5,10 +5,13 @@ import {
   createTestProject,
   createTestFile,
   createTestStorageBackend,
+  createTestTask,
+  createTestUnit,
   cleanDatabase,
 } from "./setup";
 import { post, get, put, del, expectSuccess, expectError } from "./helpers";
 import type { Application } from "express";
+import { cleanupExpiredDownloadLinks } from "../jobs/download.cleanup";
 
 describe("File Management Tests", () => {
   let app: Application;
@@ -68,9 +71,12 @@ describe("File Management Tests", () => {
         token
       );
 
-      // The upload itself succeeds at the API level; policy enforcement happens at validation layer
-      // The file entity is still created
-      expect(invalidRes.status).toBe(201);
+      expectError(invalidRes, 400, "VALIDATION_ERROR");
+
+      const createdInvalid = await prisma.fileEntity.findFirst({
+        where: { project_id: project.id, name: "test.exe" },
+      });
+      expect(createdInvalid).toBeNull();
     });
 
     it("should enforce file size limits", async () => {
@@ -102,7 +108,91 @@ describe("File Management Tests", () => {
         token
       );
 
-      expectSuccess(res, 201);
+      expectError(res, 400, "VALIDATION_ERROR");
+    });
+
+    it("should enforce role-specific upload policy matrix and preserve task state", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: user.id,
+        assignee_id: user.id,
+        role: "translation",
+        status: "assigned",
+      });
+
+      await prisma.projectMember.create({
+        data: {
+          project_id: project.id,
+          user_id: user.id,
+          role: "translation",
+        },
+      });
+
+      await prisma.uploadPolicy.create({
+        data: {
+          project_id: project.id,
+          allowed_types: JSON.stringify({
+            translation: {
+              file_types: ["subtitle"],
+              mime_types: ["application/x-ass", "text/plain"],
+              extensions: [".ass", ".txt"],
+            },
+            encoding: {
+              file_types: ["video"],
+              mime_types: ["video/mp4"],
+              extensions: [".mp4"],
+            },
+          }),
+          max_size_bytes: 104857600,
+          require_approval: false,
+        },
+      });
+
+      const rejected = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "encoded.mp4",
+          file_type: "video",
+          mime_type: "video/mp4",
+          size_bytes: 4096,
+          storage_path: "/uploads/encoded.mp4",
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "translation",
+        },
+        token
+      );
+
+      expectError(rejected, 400, "VALIDATION_ERROR");
+
+      const unchangedTask = await prisma.task.findUnique({ where: { id: task.id } });
+      expect(unchangedTask!.status).toBe("assigned");
+
+      const accepted = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "translation.ass",
+          file_type: "subtitle",
+          mime_type: "application/x-ass",
+          size_bytes: 2048,
+          storage_path: "/uploads/translation.ass",
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "translation",
+        },
+        token
+      );
+
+      expectSuccess(accepted, 201);
+      expect(accepted.body.data.metadata).toContain(task.id);
     });
   });
 
@@ -386,6 +476,35 @@ describe("File Management Tests", () => {
 
       expectError(res, 410, "GONE");
     });
+
+    it("should delete expired download link records during cleanup", async () => {
+      const { user } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+
+      const expired = await prisma.downloadLink.create({
+        data: {
+          project_id: project.id,
+          created_by: user.id,
+          token: "expired-cleanup-token",
+          expires_at: new Date(Date.now() - 1000),
+          is_active: true,
+        },
+      });
+      const active = await prisma.downloadLink.create({
+        data: {
+          project_id: project.id,
+          created_by: user.id,
+          token: "active-cleanup-token",
+          expires_at: new Date(Date.now() + 60000),
+          is_active: true,
+        },
+      });
+
+      await cleanupExpiredDownloadLinks();
+
+      await expect(prisma.downloadLink.findUnique({ where: { id: expired.id } })).resolves.toBeNull();
+      await expect(prisma.downloadLink.findUnique({ where: { id: active.id } })).resolves.toBeDefined();
+    });
   });
 
   describe("Sensitive Tag Access Control", () => {
@@ -450,6 +569,103 @@ describe("File Management Tests", () => {
     });
   });
 
+  describe("Supervisor Batch Operations", () => {
+    it("should batch assign matching unit tasks to one assignee", async () => {
+      const { user: supervisor, token } = await createTestUser({ role: "supervisor" });
+      const { user: assignee } = await createTestUser();
+      const project = await createTestProject({ owner_id: supervisor.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const otherUnit = await createTestUnit({
+        project_id: project.id,
+        unit_number: 2,
+      });
+      const targetTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: supervisor.id,
+        role: "translation",
+        status: "claimable",
+      });
+      const otherRoleTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: supervisor.id,
+        role: "encoding",
+        status: "claimable",
+      });
+      const otherUnitTask = await createTestTask({
+        project_id: project.id,
+        unit_id: otherUnit.id,
+        creator_id: supervisor.id,
+        role: "translation",
+        status: "claimable",
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/files/batch/assign-tasks",
+        {
+          unit_id: unit.id,
+          assignee_id: assignee.id,
+          role: "translation",
+        },
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.assigned_count).toBe(1);
+
+      await expect(prisma.task.findUnique({ where: { id: targetTask.id } }))
+        .resolves.toMatchObject({ assignee_id: assignee.id, status: "assigned" });
+      await expect(prisma.task.findUnique({ where: { id: otherRoleTask.id } }))
+        .resolves.toMatchObject({ assignee_id: null, status: "claimable" });
+      await expect(prisma.task.findUnique({ where: { id: otherUnitTask.id } }))
+        .resolves.toMatchObject({ assignee_id: null, status: "claimable" });
+    });
+
+    it("should batch archive all units of a project by freezing tasks and archiving project", async () => {
+      const { user: supervisor, token } = await createTestUser({ role: "supervisor" });
+      const project = await createTestProject({ owner_id: supervisor.id, status: "active" });
+      const unit = await createTestUnit({ project_id: project.id });
+      await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: supervisor.id,
+        role: "translation",
+        status: "claimable",
+      });
+      await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: supervisor.id,
+        role: "encoding",
+        status: "assigned",
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/files/batch/archive-units",
+        { project_id: project.id },
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.success).toBe(true);
+
+      const archivedProject = await prisma.project.findUnique({ where: { id: project.id } });
+      expect(archivedProject!.is_archived).toBe(true);
+      expect(archivedProject!.status).toBe("archived");
+
+      const remainingActiveTasks = await prisma.task.count({
+        where: {
+          project_id: project.id,
+          status: { not: "frozen" },
+        },
+      });
+      expect(remainingActiveTasks).toBe(0);
+    });
+  });
+
   describe("Project File Bucket Queries", () => {
     it("should query files by project with pagination", async () => {
       const { user, token } = await createTestUser();
@@ -500,6 +716,66 @@ describe("File Management Tests", () => {
       expect(res.body.data.files[0].file_type).toBe("subtitle");
     });
 
+    it("should aggregate binary files and link assets with bucket filters", async () => {
+      const { user, token } = await createTestUser();
+      const { user: otherUser } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: user.id,
+        role: "translation",
+      });
+
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+        name: "filtered.ass",
+        file_type: "subtitle",
+        metadata: JSON.stringify({
+          unit_id: unit.id,
+          task_id: task.id,
+          role: "translation",
+        }),
+        tags: JSON.stringify(["dialogue", "approved"]),
+      });
+      await createTestFile({
+        project_id: project.id,
+        uploader_id: otherUser.id,
+        name: "other-video.mp4",
+        file_type: "video",
+        metadata: JSON.stringify({
+          unit_id: unit.id,
+          role: "encoding",
+        }),
+        tags: JSON.stringify(["video"]),
+      });
+      await prisma.linkHistory.create({
+        data: {
+          project_id: project.id,
+          file_id: file.id,
+          url: "https://example.com/drive/filtered",
+          link_type: "cloud_drive",
+          description: "Filtered drive link",
+          created_by: user.id,
+        },
+      });
+
+      const res = await get(
+        app,
+        `/api/v1/files?project_id=${project.id}&unit_id=${unit.id}&task_id=${task.id}&role=translation&tag=dialogue`,
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.items).toHaveLength(2);
+      expect(res.body.data.items.map((item: { asset_kind: string }) => item.asset_kind).sort()).toEqual(["binary", "link"]);
+      expect(res.body.data.files[0].current_version).toBeDefined();
+      expect(res.body.data.files[0].version_count).toBeGreaterThanOrEqual(1);
+      expect(res.body.meta.total).toBe(2);
+    });
+
     it("should exclude deleted files by default", async () => {
       const { user, token } = await createTestUser();
       const project = await createTestProject({ owner_id: user.id });
@@ -542,6 +818,40 @@ describe("File Management Tests", () => {
 
       expectSuccess(res, 200);
       expect(res.body.data.files.length).toBe(1);
+    });
+
+    it("should expose asset detail with current version and version badges", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+      });
+
+      await prisma.fileVersion.updateMany({
+        where: { file_id: file.id },
+        data: { is_latest: false },
+      });
+      await prisma.fileVersion.create({
+        data: {
+          file_id: file.id,
+          version_number: 2,
+          storage_path: "/uploads/detail-v2.ass",
+          size_bytes: 2048,
+          checksum: "detail-v2",
+          is_current: true,
+          is_latest: true,
+          is_latest_approved: false,
+        },
+      });
+
+      const res = await get(app, `/api/v1/files/${file.id}`, token);
+
+      expectSuccess(res, 200);
+      expect(res.body.data.current_version).toBeDefined();
+      expect(res.body.data.version_count).toBeGreaterThanOrEqual(2);
+      expect(res.body.data.has_multiple_versions).toBe(true);
+      expect(res.body.data.uploader.id).toBe(user.id);
     });
   });
 

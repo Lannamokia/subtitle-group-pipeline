@@ -1,11 +1,26 @@
 import { z } from "zod";
-import { FileType } from "@prisma/client";
+import { FileType, TaskRole } from "@prisma/client";
 
 export const fileQuerySchema = z.object({
   page: z.string().optional().transform(Number).default("1"),
   pageSize: z.string().optional().transform(Number).default("20"),
   project_id: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
+  unit_id: z.string().uuid().optional(),
+  unitId: z.string().uuid().optional(),
+  task_id: z.string().uuid().optional(),
+  taskId: z.string().uuid().optional(),
+  uploader_id: z.string().uuid().optional(),
+  uploaderId: z.string().uuid().optional(),
+  role: z.nativeEnum(TaskRole).optional(),
+  tag: z.string().max(100).optional(),
+  tags: z.string().max(500).optional(),
+  uploaded_from: z.string().datetime().optional(),
+  uploadedFrom: z.string().datetime().optional(),
+  uploaded_to: z.string().datetime().optional(),
+  uploadedTo: z.string().datetime().optional(),
   file_type: z.nativeEnum(FileType).optional(),
+  type: z.nativeEnum(FileType).optional(),
   search: z.string().optional(),
   include_deleted: z
     .string()
@@ -25,6 +40,11 @@ export const uploadFileSchema = z.object({
   checksum: z.string().optional().nullable(),
   metadata: z.string().optional().nullable(), // JSON string
   tags: z.string().optional().nullable(), // JSON string array
+  task_id: z.string().uuid("Invalid task ID").optional(),
+  taskId: z.string().uuid("Invalid task ID").optional(),
+  unit_id: z.string().uuid("Invalid unit ID").optional(),
+  unitId: z.string().uuid("Invalid unit ID").optional(),
+  role: z.nativeEnum(TaskRole).optional(),
   change_summary: z.string().max(1000).optional().nullable(),
 });
 
@@ -52,16 +72,19 @@ export const approveVersionSchema = z.object({
 });
 
 export const createLinkSchema = z.object({
-  project_id: z.string().uuid("Invalid project ID"),
+  project_id: z.string().uuid("Invalid project ID").optional(),
+  projectId: z.string().uuid("Invalid project ID").optional(),
   file_id: z.string().uuid("Invalid file ID").optional().nullable(),
   url: z.string().url("Invalid URL"),
-  link_type: z.string().min(1, "Link type is required"),
+  link_type: z.string().min(1, "Link type is required").default("cloud_drive"),
+  name: z.string().max(500).optional(),
+  extractCode: z.string().max(100).optional(),
   description: z.string().max(1000).optional().nullable(),
   expires_at: z.string().datetime().optional().nullable(),
 });
 
 export const updateUploadPolicySchema = z.object({
-  allowed_types: z.string(), // JSON string
+  allowed_types: z.string(), // JSON string: array or role matrix object
   max_size_bytes: z.number().int().min(1).optional(),
   require_approval: z.boolean().optional(),
   extension_whitelist: z.string().optional().nullable(), // JSON string
@@ -69,6 +92,25 @@ export const updateUploadPolicySchema = z.object({
 
 export const downloadLinkQuerySchema = z.object({
   ttl: z.string().optional().transform(Number).default("300"),
+});
+
+export const batchAssignTasksSchema = z.object({
+  unit_id: z.string().uuid("Invalid unit ID").optional(),
+  unitId: z.string().uuid("Invalid unit ID").optional(),
+  assignee_id: z.string().uuid("Invalid assignee ID").optional(),
+  assigneeId: z.string().uuid("Invalid assignee ID").optional(),
+  role: z.nativeEnum(TaskRole).optional(),
+}).refine((data) => data.unit_id || data.unitId, {
+  message: "unit_id is required",
+}).refine((data) => data.assignee_id || data.assigneeId, {
+  message: "assignee_id is required",
+});
+
+export const batchArchiveUnitsSchema = z.object({
+  project_id: z.string().uuid("Invalid project ID").optional(),
+  projectId: z.string().uuid("Invalid project ID").optional(),
+}).refine((data) => data.project_id || data.projectId, {
+  message: "project_id is required",
 });
 
 export type FileQueryInput = z.infer<typeof fileQuerySchema>;
@@ -79,3 +121,5 @@ export type ApproveVersionInput = z.infer<typeof approveVersionSchema>;
 export type CreateLinkInput = z.infer<typeof createLinkSchema>;
 export type UpdateUploadPolicyInput = z.infer<typeof updateUploadPolicySchema>;
 export type DownloadLinkQueryInput = z.infer<typeof downloadLinkQuerySchema>;
+export type BatchAssignTasksInput = z.infer<typeof batchAssignTasksSchema>;
+export type BatchArchiveUnitsInput = z.infer<typeof batchArchiveUnitsSchema>;

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { authenticate, requireRole } from "../../middleware/auth";
 import { validateBody, validateQuery, validateParams } from "../../middleware/validate";
 import * as controller from "./file.controller";
@@ -9,10 +10,16 @@ import {
   createLinkSchema,
   updateUploadPolicySchema,
   downloadLinkQuerySchema,
+  batchAssignTasksSchema,
+  batchArchiveUnitsSchema,
 } from "./file.schema";
 import { z } from "zod";
 
 const router = Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
 
 const fileIdParamSchema = z.object({ fileId: z.string().uuid("Invalid file ID") });
 const versionIdParamSchema = z.object({
@@ -22,18 +29,39 @@ const versionIdParamSchema = z.object({
 const projectIdParamSchema = z.object({ projectId: z.string().uuid("Invalid project ID") });
 const projectIdQuerySchema = z.object({ project_id: z.string().uuid("Invalid project ID") });
 
-// Compatibility routes mounted under /api/v1/files
+// Static and collection routes must stay before /:fileId.
+router.get(
+  "/upload-policy",
+  validateQuery(z.object({ project_id: z.string().uuid().optional() })),
+  controller.getUploadPolicy
+);
+
+router.post(
+  "/upload-policy",
+  authenticate,
+  requireRole("super_admin", "group_admin", "supervisor"),
+  validateBody(updateUploadPolicySchema),
+  controller.updateUploadPolicy
+);
+
 router.post(
   "/upload",
   authenticate,
-  validateBody(uploadFileSchema),
+  upload.single("file"),
+  controller.uploadFile
+);
+
+router.post(
+  "/",
+  authenticate,
+  upload.single("file"),
   controller.uploadFile
 );
 
 router.get(
   "/",
   authenticate,
-  validateQuery(fileQuerySchema.extend({ project_id: z.string().uuid("Invalid project ID") })),
+  validateQuery(fileQuerySchema),
   controller.getProjectFiles
 );
 
@@ -47,10 +75,124 @@ router.post(
 router.get(
   "/links",
   authenticate,
-  validateQuery(projectIdQuerySchema),
+  validateQuery(projectIdQuerySchema.partial().extend({ projectId: z.string().uuid("Invalid project ID").optional() })),
   controller.getLinks
 );
 
+router.delete(
+  "/links/:linkId",
+  authenticate,
+  validateParams(z.object({ linkId: z.string().uuid("Invalid link ID") })),
+  controller.deleteLink
+);
+
+router.post(
+  "/batch/assign-tasks",
+  authenticate,
+  requireRole("super_admin", "group_admin", "supervisor"),
+  validateBody(batchAssignTasksSchema),
+  controller.batchAssignTasks
+);
+
+router.post(
+  "/batch/archive-units",
+  authenticate,
+  requireRole("super_admin", "group_admin", "supervisor"),
+  validateBody(batchArchiveUnitsSchema),
+  controller.batchArchiveUnits
+);
+
+// Project-scoped file bucket routes.
+router.post(
+  "/projects/:projectId/files",
+  authenticate,
+  validateParams(projectIdParamSchema),
+  upload.single("file"),
+  controller.uploadFile
+);
+
+router.get(
+  "/projects/:projectId/files",
+  authenticate,
+  validateParams(projectIdParamSchema),
+  validateQuery(fileQuerySchema),
+  controller.getProjectFiles
+);
+
+router.post(
+  "/projects/:projectId/files/:fileId/replace",
+  authenticate,
+  validateParams(z.object({
+    projectId: z.string().uuid("Invalid project ID"),
+    fileId: z.string().uuid("Invalid file ID"),
+  })),
+  validateBody(replaceFileSchema),
+  controller.replaceFile
+);
+
+router.post(
+  "/projects/:projectId/links",
+  authenticate,
+  validateParams(projectIdParamSchema),
+  validateBody(createLinkSchema),
+  controller.createLink
+);
+
+router.get(
+  "/projects/:projectId/links",
+  authenticate,
+  validateParams(projectIdParamSchema),
+  controller.getLinks
+);
+
+// Compatibility routes for callers that include an extra /files prefix.
+router.get(
+  "/files/:fileId",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  controller.getFile
+);
+
+router.delete(
+  "/files/:fileId",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  controller.deleteFile
+);
+
+router.get(
+  "/files/:fileId/versions",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  controller.getFileVersions
+);
+
+router.post(
+  "/files/:fileId/versions/:versionId/approve",
+  authenticate,
+  validateParams(versionIdParamSchema),
+  controller.approveVersion
+);
+
+router.get(
+  "/files/:fileId/download",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  validateQuery(downloadLinkQuerySchema),
+  controller.getDownloadLink
+);
+
+router.post(
+  "/files/:fileId/download",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  controller.getDownloadLink
+);
+
+// Actual download (token-based, no auth required for the link itself)
+router.get("/download/:token", controller.downloadByToken);
+
+// File entity routes.
 router.post(
   "/:fileId/replace",
   authenticate,
@@ -81,6 +223,14 @@ router.get(
   controller.getDownloadLink
 );
 
+router.get(
+  "/:fileId/download",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  validateQuery(downloadLinkQuerySchema),
+  controller.getDownloadLink
+);
+
 router.post(
   "/:fileId/download-link",
   authenticate,
@@ -88,126 +238,25 @@ router.post(
   controller.getDownloadLink
 );
 
-router.get(
-  "/:fileId",
-  authenticate,
-  validateParams(fileIdParamSchema),
-  controller.getFile
-);
-
-router.delete(
-  "/:fileId",
-  authenticate,
-  validateParams(fileIdParamSchema),
-  controller.deleteFile
-);
-
-// Project-scoped file routes
 router.post(
-  "/projects/:projectId/files",
-  authenticate,
-  validateParams(projectIdParamSchema),
-  validateBody(uploadFileSchema),
-  controller.uploadFile
-);
-
-router.get(
-  "/projects/:projectId/files",
-  authenticate,
-  validateParams(projectIdParamSchema),
-  validateQuery(fileQuerySchema),
-  controller.getProjectFiles
-);
-
-router.post(
-  "/projects/:projectId/files/:fileId/replace",
-  authenticate,
-  validateParams(z.object({
-    projectId: z.string().uuid("Invalid project ID"),
-    fileId: z.string().uuid("Invalid file ID"),
-  })),
-  validateBody(replaceFileSchema),
-  controller.replaceFile
-);
-
-// File detail routes
-router.get(
-  "/files/:fileId",
+  "/:fileId/download",
   authenticate,
   validateParams(fileIdParamSchema),
-  controller.getFile
-);
-
-router.delete(
-  "/files/:fileId",
-  authenticate,
-  validateParams(fileIdParamSchema),
-  controller.deleteFile
-);
-
-// Version routes
-router.get(
-  "/files/:fileId/versions",
-  authenticate,
-  validateParams(fileIdParamSchema),
-  controller.getFileVersions
-);
-
-router.post(
-  "/files/:fileId/versions/:versionId/approve",
-  authenticate,
-  validateParams(versionIdParamSchema),
-  controller.approveVersion
-);
-
-// Download link
-router.get(
-  "/files/:fileId/download",
-  authenticate,
-  validateParams(fileIdParamSchema),
-  validateQuery(downloadLinkQuerySchema),
   controller.getDownloadLink
 );
 
-// Actual download (token-based, no auth required for the link itself)
-router.get("/download/:token", controller.downloadByToken);
-
-// Compatibility routes for frontend calling /links directly
-router.post("/links", authenticate, validateBody(createLinkSchema), controller.createLink);
-router.delete("/links/:linkId", authenticate, validateParams(z.object({ linkId: z.string().uuid("Invalid link ID") })), controller.deleteLink);
-
-// Compatibility route: POST /files/:fileId/download (frontend uses POST)
-router.post("/files/:fileId/download", authenticate, validateParams(fileIdParamSchema), controller.getDownloadLink);
-
-// Link asset routes
-router.post(
-  "/projects/:projectId/links",
-  authenticate,
-  validateParams(projectIdParamSchema),
-  validateBody(createLinkSchema),
-  controller.createLink
-);
-
 router.get(
-  "/projects/:projectId/links",
+  "/:fileId",
   authenticate,
-  validateParams(projectIdParamSchema),
-  controller.getLinks
+  validateParams(fileIdParamSchema),
+  controller.getFile
 );
 
-// Upload policy routes
-router.get(
-  "/upload-policy",
-  validateQuery(z.object({ project_id: z.string().uuid().optional() })),
-  controller.getUploadPolicy
-);
-
-router.post(
-  "/upload-policy",
+router.delete(
+  "/:fileId",
   authenticate,
-  requireRole("super_admin", "group_admin", "supervisor"),
-  validateBody(updateUploadPolicySchema),
-  controller.updateUploadPolicy
+  validateParams(fileIdParamSchema),
+  controller.deleteFile
 );
 
 export default router;

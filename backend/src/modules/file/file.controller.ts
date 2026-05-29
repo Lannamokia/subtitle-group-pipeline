@@ -7,6 +7,11 @@ import { AppError } from "../../utils/response";
 import { env } from "../../config/env";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
+import { FileType, TaskRole } from "@prisma/client";
+import type { UserRole } from "@prisma/client";
+import * as storageService from "../storage/storage.service";
+import { uploadFileSchema } from "./file.schema";
 
 // Helper to prevent path traversal in local download
 function preventPathTraversal(filepath: string): string {
@@ -32,7 +37,13 @@ function getProjectId(req: Request): string {
     return paramProjectId;
   }
 
-  const queryProjectId = req.query.project_id;
+  const bodyProjectId = (req.body as { project_id?: unknown; projectId?: unknown } | undefined)?.project_id
+    ?? (req.body as { project_id?: unknown; projectId?: unknown } | undefined)?.projectId;
+  if (typeof bodyProjectId === "string") {
+    return bodyProjectId;
+  }
+
+  const queryProjectId = req.query.project_id ?? req.query.projectId;
   if (typeof queryProjectId === "string") {
     return queryProjectId;
   }
@@ -42,6 +53,105 @@ function getProjectId(req: Request): string {
   }
 
   return "";
+}
+
+function inferFileType(file: Express.Multer.File, explicitType?: unknown): FileType {
+  if (typeof explicitType === "string" && Object.values(FileType).includes(explicitType as FileType)) {
+    return explicitType as FileType;
+  }
+
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (file.mimetype.startsWith("video/") || [".mkv", ".mp4", ".mov", ".avi"].includes(ext)) {
+    return FileType.video;
+  }
+  if ([".ass", ".ssa", ".srt", ".vtt"].includes(ext) || file.mimetype.includes("subtitle")) {
+    return FileType.subtitle;
+  }
+  if ([".ttf", ".otf", ".woff", ".woff2"].includes(ext) || file.mimetype.includes("font")) {
+    return FileType.font;
+  }
+  if ([".zip", ".rar", ".7z", ".tar", ".gz"].includes(ext)) {
+    return FileType.project_package;
+  }
+  return FileType.other;
+}
+
+async function buildUploadInputFromMultipart(req: AuthenticatedRequest) {
+  if (!req.file) {
+    return null;
+  }
+
+  const projectId = getProjectId(req);
+  if (!projectId) {
+    throw new AppError("Project ID is required for file upload", "VALIDATION_ERROR", 400);
+  }
+
+  const body = req.body as Record<string, unknown>;
+  const taskRole = typeof body.role === "string" && Object.values(TaskRole).includes(body.role as TaskRole)
+    ? body.role as TaskRole
+    : undefined;
+  const inferredType = inferFileType(req.file, body.file_type ?? body.type);
+  const validation = await fileService.validateUpload(
+    {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+    },
+    projectId,
+    req.user!.role as UserRole,
+    {
+      userId: req.user!.id,
+      taskRole,
+      fileType: inferredType,
+    }
+  );
+  if (!validation.valid) {
+    throw new AppError(validation.error || "Invalid upload", "VALIDATION_ERROR", 400);
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { storage_backend_id: true },
+  });
+  if (!project) {
+    throw new AppError("Project not found", "NOT_FOUND", 404);
+  }
+
+  const backend = project.storage_backend_id
+    ? await prisma.storageBackend.findUnique({ where: { id: project.storage_backend_id } })
+    : await storageService.getDefaultBackend();
+  if (!backend || !backend.is_active) {
+    throw new AppError("No active storage backend configured for upload", "CONFIG_ERROR", 500);
+  }
+
+  const uploadResult = await storageService.uploadFile(
+    backend.id,
+    projectId,
+    req.file.buffer,
+    req.file.originalname,
+    req.file.mimetype
+  );
+
+  const checksum = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
+
+  return {
+    project_id: projectId,
+    name: typeof body.name === "string" && body.name.trim() ? body.name : req.file.originalname,
+    file_type: inferredType,
+    mime_type: req.file.mimetype || "application/octet-stream",
+    size_bytes: uploadResult.size,
+    storage_path: uploadResult.storagePath,
+    storage_backend_id: backend.id,
+    checksum,
+    metadata: typeof body.metadata === "string" ? body.metadata : null,
+    tags: typeof body.tags === "string" ? body.tags : null,
+    task_id: typeof body.task_id === "string" ? body.task_id : undefined,
+    taskId: typeof body.taskId === "string" ? body.taskId : undefined,
+    unit_id: typeof body.unit_id === "string" ? body.unit_id : undefined,
+    unitId: typeof body.unitId === "string" ? body.unitId : undefined,
+    role: taskRole,
+    change_summary: typeof body.change_summary === "string" ? body.change_summary : null,
+  };
 }
 
 function getRequestedTtl(req: Request): number {
@@ -69,7 +179,12 @@ export async function uploadFile(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await fileService.uploadFile(req.user!.id, req.body);
+    const multipartInput = await buildUploadInputFromMultipart(req);
+    const input = multipartInput || uploadFileSchema.parse({
+      ...req.body,
+      project_id: req.body.project_id ?? getProjectId(req),
+    });
+    const result = await fileService.uploadFile(req.user!.id, input);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -105,7 +220,7 @@ export async function getProjectFiles(
       getProjectId(req),
       req.query as unknown as Parameters<typeof fileService.getProjectFiles>[1]
     );
-    successResponse(res, { files: result.files, links: result.links }, 200, result.meta);
+    successResponse(res, { files: result.files, links: result.links, items: result.items }, 200, result.meta);
   } catch (error) {
     next(error);
   }
@@ -256,7 +371,12 @@ export async function createLink(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await fileService.createLinkAsset(req.user!.id, req.body);
+    const projectId = getProjectId(req);
+    const input = {
+      ...req.body,
+      project_id: req.body.project_id || projectId || undefined,
+    };
+    const result = await fileService.createLinkAsset(req.user!.id, input);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -330,6 +450,46 @@ export async function updateUploadPolicy(
       req.body,
       req.query.project_id as string | undefined
     );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// POST /batch/assign-tasks
+export async function batchAssignTasks(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const body = req.body as {
+      unit_id?: string;
+      unitId?: string;
+      assignee_id?: string;
+      assigneeId?: string;
+      role?: TaskRole;
+    };
+    const result = await fileService.batchAssignTasks(
+      body.unit_id || body.unitId || "",
+      body.assignee_id || body.assigneeId || "",
+      body.role
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// POST /batch/archive-units
+export async function batchArchiveUnits(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const body = req.body as { project_id?: string; projectId?: string };
+    const result = await fileService.batchArchiveUnits(body.project_id || body.projectId || "");
     successResponse(res, result);
   } catch (error) {
     next(error);

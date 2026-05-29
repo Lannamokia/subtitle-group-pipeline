@@ -31,10 +31,10 @@
 
 - [x] 4.1 Implement the storage adapter abstraction for local files, S3-compatible objects, and link-type assets. The adapter must support multiple configured backend instances and route file operations to the project's bound backend. Link-type assets (cloud-drive links) use an independent `link_history` table, not the binary file version chain.
 - [x] 4.2 Implement built-in asset version chains with automatic current-version resolution (prefer latest-approved, fall back to latest), latest pointer, and latest-approved pointer. Each upload creates a new file entity; same-name files do not auto-merge.
-- [ ] 4.3 Implement upload policy enforcement so each role can submit only the asset types allowed by project policy
-- [ ] 4.4 Implement the project file bucket API with project-scoped aggregation, filters, version badges, and asset detail lookup. File bucket queries must merge binary file entities and link-type assets into a unified view.
+- [x] 4.3 Implement upload policy enforcement so each role can submit only the asset types allowed by project policy
+- [x] 4.4 Implement the project file bucket API with project-scoped aggregation, filters, version badges, and asset detail lookup. File bucket queries must merge binary file entities and link-type assets into a unified view.
 - [ ] 4.5 Implement file download authorization with temporary links: anyone with file view permission can click download to generate a link; reuse existing non-expired links for the same user+file; create a new link if the existing one expires within 30s (60s for video files). Link TTL is globally configurable by admin and overridable per project by supervisor, with a minimum floor of 90s. S3 uses presigned URLs, local storage uses database temporary link records. Support "sensitive" file tags that restrict download to specific roles.
-- [ ] 4.6 Implement batch operations for supervisor: batch assign multiple tasks in a project unit to the same person, and batch archive all units of a project.
+- [x] 4.6 Implement batch operations for supervisor: batch assign multiple tasks in a project unit to the same person, and batch archive all units of a project.
 - [x] 4.7 Implement storage backend management backend: admin CRUD for storage backend instances (S3 or local), configuration of endpoint/credentials/bucket or root path, per-backend max quota, and usage tracking. Project file operations must route to the project's bound backend.
 
 ## 5. Workflow notifications
@@ -78,7 +78,7 @@
 - [x] 8.1 Add backend integration tests for registration-disabled, registration-open, and registration-with-group-verification modes, plus role-tag application and approval flows
 - [x] 8.2 Add backend integration tests for non-expiring verification codes, pending-verification login responses, QQ group verification success, verification-association cleanup, and invalid-group or invalid-code rejection
 - [ ] 8.3 Add backend integration tests for template instantiation (including delivery checklist and product configuration inheritance), join approval, competitive translation segment claiming, task cancellation and downstream freezing, active task return, dependency gating, pipeline review gates, supervisory overrides, and downstream cascade-reset on task modification (non-release roles retain file history; release role discards artifacts)
-- [ ] 8.4 Add backend integration tests for upload policy enforcement, file entity creation per upload, same-name independent entities, link-type asset history, file version auto-resolution, temporary download links with TTL and sensitive tag control, project file bucket queries, and review snapshot persistence
+- [x] 8.4 Add backend integration tests for upload policy enforcement, file entity creation per upload, same-name independent entities, link-type asset history, file version auto-resolution, temporary download links with TTL and sensitive tag control, project file bucket queries, and review snapshot persistence
 - [x] 8.5 Add backend integration tests for notification recipient resolution, QQ group @ payload generation, channel escalation rules, task-reassignment notifications, comment @ mentions, overdue marking and escalation, channel delivery logging, and retry handling
 - [ ] 8.6 Add backend integration tests for ASS parsing, merge jobs with independent merge entities, duplicate elimination, version comparison generation, conflict generation, online dedup write-back restricted to supervisors, and file version reference in task comments
 - [x] 8.7 Add backend integration tests for project wiki persistence, Markdown rendering data, glossary-table retrieval, and wiki approval flow configuration
@@ -95,4 +95,4 @@
 - [ ] 9.2 Implement archive retention cleanup: periodically scan archived projects that are NOT soft-deleted and have passed the configured retention days, remove old file versions and intermediate artifacts, preserving only final approved versions per workflow stage. Projects that were soft-deleted before the retention period are handled entirely by recycle bin cleanup (9.3).
 - [x] 9.3 Implement recycle bin physical cleanup: periodically scan soft-deleted projects past the configured recycle-bin retention days, permanently delete all associated data
 - [x] 9.4 Implement notification channel escalation: periodically check unread in-site notifications past the escalation threshold, upgrade to email; check unread email past threshold, upgrade to QQ
-- [ ] 9.5 Implement temporary download link expiration cleanup: run every 30 seconds to scan and delete expired `download_links` records
+- [x] 9.5 Implement temporary download link expiration cleanup: run every 30 seconds to scan and delete expired `download_links` records
