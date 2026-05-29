@@ -35,6 +35,7 @@ router.get("/", validateQuery(taskQuerySchema), controller.getTasks);
 router.get("/:id", validateParams(idParamSchema), controller.getTask);
 router.post("/", authenticate, validateBody(createTaskSchema), controller.createTask);
 router.patch("/:id", authenticate, validateParams(idParamSchema), validateBody(updateTaskSchema), controller.updateTask);
+router.put("/:id", authenticate, validateParams(idParamSchema), validateBody(updateTaskSchema), controller.updateTask);
 router.delete("/:id", authenticate, validateParams(idParamSchema), controller.deleteTask);
 
 // State transitions

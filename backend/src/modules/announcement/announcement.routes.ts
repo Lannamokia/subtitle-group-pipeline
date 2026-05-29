@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, requireRole } from "../../middleware/auth";
+import { authenticate } from "../../middleware/auth";
 import { validateBody, validateQuery, validateParams } from "../../middleware/validate";
 import * as controller from "./announcement.controller";
 import {
@@ -18,7 +18,6 @@ router.get("/:id", validateParams(idParamSchema), controller.getAnnouncement);
 router.post(
   "/",
   authenticate,
-  requireRole("super_admin", "group_admin", "supervisor"),
   validateBody(createAnnouncementSchema),
   controller.createAnnouncement
 );

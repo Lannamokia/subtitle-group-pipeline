@@ -14,9 +14,18 @@ import {
 
 const router = Router();
 
+const limiterStores: Array<Map<string, { count: number; resetTime: number }>> = [];
+
+export function resetAuthRateLimiters() {
+  for (const attempts of limiterStores) {
+    attempts.clear();
+  }
+}
+
 // In-memory rate limiter for auth endpoints (fallback when express-rate-limit not installed)
 const authRateLimiter = (windowMs: number, maxRequests: number) => {
   const attempts = new Map<string, { count: number; resetTime: number }>();
+  limiterStores.push(attempts);
 
   return (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction): void => {
     const key = req.ip || "unknown";

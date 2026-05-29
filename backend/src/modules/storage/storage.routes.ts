@@ -37,6 +37,15 @@ router.post("/", authenticate, requireRole("super_admin", "group_admin"), valida
 router.patch("/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
 router.delete("/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), controller.deleteBackend);
 
+// Backward-compatible aliases for tests and older clients using /storage/backends.
+router.get("/backends", validateQuery(storageQuerySchema), controller.getBackends);
+router.get("/backends/default", controller.getDefaultBackend);
+router.get("/backends/:id", validateParams(idParamSchema), controller.getBackend);
+router.post("/backends", authenticate, requireRole("super_admin", "group_admin"), validateBody(createStorageBackendSchema), controller.createBackend);
+router.put("/backends/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
+router.patch("/backends/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
+router.delete("/backends/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), controller.deleteBackend);
+
 // Avatar upload endpoint
 router.post("/avatar", authenticate, upload.single("avatar"), controller.uploadAvatar);
 

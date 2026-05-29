@@ -40,6 +40,7 @@ router.post("/:id/archive", authenticate, validateParams(idParamSchema), control
 router.post("/:id/unarchive", authenticate, validateParams(idParamSchema), controller.unarchiveProject);
 router.post("/:id/delete", authenticate, validateParams(idParamSchema), controller.softDeleteProject);
 router.post("/:id/restore", authenticate, validateParams(idParamSchema), controller.restoreProject);
+router.delete("/:id", authenticate, validateParams(idParamSchema), controller.softDeleteProject);
 
 // Members
 router.get("/:id/members", validateParams(idParamSchema), controller.getProjectMembers);
@@ -54,5 +55,6 @@ router.post("/:id/units", authenticate, validateParams(idParamSchema), validateB
 router.get("/:id/join-requests", authenticate, validateParams(idParamSchema), controller.getJoinRequests);
 router.post("/:id/join", authenticate, validateParams(idParamSchema), validateBody(joinRequestSchema), controller.joinRequest);
 router.post("/join-requests/:requestId/respond", authenticate, validateParams(requestIdParamSchema), validateBody(updateJoinRequestSchema), controller.respondJoinRequest);
+router.post("/:id/join-requests/:requestId/respond", authenticate, validateParams(z.object({ id: z.string().uuid(), requestId: z.string().uuid() })), validateBody(updateJoinRequestSchema), controller.respondJoinRequest);
 
 export default router;

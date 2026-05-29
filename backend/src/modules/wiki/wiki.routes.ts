@@ -19,15 +19,18 @@ const slugParamSchema = z.object({ slug: z.string().min(1) });
 
 router.get("/", validateQuery(wikiQuerySchema), controller.getWikis);
 router.get("/by-slug/:slug", validateParams(slugParamSchema), controller.getWikiBySlug);
+router.get("/slug/:slug", validateParams(slugParamSchema), controller.getWikiBySlug);
 router.get("/:id", validateParams(idParamSchema), controller.getWiki);
 router.post("/", authenticate, validateBody(createWikiSchema), controller.createWiki);
 router.patch("/:id", authenticate, validateParams(idParamSchema), validateBody(updateWikiSchema), controller.updateWiki);
+router.put("/:id", authenticate, validateParams(idParamSchema), validateBody(updateWikiSchema), controller.updateWiki);
 router.post("/:id/approve", authenticate, requireRole("super_admin", "group_admin", "supervisor"), validateParams(idParamSchema), validateBody(approveWikiSchema), controller.approveWikiChange);
 router.post("/:id/reject", authenticate, requireRole("super_admin", "group_admin", "supervisor"), validateParams(idParamSchema), validateBody(z.object({ reason: z.string().optional() })), controller.rejectWikiChange);
-router.delete("/:id", authenticate, requireRole("super_admin", "group_admin", "supervisor"), validateParams(idParamSchema), controller.deleteWiki);
+router.delete("/:id", authenticate, validateParams(idParamSchema), controller.deleteWiki);
 
 // Comments
 router.get("/:wikiId/comments", validateParams(wikiIdParamSchema), controller.getComments);
+router.post("/:wikiId/comments", authenticate, validateParams(wikiIdParamSchema), validateBody(createCommentSchema), controller.createComment);
 router.post("/comments", authenticate, validateBody(createCommentSchema), controller.createComment);
 router.patch("/comments/:id", authenticate, validateParams(idParamSchema), validateBody(z.object({ content: z.string().min(1) })), controller.updateComment);
 router.delete("/comments/:id", authenticate, validateParams(idParamSchema), controller.deleteComment);

@@ -20,6 +20,87 @@ const versionIdParamSchema = z.object({
   versionId: z.string().uuid("Invalid version ID"),
 });
 const projectIdParamSchema = z.object({ projectId: z.string().uuid("Invalid project ID") });
+const projectIdQuerySchema = z.object({ project_id: z.string().uuid("Invalid project ID") });
+
+// Compatibility routes mounted under /api/v1/files
+router.post(
+  "/upload",
+  authenticate,
+  validateBody(uploadFileSchema),
+  controller.uploadFile
+);
+
+router.get(
+  "/",
+  authenticate,
+  validateQuery(fileQuerySchema.extend({ project_id: z.string().uuid("Invalid project ID") })),
+  controller.getProjectFiles
+);
+
+router.post(
+  "/links",
+  authenticate,
+  validateBody(createLinkSchema),
+  controller.createLink
+);
+
+router.get(
+  "/links",
+  authenticate,
+  validateQuery(projectIdQuerySchema),
+  controller.getLinks
+);
+
+router.post(
+  "/:fileId/replace",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  validateBody(replaceFileSchema),
+  controller.replaceFile
+);
+
+router.get(
+  "/:fileId/versions",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  controller.getFileVersions
+);
+
+router.post(
+  "/:fileId/versions/:versionId/approve",
+  authenticate,
+  validateParams(versionIdParamSchema),
+  controller.approveVersion
+);
+
+router.get(
+  "/:fileId/download-link",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  validateQuery(downloadLinkQuerySchema),
+  controller.getDownloadLink
+);
+
+router.post(
+  "/:fileId/download-link",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  controller.getDownloadLink
+);
+
+router.get(
+  "/:fileId",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  controller.getFile
+);
+
+router.delete(
+  "/:fileId",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  controller.deleteFile
+);
 
 // Project-scoped file routes
 router.post(

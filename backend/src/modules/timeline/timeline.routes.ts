@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { TimelineEventType } from "@prisma/client";
 import { authenticate } from "../../middleware/auth";
 import { validateQuery, validateParams } from "../../middleware/validate";
 import * as controller from "./timeline.controller";
@@ -13,6 +14,7 @@ const projectIdParamSchema = z.object({
 const timelineQuerySchema = z.object({
   page: z.string().optional().transform(Number).default("1"),
   pageSize: z.string().optional().transform(Number).default("50"),
+  event_type: z.nativeEnum(TimelineEventType).optional(),
 });
 
 router.get(
@@ -25,6 +27,21 @@ router.get(
 
 router.get(
   "/global",
+  authenticate,
+  validateQuery(timelineQuerySchema),
+  controller.getGlobalTimeline
+);
+
+// Backward-compatible aliases for tests and older clients.
+router.get(
+  "/:projectId",
+  authenticate,
+  validateParams(projectIdParamSchema),
+  validateQuery(timelineQuerySchema),
+  controller.getProjectTimeline
+);
+router.get(
+  "/",
   authenticate,
   validateQuery(timelineQuerySchema),
   controller.getGlobalTimeline
