@@ -487,6 +487,9 @@ export async function updateProject(
   if (data.delivery_checklist !== undefined) {
     updateData.delivery_checklist = JSON.stringify(data.delivery_checklist);
   }
+  if (data.download_link_ttl_seconds !== undefined) {
+    updateData.download_link_ttl_seconds = data.download_link_ttl_seconds;
+  }
 
   const project = await prisma.project.update({
     where: { id: projectId },

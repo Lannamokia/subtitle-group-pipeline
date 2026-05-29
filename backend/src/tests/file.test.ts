@@ -458,6 +458,152 @@ describe("File Management Tests", () => {
       expect(ttlSeconds).toBeGreaterThanOrEqual(90);
     });
 
+    it("should reuse an existing non-expired link for the same user and file", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+      });
+
+      const first = await post(app, `/api/v1/files/${file.id}/download-link`, {}, token);
+      const second = await post(app, `/api/v1/files/${file.id}/download-link`, {}, token);
+
+      expectSuccess(first, 200);
+      expectSuccess(second, 200);
+      expect(second.body.data.downloadUrl).toBe(first.body.data.downloadUrl);
+
+      const links = await prisma.downloadLink.findMany({
+        where: { file_id: file.id, created_by: user.id },
+      });
+      expect(links).toHaveLength(1);
+    });
+
+    it("should create a new link when the existing one is close to expiry", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+      });
+
+      await prisma.downloadLink.create({
+        data: {
+          project_id: project.id,
+          file_id: file.id,
+          created_by: user.id,
+          token: "soon-expiring-token",
+          expires_at: new Date(Date.now() + 25_000),
+          is_active: true,
+        },
+      });
+
+      const res = await post(app, `/api/v1/files/${file.id}/download-link`, {}, token);
+
+      expectSuccess(res, 200);
+      expect(res.body.data.downloadUrl).not.toContain("soon-expiring-token");
+
+      const links = await prisma.downloadLink.findMany({
+        where: { file_id: file.id, created_by: user.id },
+      });
+      expect(links).toHaveLength(2);
+    });
+
+    it("should use a 60-second refresh threshold for video links", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+        file_type: "video",
+        mime_type: "video/mp4",
+      });
+
+      await prisma.downloadLink.create({
+        data: {
+          project_id: project.id,
+          file_id: file.id,
+          created_by: user.id,
+          token: "video-expiring-token",
+          expires_at: new Date(Date.now() + 45_000),
+          is_active: true,
+        },
+      });
+
+      const res = await post(app, `/api/v1/files/${file.id}/download-link`, {}, token);
+
+      expectSuccess(res, 200);
+      expect(res.body.data.downloadUrl).not.toContain("video-expiring-token");
+    });
+
+    it("should use global TTL configuration and project override", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+
+      await prisma.dataRetentionSettings.create({
+        data: {
+          download_link_ttl_seconds: 120,
+        },
+      });
+
+      const { file: globalFile } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+        name: "global-ttl.ass",
+      });
+      const globalRes = await post(app, `/api/v1/files/${globalFile.id}/download-link`, {}, token);
+      expectSuccess(globalRes, 200);
+      expect((new Date(globalRes.body.data.expiresAt).getTime() - Date.now()) / 1000)
+        .toBeGreaterThanOrEqual(120);
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { download_link_ttl_seconds: 180 },
+      });
+      const { file: projectFile } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+        name: "project-ttl.ass",
+      });
+      const projectRes = await post(app, `/api/v1/files/${projectFile.id}/download-link`, {}, token);
+      expectSuccess(projectRes, 200);
+      expect((new Date(projectRes.body.data.expiresAt).getTime() - Date.now()) / 1000)
+        .toBeGreaterThanOrEqual(180);
+    });
+
+    it("should record S3 temporary links for reuse and cleanup", async () => {
+      const { user, token } = await createTestUser();
+      const backend = await createTestStorageBackend({
+        backend_type: "s3",
+        config: {
+          region: "us-east-1",
+          bucket: "test-bucket",
+          accessKeyId: "test",
+          secretAccessKey: "test",
+          endpoint: "https://s3.example.test",
+          forcePathStyle: true,
+        },
+      });
+      const project = await createTestProject({
+        owner_id: user.id,
+        storage_backend_id: backend.id,
+      });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+        storage_backend_id: backend.id,
+      });
+
+      const res = await post(app, `/api/v1/files/${file.id}/download-link`, {}, token);
+
+      expectSuccess(res, 200);
+      expect(res.body.data.downloadUrl).toContain("s3.example.test");
+      const link = await prisma.downloadLink.findFirst({
+        where: { file_id: file.id, created_by: user.id },
+      });
+      expect(link).toBeDefined();
+    });
+
     it("should reject expired download token", async () => {
       const { user, token } = await createTestUser();
       const project = await createTestProject({ owner_id: user.id });
@@ -508,6 +654,25 @@ describe("File Management Tests", () => {
   });
 
   describe("Sensitive Tag Access Control", () => {
+    it("should require project file view permission before generating a link", async () => {
+      const { user: owner } = await createTestUser();
+      const { token: outsiderToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: owner.id,
+      });
+
+      const res = await post(
+        app,
+        `/api/v1/files/${file.id}/download-link`,
+        {},
+        outsiderToken
+      );
+
+      expectError(res, 403, "FORBIDDEN");
+    });
+
     it("should restrict sensitive files to authorized roles", async () => {
       const { user: admin, token: adminToken } = await createTestUser({ role: "super_admin" });
       const { user: regular, token: regularToken } = await createTestUser();

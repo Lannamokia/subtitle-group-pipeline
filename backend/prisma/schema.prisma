@@ -363,6 +363,7 @@ model Project {
   product_config    String?       // JSON snapshot of template product/output configuration
   delivery_checklist String?       // JSON: array of checklist items, inherited from template, editable at project level
   release_task_type String?       // snapshot of template release task type
+  download_link_ttl_seconds Int?  // supervisor override for temporary download links
   is_archived       Boolean       @default(false)
   archived_at       DateTime?
   deleted_at        DateTime?
@@ -990,6 +991,7 @@ model DataRetentionSettings {
   audit_log_retention_days Int    @default(365)   // keep audit logs
   notification_retention_days Int @default(30)     // keep old notifications
   max_file_versions      Int      @default(10)    // max versions to keep per file
+  download_link_ttl_seconds Int   @default(300)   // global default for temporary download links
   created_at             DateTime @default(now())
   updated_at             DateTime @updatedAt
 }

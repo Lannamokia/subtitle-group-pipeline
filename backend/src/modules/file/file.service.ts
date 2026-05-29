@@ -1132,6 +1132,49 @@ function getMinimumTtl(fileType: string, requestedTtl: number): number {
   return Math.max(requestedTtl, baseMinimum);
 }
 
+async function resolveConfiguredDownloadTtl(
+  project: { download_link_ttl_seconds?: number | null },
+  requestedTtl: number
+): Promise<number> {
+  if (project.download_link_ttl_seconds) {
+    return project.download_link_ttl_seconds;
+  }
+
+  const settings = await prisma.dataRetentionSettings.findFirst({
+    orderBy: { created_at: "desc" },
+    select: { download_link_ttl_seconds: true },
+  });
+
+  return settings?.download_link_ttl_seconds || requestedTtl;
+}
+
+async function assertFileViewPermission(file: {
+  project_id: string;
+  uploader_id: string;
+  project: { owner_id: string };
+}, userId: string, userRole: UserRole): Promise<void> {
+  if (["super_admin", "group_admin", "supervisor"].includes(userRole)) {
+    return;
+  }
+
+  if (file.uploader_id === userId || file.project.owner_id === userId) {
+    return;
+  }
+
+  const membership = await prisma.projectMember.findFirst({
+    where: {
+      project_id: file.project_id,
+      user_id: userId,
+      left_at: null,
+    },
+    select: { id: true },
+  });
+
+  if (!membership) {
+    throw new AppError("Insufficient permissions to view this file", "FORBIDDEN", 403);
+  }
+}
+
 export async function getDownloadLink(
   fileId: string,
   userId: string,
@@ -1160,6 +1203,8 @@ export async function getDownloadLink(
   if (file.is_deleted) {
     throw new AppError("File has been deleted", "GONE", 410);
   }
+
+  await assertFileViewPermission(file, userId, userRole);
 
   // Check sensitive file access
   const tags: string[] = file.tags ? JSON.parse(file.tags) : [];
@@ -1198,7 +1243,8 @@ export async function getDownloadLink(
   }
 
   // Calculate TTL
-  const ttlSeconds = getMinimumTtl(file.file_type, requestedTtl);
+  const configuredTtl = await resolveConfiguredDownloadTtl(file.project, requestedTtl);
+  const ttlSeconds = getMinimumTtl(file.file_type, configuredTtl);
   const now = new Date();
   const nextSecond = Math.ceil(now.getTime() / 1000) * 1000;
   const expiresAt = new Date(nextSecond + ttlSeconds * 1000);
@@ -1229,10 +1275,16 @@ export async function getDownloadLink(
   }
 
   // Determine storage backend
-  const backend = file.project.storage_backend;
+  let backend = file.project.storage_backend;
+  if (file.storage_backend_id && file.storage_backend_id !== backend?.id) {
+    backend = await prisma.storageBackend.findUnique({
+      where: { id: file.storage_backend_id },
+    });
+  }
   const storageBackendId = file.storage_backend_id || backend?.id;
 
   let downloadUrl: string;
+  const token = generateToken();
 
   if (backend?.backend_type === "s3" || backend?.backend_type === "s3_compatible") {
     // For S3, generate presigned URL
@@ -1243,9 +1295,21 @@ export async function getDownloadLink(
       currentVersion.storage_path,
       ttlSeconds
     );
+
+    await prisma.downloadLink.create({
+      data: {
+        project_id: file.project_id,
+        file_id: fileId,
+        created_by: userId,
+        token,
+        expires_at: expiresAt,
+        max_downloads: null,
+        download_count: 0,
+        is_active: true,
+      },
+    });
   } else {
     // For local storage, create a DownloadLink record with token
-    const token = generateToken();
     await prisma.downloadLink.create({
       data: {
         project_id: file.project_id,
