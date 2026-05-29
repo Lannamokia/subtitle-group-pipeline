@@ -3,6 +3,7 @@ import { AppError } from "../../utils/response";
 import { TaskRole, TaskStatus, ProjectStatus, TimelineEventType } from "@prisma/client";
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
+import * as notificationService from "../notification/notification.service";
 import type {
   CreateProjectInput,
   CreateProjectFromTemplateInput,
@@ -42,6 +43,29 @@ function numberFromPolicy(policy: Record<string, unknown>, ...keys: string[]): n
     }
   }
   return undefined;
+}
+
+async function getProjectSupervisorRecipientIds(projectId: string, actorId?: string): Promise<string[]> {
+  const [project, supervisors] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { owner_id: true },
+    }),
+    prisma.projectMember.findMany({
+      where: {
+        project_id: projectId,
+        OR: [{ role: "supervisor" }, { is_lead: true }],
+      },
+      select: { user_id: true },
+    }),
+  ]);
+
+  return [
+    ...new Set([
+      ...(project?.owner_id ? [project.owner_id] : []),
+      ...supervisors.map((member) => member.user_id),
+    ]),
+  ].filter((userId) => userId !== actorId);
 }
 
 function booleanFromPolicy(policy: Record<string, unknown>, ...keys: string[]): boolean | undefined {
@@ -1059,6 +1083,17 @@ export async function createJoinRequest(
     metadata: { role: data.role },
   });
 
+  const recipients = await getProjectSupervisorRecipientIds(projectId, userId);
+  for (const recipientId of recipients) {
+    await notificationService.createNotification(recipientId, "join_request", {
+      projectId,
+      actorId: userId,
+      projectName: project.name,
+      actorName: "申请人",
+      reason: data.message || undefined,
+    });
+  }
+
   return request;
 }
 
@@ -1069,6 +1104,10 @@ export async function respondToJoinRequest(
 ) {
   const request = await prisma.joinRequest.findUnique({
     where: { id: requestId },
+    include: {
+      project: { select: { name: true } },
+      user: { select: { username: true, nickname: true } },
+    },
   });
 
   if (!request) {
@@ -1115,6 +1154,27 @@ export async function respondToJoinRequest(
       metadata: { user_id: request.user_id, role: request.role },
     });
   }
+
+  const applicantName = request.user.nickname || request.user.username;
+  await notificationService.createNotification(
+    request.user_id,
+    data.approved ? "join_approved" : "join_rejected",
+    {
+      projectId: request.project_id,
+      actorId: approverId,
+      projectName: request.project.name,
+    }
+  );
+  await notificationService.createNotification(
+    approverId,
+    data.approved ? "join_approved" : "join_rejected",
+    {
+      projectId: request.project_id,
+      actorId: approverId,
+      projectName: request.project.name,
+      actorName: applicantName,
+    }
+  );
 
   await auditService.log({
     user_id: approverId,

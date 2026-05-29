@@ -22,6 +22,7 @@ import type {
 } from "./subtitle.schema";
 import * as fileService from "../file/file.service";
 import * as storageService from "../storage/storage.service";
+import * as notificationService from "../notification/notification.service";
 import { createHash, randomUUID } from "crypto";
 import type { ConflictType } from "@prisma/client";
 
@@ -719,6 +720,7 @@ export async function processMergeJob(jobId: string) {
     const project = await prisma.project.findUnique({
       where: { id: job.project_id },
       select: {
+        name: true,
         owner_id: true,
         storage_backend_id: true,
       },
@@ -815,6 +817,21 @@ export async function processMergeJob(jobId: string) {
           overlap_conflicts: conflicts.filter((c) => c.type === "overlap").length,
         }),
       },
+    });
+
+    const notificationType = unresolvedConflicts.length > 0 ? "conflict_detected" : "project_update";
+    const recipients = await notificationService.resolveRecipients(notificationType, {
+      projectId: job.project_id,
+      actorId: notificationType === "project_update" ? project.owner_id : undefined,
+    });
+    await notificationService.createBulkNotifications(recipients, notificationType, {
+      projectId: job.project_id,
+      actorId: notificationType === "project_update" ? project.owner_id : undefined,
+      projectName: project.name,
+      fileName: mergedFileName,
+      reason: unresolvedConflicts.length > 0
+        ? `检测到 ${unresolvedConflicts.length} 个未解决字幕冲突`
+        : "字幕合并已完成",
     });
 
     return updatedJob;

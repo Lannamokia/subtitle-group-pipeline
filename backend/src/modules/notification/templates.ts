@@ -65,11 +65,15 @@ const TEMPLATES: Record<NotificationType, (ctx: TemplateContext) => { title: str
   }),
   join_approved: (ctx) => ({
     title: `加入申请已通过：${ctx.projectName || "未知项目"}`,
-    content: `你加入「${ctx.projectName || "未知项目"}」的申请已通过。`,
+    content: ctx.actorName
+      ? `${ctx.actorName} 加入「${ctx.projectName || "未知项目"}」的申请已通过。`
+      : `你加入「${ctx.projectName || "未知项目"}」的申请已通过。`,
   }),
   join_rejected: (ctx) => ({
     title: `加入申请未通过：${ctx.projectName || "未知项目"}`,
-    content: `你加入「${ctx.projectName || "未知项目"}」的申请未通过${ctx.reason ? `，原因：${ctx.reason}` : ""}。`,
+    content: ctx.actorName
+      ? `${ctx.actorName} 加入「${ctx.projectName || "未知项目"}」的申请未通过${ctx.reason ? `，原因：${ctx.reason}` : ""}。`
+      : `你加入「${ctx.projectName || "未知项目"}」的申请未通过${ctx.reason ? `，原因：${ctx.reason}` : ""}。`,
   }),
   file_uploaded: (ctx) => ({
     title: `新文件上传：${ctx.fileName || "未知文件"}`,

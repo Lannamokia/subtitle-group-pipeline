@@ -79,6 +79,79 @@ function parseMetadata(metadata: string | null | undefined): Record<string, unkn
   }
 }
 
+async function getWorkflowReviewerIds(projectId: string): Promise<string[]> {
+  const [project, supervisors] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { owner_id: true },
+    }),
+    prisma.projectMember.findMany({
+      where: {
+        project_id: projectId,
+        OR: [{ role: "supervisor" }, { is_lead: true }],
+      },
+      select: { user_id: true },
+    }),
+  ]);
+
+  return [
+    ...new Set([
+      ...(project?.owner_id ? [project.owner_id] : []),
+      ...supervisors.map((member) => member.user_id),
+    ]),
+  ];
+}
+
+async function getProjectDisplayName(projectId: string): Promise<string | undefined> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { name: true },
+  });
+  return project?.name;
+}
+
+async function notifyUnlockedDownstreamTask(
+  task: { id: string; project_id: string; title: string; role: TaskRole; assignee_id: string | null },
+  actorId?: string
+): Promise<void> {
+  const projectName = await getProjectDisplayName(task.project_id);
+
+  if (task.assignee_id) {
+    await notificationService.createNotification(task.assignee_id, "task_assigned", {
+      projectId: task.project_id,
+      taskId: task.id,
+      taskName: task.title,
+      projectName,
+      actorId,
+      reason: "依赖任务已完成，当前任务已解锁",
+    });
+    return;
+  }
+
+  const waiters = await prisma.projectMember.findMany({
+    where: {
+      project_id: task.project_id,
+      role: task.role,
+      left_at: null,
+    },
+    select: { user_id: true },
+  });
+
+  const recipients = [...new Set(waiters.map((waiter) => waiter.user_id))]
+    .filter((userId) => userId !== actorId);
+
+  for (const userId of recipients) {
+    await notificationService.createNotification(userId, "project_update", {
+      projectId: task.project_id,
+      taskId: task.id,
+      taskName: task.title,
+      projectName,
+      actorId,
+      reason: "依赖任务已完成，开放任务可领取",
+    });
+  }
+}
+
 async function discardReleaseArtifacts(
   task: { id: string; project_id: string },
   actorId?: string
@@ -946,6 +1019,33 @@ export async function submitTask(
     metadata: { task_id: taskId },
   });
 
+  if (REVIEW_REQUIRED_ROLES.includes(task.role)) {
+    const reviewerIds = (await getWorkflowReviewerIds(task.project_id))
+      .filter((reviewerId) => reviewerId !== userId);
+    const projectName = await getProjectDisplayName(task.project_id);
+
+    for (const reviewerId of reviewerIds) {
+      const review = await prisma.review.create({
+        data: {
+          project_id: task.project_id,
+          task_id: taskId,
+          reviewer_id: reviewerId,
+          requester_id: userId,
+          status: ReviewStatus.pending,
+        },
+      });
+
+      await notificationService.createNotification(reviewerId, "review_requested", {
+        projectId: task.project_id,
+        taskId,
+        actorId: userId,
+        taskName: task.title,
+        projectName,
+        extra: { review_id: review.id },
+      });
+    }
+  }
+
   await auditService.log({
     user_id: actorId || userId,
     action: "task.submit",
@@ -1055,6 +1155,7 @@ export async function approveTask(
       project_id: task.project_id,
       task_id: taskId,
       reviewer_id: reviewerId,
+      requester_id: task.assignee_id,
       status: ReviewStatus.approved,
       comments: data.comments,
       line_comments: data.line_comments,
@@ -1079,7 +1180,18 @@ export async function approveTask(
         where: { id: downTask.id },
         data: { status: "claimable" },
       });
+      await notifyUnlockedDownstreamTask(downTask, reviewerId);
     }
+  }
+
+  if (task.assignee_id && task.assignee_id !== reviewerId) {
+    await notificationService.createNotification(task.assignee_id, "review_approved", {
+      projectId: task.project_id,
+      taskId,
+      actorId: reviewerId,
+      taskName: task.title,
+      projectName: await getProjectDisplayName(task.project_id),
+    });
   }
 
   await timelineService.createTimelineEvent({
@@ -1137,6 +1249,7 @@ export async function rejectTask(
       project_id: task.project_id,
       task_id: taskId,
       reviewer_id: reviewerId,
+      requester_id: task.assignee_id,
       status: ReviewStatus.rejected,
       comments: data.comments,
       line_comments: data.line_comments,
@@ -1179,6 +1292,17 @@ export async function rejectTask(
     actor_id: reviewerId,
     metadata: { task_id: taskId, review_id: review.id },
   });
+
+  if (task.assignee_id && task.assignee_id !== reviewerId) {
+    await notificationService.createNotification(task.assignee_id, "review_rejected", {
+      projectId: task.project_id,
+      taskId,
+      actorId: reviewerId,
+      taskName: task.title,
+      projectName: await getProjectDisplayName(task.project_id),
+      reason: data.comments || undefined,
+    });
+  }
 
   await auditService.log({
     user_id: actorId || reviewerId,

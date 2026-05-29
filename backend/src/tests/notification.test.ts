@@ -6,11 +6,13 @@ import {
   createTestTask,
   createTestUnit,
   createTestFile,
+  createTestStorageBackend,
   createTestNotification,
   cleanDatabase,
 } from "./setup";
 import { post, get, put, expectSuccess } from "./helpers";
 import * as notificationService from "../modules/notification/notification.service";
+import * as subtitleService from "../modules/subtitle/subtitle.service";
 import { executeDelivery } from "../modules/notification/delivery.service";
 import { buildGroupMessageContent } from "../modules/notification/adapters/qq.adapter";
 import { NotificationChannel } from "@prisma/client";
@@ -157,6 +159,267 @@ describe("Notification Tests", () => {
       expect(recipients).toContain(assignee.id);
       expect(recipients).toContain(supervisor.id);
       expect(recipients).toContain(owner.id);
+    });
+  });
+
+  describe("Workflow Event Notifications", () => {
+    it("should create review requests and notify project reviewers when a gated task is submitted", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: supervisor } = await createTestUser();
+      const { user: translator, token: translatorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: supervisor.id, role: "supervisor", is_lead: true },
+      });
+
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "in_progress",
+        assignee_id: translator.id,
+        creator_id: owner.id,
+      });
+
+      const res = await post(app, `/api/v1/tasks/${task.id}/submit`, {}, translatorToken);
+
+      expectSuccess(res, 200);
+
+      const reviews = await prisma.review.findMany({
+        where: { task_id: task.id, status: "pending" },
+      });
+      expect(reviews.map((review) => review.reviewer_id)).toEqual(
+        expect.arrayContaining([owner.id, supervisor.id])
+      );
+      expect(reviews.every((review) => review.requester_id === translator.id)).toBe(true);
+
+      const notifications = await prisma.notification.findMany({
+        where: { type: "review_requested", task_id: task.id },
+      });
+      expect(notifications.map((notification) => notification.user_id)).toEqual(
+        expect.arrayContaining([owner.id, supervisor.id])
+      );
+    });
+
+    it("should notify the requester when review is approved or rejected", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: translator } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const approvedTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "submitted",
+        assignee_id: translator.id,
+        creator_id: owner.id,
+      });
+
+      const approveRes = await post(
+        app,
+        `/api/v1/tasks/${approvedTask.id}/approve`,
+        { approved: true, comments: "OK" },
+        ownerToken
+      );
+      expectSuccess(approveRes, 200);
+
+      const approvedReview = await prisma.review.findFirst({
+        where: { task_id: approvedTask.id, status: "approved" },
+      });
+      expect(approvedReview!.requester_id).toBe(translator.id);
+
+      const approvedNotification = await prisma.notification.findFirst({
+        where: {
+          user_id: translator.id,
+          task_id: approvedTask.id,
+          type: "review_approved",
+        },
+      });
+      expect(approvedNotification).toBeDefined();
+
+      const rejectedTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "encoding",
+        status: "submitted",
+        assignee_id: translator.id,
+        creator_id: owner.id,
+      });
+
+      const rejectRes = await post(
+        app,
+        `/api/v1/tasks/${rejectedTask.id}/reject`,
+        { approved: false, comments: "Needs fixes" },
+        ownerToken
+      );
+      expectSuccess(rejectRes, 200);
+
+      const rejectedReview = await prisma.review.findFirst({
+        where: { task_id: rejectedTask.id, status: "rejected" },
+      });
+      expect(rejectedReview!.requester_id).toBe(translator.id);
+
+      const rejectedNotification = await prisma.notification.findFirst({
+        where: {
+          user_id: translator.id,
+          task_id: rejectedTask.id,
+          type: "review_rejected",
+        },
+      });
+      expect(rejectedNotification).toBeDefined();
+    });
+
+    it("should notify downstream assignees when an approved task unlocks their work", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: translator } = await createTestUser();
+      const { user: postWorker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "submitted",
+        assignee_id: translator.id,
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "pending_publish",
+        assignee_id: postWorker.id,
+        creator_id: owner.id,
+      });
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const approveRes = await post(
+        app,
+        `/api/v1/tasks/${upstream.id}/approve`,
+        { approved: true, comments: "Unlock next" },
+        ownerToken
+      );
+      expectSuccess(approveRes, 200);
+
+      const notification = await prisma.notification.findFirst({
+        where: {
+          user_id: postWorker.id,
+          task_id: downstream.id,
+          type: "task_assigned",
+        },
+      });
+      expect(notification).toBeDefined();
+    });
+
+    it("should notify both applicant and acting reviewer for join decisions", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: applicant, token: applicantToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+
+      const joinRes = await post(
+        app,
+        `/api/v1/projects/${project.id}/join`,
+        { role: "translation", message: "I can help" },
+        applicantToken
+      );
+      expectSuccess(joinRes, 201);
+
+      const approveRes = await post(
+        app,
+        `/api/v1/projects/join-requests/${joinRes.body.data.id}/respond`,
+        { approved: true },
+        ownerToken
+      );
+      expectSuccess(approveRes, 200);
+
+      const approvedNotifications = await prisma.notification.findMany({
+        where: {
+          type: "join_approved",
+          project_id: project.id,
+        },
+      });
+      expect(approvedNotifications.map((notification) => notification.user_id)).toEqual(
+        expect.arrayContaining([applicant.id, owner.id])
+      );
+    });
+
+    it("should notify supervisors when subtitle merge detects conflicts", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: supervisor } = await createTestUser();
+      const backend = await createTestStorageBackend({ is_default: true });
+      const project = await createTestProject({
+        owner_id: owner.id,
+        storage_backend_id: backend.id,
+      });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "submitted",
+        creator_id: owner.id,
+      });
+
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: supervisor.id, role: "supervisor" },
+      });
+
+      const { version: versionA } = await createTestFile({
+        project_id: project.id,
+        uploader_id: owner.id,
+        name: "a.ass",
+      });
+      const { version: versionB } = await createTestFile({
+        project_id: project.id,
+        uploader_id: owner.id,
+        name: "b.ass",
+      });
+
+      const contentA = `[Script Info]
+Title: A
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Version A`;
+      const contentB = contentA.replace("Version A", "Version B");
+
+      await prisma.translationSubmission.createMany({
+        data: [
+          { task_id: task.id, user_id: owner.id, file_version_id: versionA.id, content: contentA },
+          { task_id: task.id, user_id: owner.id, file_version_id: versionB.id, content: contentB },
+        ],
+      });
+      const job = await prisma.mergeJob.create({
+        data: {
+          project_id: project.id,
+          unit_id: unit.id,
+          input_files: JSON.stringify([versionA.id, versionB.id]),
+        },
+      });
+
+      await subtitleService.processMergeJob(job.id);
+
+      const notifications = await prisma.notification.findMany({
+        where: { type: "conflict_detected", project_id: project.id },
+      });
+      expect(notifications.map((notification) => notification.user_id)).toEqual(
+        expect.arrayContaining([owner.id, supervisor.id])
+      );
     });
   });
 

@@ -346,9 +346,26 @@ export async function resolveRecipients(
       if (context.joinRequestId) {
         const req = await prisma.joinRequest.findUnique({
           where: { id: context.joinRequestId },
-          select: { user_id: true },
+          select: { user_id: true, approved_by: true },
         });
         if (req?.user_id) recipients.push(req.user_id);
+        if (req?.approved_by) recipients.push(req.approved_by);
+      }
+      break;
+
+    case "project_update":
+      if (context.projectId) {
+        const members = await prisma.projectMember.findMany({
+          where: { project_id: context.projectId, left_at: null },
+          select: { user_id: true },
+        });
+        for (const member of members) recipients.push(member.user_id);
+
+        const project = await prisma.project.findUnique({
+          where: { id: context.projectId },
+          select: { owner_id: true },
+        });
+        if (project?.owner_id) recipients.push(project.owner_id);
       }
       break;
 
@@ -490,6 +507,9 @@ export async function resolveRecipients(
 
   // Remove duplicates and the actor (don't notify yourself)
   const unique = [...new Set(recipients)];
+  if (eventType === "join_approved" || eventType === "join_rejected") {
+    return unique;
+  }
   return context.actorId ? unique.filter((id) => id !== context.actorId) : unique;
 }
 
