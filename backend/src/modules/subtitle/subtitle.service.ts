@@ -22,7 +22,7 @@ import type {
 } from "./subtitle.schema";
 import * as fileService from "../file/file.service";
 import * as storageService from "../storage/storage.service";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import type { ConflictType } from "@prisma/client";
 
 // ==================== TRANSLATION CLAIMS ====================
@@ -320,6 +320,11 @@ export async function submitTranslation(
     where: { id: taskId },
     include: {
       unit: true,
+      project: {
+        select: {
+          storage_backend_id: true,
+        },
+      },
     },
   });
 
@@ -348,25 +353,55 @@ export async function submitTranslation(
   let fileVersionId: string | null = null;
 
   if (data.ass_content) {
+    let parsed: ASSParseResult;
+    try {
+      parsed = parseASS(data.ass_content);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new AppError(`Invalid ASS submission: ${message}`, "VALIDATION_ERROR", 400);
+    }
+
+    if (parsed.lines.length === 0) {
+      throw new AppError(
+        "Invalid ASS submission: no dialogue lines found",
+        "VALIDATION_ERROR",
+        400
+      );
+    }
+
     // Create a new FileEntity for the ASS submission
     const fileName = `translation_${taskId}_${Date.now()}.ass`;
-    const backend = await storageService.getDefaultBackend();
+    const backend = task.project.storage_backend_id
+      ? await prisma.storageBackend.findUnique({ where: { id: task.project.storage_backend_id } })
+      : await storageService.getDefaultBackend();
 
-    // Store the ASS content (in a real system, this would write to storage)
-    // For now, we create the file record and store content as metadata
+    if (!backend || !backend.is_active) {
+      throw new AppError("No active storage backend configured", "CONFIG_ERROR", 500);
+    }
+
+    const uploadResult = await storageService.uploadFile(
+      backend.id,
+      task.project_id,
+      Buffer.from(data.ass_content, "utf-8"),
+      fileName,
+      "application/x-ass"
+    );
+
     const file = await fileService.createFile(userId, {
       project_id: task.project_id,
       name: fileName,
       file_type: "subtitle",
       mime_type: "application/x-ass",
-      size_bytes: Buffer.byteLength(data.ass_content, "utf-8"),
-      storage_path: `submissions/${task.project_id}/${fileName}`,
+      size_bytes: uploadResult.size,
+      storage_path: uploadResult.storagePath,
+      storage_backend_id: backend.id,
       checksum: null,
       metadata: JSON.stringify({
         task_id: taskId,
         claim_id: claim.id,
         unit_id: task.unit_id,
         submission_type: "translation",
+        parsed_line_count: parsed.lines.length,
       }),
     });
 
@@ -378,13 +413,6 @@ export async function submitTranslation(
     });
 
     fileVersionId = versions[0]?.id ?? null;
-
-    // Update storage usage
-    await storageService.updateUsage(
-      backend.id,
-      Buffer.byteLength(data.ass_content, "utf-8"),
-      1
-    );
   }
 
   // Create the submission record
@@ -570,14 +598,34 @@ export async function processMergeJob(jobId: string) {
       let parsed: ASSParseResult;
       try {
         parsed = parseASS(submission.content);
-      } catch {
-        // If not valid ASS, skip or treat as plain text
-        continue;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new AppError(
+          `Unable to parse ASS input ${fileVersionId}: ${message}`,
+          "VALIDATION_ERROR",
+          400
+        );
+      }
+
+      if (parsed.lines.length === 0) {
+        throw new AppError(
+          `Unable to parse ASS input ${fileVersionId}: no dialogue lines found`,
+          "VALIDATION_ERROR",
+          400
+        );
       }
 
       for (const line of parsed.lines) {
         allLines.push({ ...line, sourceFileId: fileVersion.file_id });
       }
+    }
+
+    if (allLines.length === 0) {
+      throw new AppError(
+        "No parseable ASS dialogue lines found in merge inputs",
+        "VALIDATION_ERROR",
+        400
+      );
     }
 
     // Sort by start time
@@ -667,18 +715,45 @@ export async function processMergeJob(jobId: string) {
     );
 
     // Save merged result as NEW independent FileEntity
-    const backend = await storageService.getDefaultBackend();
     const mergedFileName = `merged_${job.unit_id}_${Date.now()}.ass`;
+    const project = await prisma.project.findUnique({
+      where: { id: job.project_id },
+      select: {
+        owner_id: true,
+        storage_backend_id: true,
+      },
+    });
+
+    if (!project) {
+      throw new AppError("Project not found", "NOT_FOUND", 404);
+    }
+
+    const backend = project.storage_backend_id
+      ? await prisma.storageBackend.findUnique({ where: { id: project.storage_backend_id } })
+      : await storageService.getDefaultBackend();
+
+    if (!backend || !backend.is_active) {
+      throw new AppError("No active storage backend configured", "CONFIG_ERROR", 500);
+    }
+
+    const mergedUpload = await storageService.uploadFile(
+      backend.id,
+      job.project_id,
+      Buffer.from(mergedContent, "utf-8"),
+      mergedFileName,
+      "application/x-ass"
+    );
 
     const mergedFile = await fileService.createFile(
-      job.project_id, // Use project as uploader placeholder
+      project.owner_id,
       {
         project_id: job.project_id,
         name: mergedFileName,
         file_type: "subtitle",
         mime_type: "application/x-ass",
-        size_bytes: Buffer.byteLength(mergedContent, "utf-8"),
-        storage_path: `merged/${job.project_id}/${mergedFileName}`,
+        size_bytes: mergedUpload.size,
+        storage_path: mergedUpload.storagePath,
+        storage_backend_id: backend.id,
         checksum: null,
         metadata: JSON.stringify({
           merge_job_id: job.id,
@@ -698,13 +773,6 @@ export async function processMergeJob(jobId: string) {
     });
 
     const mergedFileVersionId = versions[0]?.id;
-
-    // Update storage usage
-    await storageService.updateUsage(
-      backend.id,
-      Buffer.byteLength(mergedContent, "utf-8"),
-      1
-    );
 
     // Create SubtitleConflict records for unresolved conflicts
     const unresolvedConflicts = conflicts.filter(
@@ -905,6 +973,314 @@ export async function updateMergeJobStatus(
   return job;
 }
 
+type SourceSubtitle = {
+  fileId: string;
+  content: string | null;
+};
+
+function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseConflictRange(affectedLines: string | null): { start: number; end: number } | null {
+  const values = safeJsonParse<unknown>(affectedLines, null);
+  if (!Array.isArray(values) || values.length < 2) {
+    return null;
+  }
+
+  const [start, end] = values;
+  if (typeof start !== "number" || typeof end !== "number") {
+    return null;
+  }
+
+  return { start, end };
+}
+
+function overlapsRange(line: ASSLine, range: { start: number; end: number }): boolean {
+  return line.startTime < range.end && range.start < line.endTime;
+}
+
+async function getCurrentSubtitleContent(fileId: string): Promise<SourceSubtitle> {
+  const current = await prisma.fileVersion.findFirst({
+    where: { file_id: fileId, is_current: true },
+    orderBy: { version_number: "desc" },
+  });
+  const version = current || await prisma.fileVersion.findFirst({
+    where: { file_id: fileId },
+    orderBy: { version_number: "desc" },
+  });
+
+  if (!version) {
+    return { fileId, content: null };
+  }
+
+  const submission = await prisma.translationSubmission.findFirst({
+    where: { file_version_id: version.id },
+    orderBy: { submitted_at: "desc" },
+  });
+
+  return {
+    fileId,
+    content: submission?.content || null,
+  };
+}
+
+function buildResolvedSubtitleContent(
+  conflict: {
+    affected_lines: string | null;
+    file_a_id: string;
+    file_b_id: string;
+  },
+  sourceA: SourceSubtitle,
+  sourceB: SourceSubtitle,
+  resolutionText: string | null,
+  keepFileId?: string
+): { content: string; lineCount: number } {
+  const preferred = keepFileId === conflict.file_b_id ? sourceB : sourceA;
+  const fallback = preferred.content ? preferred : sourceA.content ? sourceA : sourceB;
+  const range = parseConflictRange(conflict.affected_lines);
+
+  let scriptInfo: ASSParseResult["scriptInfo"] = {
+    Title: "Resolved Merged Subtitle",
+    ScriptType: "v4.00+",
+  };
+  let styles: ASSParseResult["styles"] = [];
+  let baseLines: ASSLine[] = [];
+
+  if (fallback.content) {
+    try {
+      const parsed = parseASS(fallback.content);
+      scriptInfo = parsed.scriptInfo;
+      styles = parsed.styles;
+      baseLines = parsed.lines;
+    } catch {
+      baseLines = [];
+    }
+  }
+
+  const keptLines = range
+    ? baseLines.filter((line) => !overlapsRange(line, range))
+    : [...baseLines];
+
+  let resolvedLines: ASSLine[] = [];
+  if (resolutionText && !resolutionText.startsWith("keepTranslationId:")) {
+    resolvedLines = [{
+      id: `resolved_${randomUUID()}`,
+      layer: 0,
+      startTime: range?.start ?? baseLines[0]?.startTime ?? 0,
+      endTime: range?.end ?? baseLines[0]?.endTime ?? 5,
+      style: baseLines[0]?.style || "Default",
+      name: "",
+      marginL: 0,
+      marginR: 0,
+      marginV: 0,
+      effect: "",
+      text: resolutionText,
+    }];
+  } else if (range) {
+    const keptSource = keepFileId === conflict.file_b_id ? sourceB : sourceA;
+    if (keptSource.content) {
+      try {
+        resolvedLines = parseASS(keptSource.content).lines.filter((line) => overlapsRange(line, range));
+      } catch {
+        resolvedLines = [];
+      }
+    }
+  }
+
+  if (resolvedLines.length === 0 && range) {
+    resolvedLines = baseLines.filter((line) => overlapsRange(line, range));
+  }
+
+  const mergedLines = [...keptLines, ...resolvedLines]
+    .sort((a, b) => a.startTime - b.startTime)
+    .map((line, index) => ({ ...line, id: `resolved_${index}` }));
+
+  return {
+    content: generateASS(scriptInfo, styles, mergedLines),
+    lineCount: mergedLines.length,
+  };
+}
+
+async function persistResolvedSubtitleVersion(
+  conflict: {
+    id: string;
+    project_id: string;
+    unit_id: string | null;
+  },
+  resolverId: string,
+  content: string,
+  lineCount: number,
+  mergeJobId?: string,
+  outputFileId?: string | null
+) {
+  const checksum = createHash("sha256").update(content).digest("hex");
+  const fileName = `resolved_${conflict.unit_id || conflict.project_id}_${Date.now()}.ass`;
+  let storagePath = `generated/resolved/${conflict.project_id}/${fileName}`;
+  let storageBackendId: string | null = null;
+
+  const project = await prisma.project.findUnique({
+    where: { id: conflict.project_id },
+    select: { storage_backend_id: true },
+  });
+
+  try {
+    const backend = project?.storage_backend_id
+      ? await prisma.storageBackend.findUnique({ where: { id: project.storage_backend_id } })
+      : await storageService.getDefaultBackend();
+
+    if (backend?.is_active) {
+      const uploaded = await storageService.uploadFile(
+        backend.id,
+        conflict.project_id,
+        Buffer.from(content, "utf-8"),
+        fileName,
+        "application/x-ass"
+      );
+      storagePath = uploaded.storagePath;
+      storageBackendId = backend.id;
+    }
+  } catch {
+    // Keep a deterministic virtual path when storage is not configured in tests or local scans.
+  }
+
+  let fileId = outputFileId || null;
+  let version;
+
+  if (fileId) {
+    const existing = await prisma.fileEntity.findUnique({ where: { id: fileId } });
+    if (!existing) {
+      fileId = null;
+    }
+  }
+
+  if (fileId) {
+    const latest = await prisma.fileVersion.findFirst({
+      where: { file_id: fileId },
+      orderBy: { version_number: "desc" },
+    });
+    const nextVersionNumber = (latest?.version_number || 0) + 1;
+
+    await prisma.fileVersion.updateMany({
+      where: { file_id: fileId },
+      data: { is_current: false, is_latest: false },
+    });
+
+    version = await prisma.fileVersion.create({
+      data: {
+        file_id: fileId,
+        version_number: nextVersionNumber,
+        storage_path: storagePath,
+        size_bytes: Buffer.byteLength(content, "utf-8"),
+        checksum,
+        change_summary: `Resolved conflict ${conflict.id}`,
+        is_current: true,
+        is_latest: true,
+        is_latest_approved: false,
+      },
+    });
+
+    await prisma.fileEntity.update({
+      where: { id: fileId },
+      data: {
+        storage_path: storagePath,
+        storage_backend_id: storageBackendId,
+        size_bytes: Buffer.byteLength(content, "utf-8"),
+        checksum,
+        metadata: JSON.stringify({
+          merge_job_id: mergeJobId,
+          unit_id: conflict.unit_id,
+          resolved_conflict_id: conflict.id,
+          line_count: lineCount,
+        }),
+      },
+    });
+  } else {
+    const file = await prisma.fileEntity.create({
+      data: {
+        project_id: conflict.project_id,
+        uploader_id: resolverId,
+        name: fileName,
+        original_name: fileName,
+        file_type: "subtitle",
+        mime_type: "application/x-ass",
+        size_bytes: Buffer.byteLength(content, "utf-8"),
+        storage_path: storagePath,
+        storage_backend_id: storageBackendId,
+        checksum,
+        metadata: JSON.stringify({
+          merge_job_id: mergeJobId,
+          unit_id: conflict.unit_id,
+          resolved_conflict_id: conflict.id,
+          line_count: lineCount,
+        }),
+      },
+    });
+    fileId = file.id;
+
+    version = await prisma.fileVersion.create({
+      data: {
+        file_id: file.id,
+        version_number: 1,
+        storage_path: storagePath,
+        size_bytes: Buffer.byteLength(content, "utf-8"),
+        checksum,
+        change_summary: `Resolved conflict ${conflict.id}`,
+        is_current: true,
+        is_latest: true,
+        is_latest_approved: false,
+      },
+    });
+  }
+
+  let task = await prisma.task.findFirst({
+    where: {
+      project_id: conflict.project_id,
+      unit_id: conflict.unit_id,
+      role: "translation",
+    },
+    orderBy: { created_at: "desc" },
+  });
+
+  if (!task) {
+    task = await prisma.task.create({
+      data: {
+        project_id: conflict.project_id,
+        unit_id: conflict.unit_id,
+        title: `Resolved merged subtitle - ${conflict.unit_id || conflict.project_id}`,
+        role: "translation",
+        status: "completed",
+        creator_id: resolverId,
+        completed_at: new Date(),
+      },
+    });
+  }
+
+  await prisma.translationSubmission.create({
+    data: {
+      task_id: task.id,
+      user_id: resolverId,
+      file_version_id: version.id,
+      content,
+      line_count: lineCount,
+    },
+  });
+
+  return {
+    file_id: fileId,
+    version_id: version.id,
+    version_number: version.version_number,
+  };
+}
+
 // ==================== CONFLICT RESOLUTION ====================
 
 export async function resolveConflict(
@@ -934,13 +1310,57 @@ export async function resolveConflict(
     throw new AppError("Conflict is already resolved", "BAD_REQUEST", 400);
   }
 
+  const resolution =
+    data.resolution ??
+    (data.status === "deferred" ? "ignored" : "resolved_manual");
+  const resolutionNote =
+    data.resolution_note ??
+    data.mergedText ??
+    (data.keepTranslationId ? `keepTranslationId:${data.keepTranslationId}` : null);
+
+  const latestJob = await prisma.mergeJob.findFirst({
+    where: {
+      project_id: conflict.project_id,
+      unit_id: conflict.unit_id,
+    },
+    orderBy: { created_at: "desc" },
+  });
+
+  let resolvedOutput: Awaited<ReturnType<typeof persistResolvedSubtitleVersion>> | null = null;
+  if (resolution !== "ignored") {
+    const keepFileId = data.keepTranslationId ??
+      (resolutionNote?.startsWith("keepTranslationId:")
+        ? resolutionNote.slice("keepTranslationId:".length)
+        : undefined);
+    const [sourceA, sourceB] = await Promise.all([
+      getCurrentSubtitleContent(conflict.file_a_id),
+      getCurrentSubtitleContent(conflict.file_b_id),
+    ]);
+    const resolvedSubtitle = buildResolvedSubtitleContent(
+      conflict,
+      sourceA,
+      sourceB,
+      resolutionNote,
+      keepFileId
+    );
+
+    resolvedOutput = await persistResolvedSubtitleVersion(
+      conflict,
+      resolverId,
+      resolvedSubtitle.content,
+      resolvedSubtitle.lineCount,
+      latestJob?.id,
+      latestJob?.output_file_id
+    );
+  }
+
   const updated = await prisma.subtitleConflict.update({
     where: { id: conflictId },
     data: {
-      resolution: data.resolution,
+      resolution,
       resolved_by: resolverId,
       resolved_at: new Date(),
-      resolution_note: data.resolution_note,
+      resolution_note: resolutionNote,
     },
   });
 
@@ -954,11 +1374,30 @@ export async function resolveConflict(
       resource_id: conflictId,
       old_value: JSON.stringify({ resolution: "unresolved" }),
       new_value: JSON.stringify({
-        resolution: data.resolution,
-        note: data.resolution_note,
+        resolution,
+        note: resolutionNote,
+        resolved_output: resolvedOutput,
       }),
     },
   });
+
+  if (latestJob && resolvedOutput) {
+    const logData = safeJsonParse<Record<string, unknown>>(latestJob.log, {});
+    await prisma.mergeJob.update({
+      where: { id: latestJob.id },
+      data: {
+        status: "completed",
+        output_file_id: resolvedOutput.file_id,
+        log: JSON.stringify({
+          ...logData,
+          resolved_output_file_id: resolvedOutput.file_id,
+          resolved_output_version_id: resolvedOutput.version_id,
+          resolved_conflict_id: conflict.id,
+          resolved_at: new Date().toISOString(),
+        }),
+      },
+    });
+  }
 
   // Check if all conflicts for this unit are resolved, then regenerate merged version
   const unresolvedCount = await prisma.subtitleConflict.count({
@@ -970,24 +1409,15 @@ export async function resolveConflict(
   });
 
   if (unresolvedCount === 0) {
-    // Trigger regeneration of merged version
-    // Find the latest merge job for this unit
-    const latestJob = await prisma.mergeJob.findFirst({
-      where: {
-        project_id: conflict.project_id,
-        unit_id: conflict.unit_id,
-      },
-      orderBy: { created_at: "desc" },
-    });
-
     if (latestJob) {
-      // Mark for regeneration (in production, this would queue a background job)
+      const refreshedJob = await prisma.mergeJob.findUnique({ where: { id: latestJob.id } });
+      const logData = safeJsonParse<Record<string, unknown>>(refreshedJob?.log, {});
       await prisma.mergeJob.update({
         where: { id: latestJob.id },
         data: {
           log: JSON.stringify({
-            ...JSON.parse(latestJob.log || "{}"),
-            needs_regeneration: true,
+            ...logData,
+            needs_regeneration: false,
             all_conflicts_resolved_at: new Date().toISOString(),
           }),
         },
@@ -995,7 +1425,10 @@ export async function resolveConflict(
     }
   }
 
-  return updated;
+  return {
+    ...updated,
+    resolved_output: resolvedOutput,
+  };
 }
 
 export async function getConflictDetail(conflictId: string) {

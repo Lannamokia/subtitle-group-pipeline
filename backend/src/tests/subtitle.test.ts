@@ -486,6 +486,128 @@ Dialogue: 0,0:00:11.00,0:00:15.00,Default,,0,0,0,,New line`;
       expect(resolved.resolved_at).not.toBeNull();
     });
 
+    it("should write resolved conflicts back as a new merged subtitle version with audit trail", async () => {
+      const { user: supervisor } = await createTestUser({ role: "supervisor" });
+      const { user: translator } = await createTestUser({ role: "member" });
+      const project = await createTestProject({ owner_id: supervisor.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: supervisor.id,
+        role: "translation",
+      });
+
+      const assA = `[Script Info]
+Title: A
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Version A line
+Dialogue: 0,0:00:06.00,0:00:10.00,Default,,0,0,0,,Shared line`;
+      const assB = assA.replace("Version A line", "Version B line");
+
+      const { file: fileA, version: versionA } = await createTestFile({
+        project_id: project.id,
+        uploader_id: translator.id,
+        name: "a.ass",
+      });
+      const { file: fileB, version: versionB } = await createTestFile({
+        project_id: project.id,
+        uploader_id: translator.id,
+        name: "b.ass",
+      });
+      const { file: mergedFile } = await createTestFile({
+        project_id: project.id,
+        uploader_id: supervisor.id,
+        name: "merged.ass",
+      });
+
+      await prisma.translationSubmission.createMany({
+        data: [
+          {
+            task_id: task.id,
+            user_id: translator.id,
+            file_version_id: versionA.id,
+            content: assA,
+          },
+          {
+            task_id: task.id,
+            user_id: translator.id,
+            file_version_id: versionB.id,
+            content: assB,
+          },
+        ],
+      });
+
+      const job = await prisma.mergeJob.create({
+        data: {
+          project_id: project.id,
+          unit_id: unit.id,
+          input_files: JSON.stringify([versionA.id, versionB.id]),
+          output_file_id: mergedFile.id,
+          status: "completed",
+          log: JSON.stringify({ merged_lines: 1 }),
+        },
+      });
+      const conflict = await prisma.subtitleConflict.create({
+        data: {
+          project_id: project.id,
+          unit_id: unit.id,
+          conflict_type: "content_mismatch",
+          description: "Resolve this subtitle line",
+          affected_lines: JSON.stringify([1, 5]),
+          file_a_id: fileA.id,
+          file_b_id: fileB.id,
+          resolution: "unresolved",
+        },
+      });
+
+      const resolved = await subtitleService.resolveConflict(
+        conflict.id,
+        supervisor.id,
+        "supervisor",
+        { status: "resolved", mergedText: "Resolved final line" }
+      );
+
+      expect(resolved.resolution).toBe("resolved_manual");
+      expect(resolved.resolved_output).toBeDefined();
+      expect(resolved.resolved_output!.file_id).toBe(mergedFile.id);
+
+      const newVersion = await prisma.fileVersion.findUnique({
+        where: { id: resolved.resolved_output!.version_id },
+      });
+      expect(newVersion).toMatchObject({
+        file_id: mergedFile.id,
+        is_current: true,
+        is_latest: true,
+      });
+      expect(newVersion!.version_number).toBeGreaterThan(1);
+
+      const writeBackSubmission = await prisma.translationSubmission.findFirst({
+        where: { file_version_id: newVersion!.id },
+      });
+      expect(writeBackSubmission!.content).toContain("Resolved final line");
+
+      const auditLog = await prisma.auditLog.findFirst({
+        where: {
+          action: "conflict.resolve",
+          resource_id: conflict.id,
+        },
+      });
+      expect(auditLog).toBeDefined();
+      expect(auditLog!.new_value).toContain(newVersion!.id);
+
+      const updatedJob = await prisma.mergeJob.findUnique({ where: { id: job.id } });
+      expect(updatedJob!.output_file_id).toBe(mergedFile.id);
+      expect(updatedJob!.log).toContain(newVersion!.id);
+    });
+
     it("should reject non-supervisors from resolving conflicts", async () => {
       const { user: regular } = await createTestUser({ role: "member" });
       const project = await createTestProject({ owner_id: regular.id });

@@ -50,7 +50,7 @@
 - [x] 6.2 Implement segmented translation task support and submission records with time-range metadata
 - [x] 6.3 Implement server-side merge jobs that deduplicate identical overlap, create merged versions as independent file entities (separate from source translation file entities), and emit conflict records for unresolved overlap
 - [x] 6.4 Implement version-to-version comparison data for the online dedup page in the first release
-- [ ] 6.5 Implement resolved-conflict write-back so online review decisions create a new merged subtitle version and audit trail. Online dedup page editing is restricted to supervisors and designated conflict reviewers only.
+- [x] 6.5 Implement resolved-conflict write-back so online review decisions create a new merged subtitle version and audit trail. Online dedup page editing is restricted to supervisors and designated conflict reviewers only.
 
 ## 7. Frontend workflows and review surfaces
 
