@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate } from "../../middleware/auth";
+import { authenticate, requireRole } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import * as controller from "./auth.controller";
 import {
@@ -10,6 +10,10 @@ import {
   updateProfileSchema,
   verifyQQSchema,
   requestPasswordResetSchema,
+  createRoleTagSchema,
+  updateRoleTagSchema,
+  createTagApplicationSchema,
+  reviewTagApplicationSchema,
 } from "./auth.schema";
 
 const router = Router();
@@ -110,5 +114,16 @@ router.put("/profile", authenticate, validateBody(updateProfileSchema), controll
 router.post("/change-password", authenticate, validateBody(changePasswordSchema), controller.changePassword);
 router.post("/verify-qq", validateBody(verifyQQSchema), controller.verifyQQ);
 router.post("/request-password-reset", rateLimitMiddleware, validateBody(requestPasswordResetSchema), controller.requestPasswordReset);
+
+// Role tags
+router.get("/role-tags", authenticate, controller.getRoleTags);
+router.post("/role-tags", authenticate, requireRole("super_admin", "group_admin"), validateBody(createRoleTagSchema), controller.createRoleTag);
+router.put("/role-tags/:id", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateRoleTagSchema), controller.updateRoleTag);
+router.delete("/role-tags/:id", authenticate, requireRole("super_admin", "group_admin"), controller.deleteRoleTag);
+router.get("/role-tags/my-status", authenticate, controller.getMyRoleTagStatuses);
+router.post("/tag-applications", authenticate, validateBody(createTagApplicationSchema), controller.createTagApplication);
+router.get("/tag-applications/my", authenticate, controller.getMyTagApplications);
+router.get("/tag-applications/pending", authenticate, requireRole("super_admin", "group_admin"), controller.getPendingTagApplications);
+router.post("/tag-applications/review", authenticate, requireRole("super_admin", "group_admin"), validateBody(reviewTagApplicationSchema), controller.reviewTagApplication);
 
 export default router;

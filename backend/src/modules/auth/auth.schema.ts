@@ -52,6 +52,29 @@ export const requestPasswordResetSchema = z.object({
   username: z.string().min(1, "Username is required"),
 });
 
+export const createRoleTagSchema = z.object({
+  name: z.string().min(1, "Tag name is required").max(50),
+  description: z.string().max(500).optional(),
+  color: z.string().max(50).optional(),
+});
+
+export const updateRoleTagSchema = z.object({
+  name: z.string().min(1).max(50).optional(),
+  description: z.string().max(500).optional().nullable(),
+  color: z.string().max(50).optional(),
+});
+
+export const createTagApplicationSchema = z.object({
+  tag_id: z.string().uuid("Invalid tag ID"),
+  reason: z.string().max(500).optional(),
+});
+
+export const reviewTagApplicationSchema = z.object({
+  application_id: z.string().uuid("Invalid application ID"),
+  approved: z.boolean(),
+  rejection_reason: z.string().max(500).optional(),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
@@ -59,3 +82,7 @@ export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type VerifyQQInput = z.infer<typeof verifyQQSchema>;
 export type RequestPasswordResetInput = z.infer<typeof requestPasswordResetSchema>;
+export type CreateRoleTagInput = z.infer<typeof createRoleTagSchema>;
+export type UpdateRoleTagInput = z.infer<typeof updateRoleTagSchema>;
+export type CreateTagApplicationInput = z.infer<typeof createTagApplicationSchema>;
+export type ReviewTagApplicationInput = z.infer<typeof reviewTagApplicationSchema>;

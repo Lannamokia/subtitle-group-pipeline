@@ -187,8 +187,8 @@ export function TemplatePage() {
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get<ProjectTemplate[]>("/templates");
-      setTemplates(res.data);
+      const res = await api.get<{ data: ProjectTemplate[] }>("/templates");
+      setTemplates(res.data.data);
     } catch (error) {
       toast.error("获取模板列表失败: " + getErrorMessage(error));
     } finally {

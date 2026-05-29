@@ -1,14 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useNotificationStore } from "@/stores/notificationStore";
+import { notificationApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { mockNotifications } from "@/lib/mockData";
-import type { NotificationType } from "@/types";
+import type { Notification, NotificationType } from "@/types";
 import {
   Bell,
   CheckCheck,
@@ -48,8 +48,13 @@ export function NotificationPage() {
   } = useNotificationStore();
   const [showPrefs, setShowPrefs] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  const notifications = mockNotifications;
+  useEffect(() => {
+    notificationApi.getNotifications()
+      .then((data) => setNotifications(data.items || []))
+      .catch(() => {});
+  }, []);
 
   const filtered =
     activeTab === "all"
@@ -189,7 +194,7 @@ function NotificationItem({
   notification,
   onRead,
 }: {
-  notification: typeof mockNotifications[0];
+  notification: Notification;
   onRead: () => void;
 }) {
   return (

@@ -7,6 +7,55 @@ import type {
   TemplateQueryInput,
 } from "./template.schema";
 
+function safeParseJson<T>(json: string | null | undefined, defaultValue: T): T {
+  if (!json) return defaultValue;
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return defaultValue;
+  }
+}
+
+function serializeTemplate(template: {
+  id: string;
+  name: string;
+  description: string | null;
+  project_type: string;
+  roles: string;
+  upload_policy: string;
+  notification_policy: string;
+  ass_policy: string;
+  product_config: string;
+  delivery_checklist: string;
+  release_task_type: string;
+  is_default: boolean;
+  created_at: Date;
+  updated_at: Date;
+  _count?: { projects?: number };
+}) {
+  return {
+    id: template.id,
+    name: template.name,
+    type: template.project_type,
+    description: template.description || undefined,
+    roles: safeParseJson(template.roles, []),
+    uploadPolicy: safeParseJson(template.upload_policy, { allowedTypes: {} }),
+    notificationPolicy: safeParseJson(template.notification_policy, { events: {} }),
+    assPolicy: safeParseJson(template.ass_policy, { mergeRule: "default", dedupThreshold: 0.1 }),
+    productConfig: safeParseJson(template.product_config, {
+      resolution: "1920x1080",
+      bitrate: "8000k",
+      encoder: "x264",
+      containerFormat: "mkv",
+      namingRule: "{title}_{ep}_{quality}",
+    }),
+    deliveryChecklist: safeParseJson(template.delivery_checklist, []),
+    useCount: template._count?.projects ?? 0,
+    createdAt: template.created_at.toISOString(),
+    updatedAt: template.updated_at.toISOString(),
+  };
+}
+
 export async function createTemplate(
   data: CreateTemplateInput,
   actorId?: string
@@ -54,7 +103,7 @@ export async function createTemplate(
     new_value: template,
   });
 
-  return template;
+  return serializeTemplate(template);
 }
 
 export async function getTemplates(query: TemplateQueryInput) {
@@ -81,12 +130,15 @@ export async function getTemplates(query: TemplateQueryInput) {
       skip,
       take: pageSize,
       orderBy: { created_at: "desc" },
+      include: {
+        _count: { select: { projects: true } },
+      },
     }),
     prisma.projectTemplate.count({ where }),
   ]);
 
   return {
-    templates,
+    templates: templates.map(serializeTemplate),
     meta: {
       page,
       pageSize,
@@ -105,7 +157,7 @@ export async function getTemplateById(templateId: string) {
     throw new AppError("Template not found", "NOT_FOUND", 404);
   }
 
-  return template;
+  return serializeTemplate(template);
 }
 
 export async function updateTemplate(
@@ -171,7 +223,7 @@ export async function updateTemplate(
     new_value: template,
   });
 
-  return template;
+  return serializeTemplate(template);
 }
 
 export async function deleteTemplate(
@@ -250,5 +302,5 @@ export async function setDefaultTemplate(
     new_value: updated,
   });
 
-  return updated;
+  return serializeTemplate(updated);
 }

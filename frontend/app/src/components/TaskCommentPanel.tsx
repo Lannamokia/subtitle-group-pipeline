@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { mockUsers } from "@/lib/mockData";
+import { memberApi } from "@/lib/api";
 import type { TaskComment, User } from "@/types";
 import {
   Send,
@@ -21,55 +21,11 @@ import {
   Hash,
 } from "lucide-react";
 
-// Mock comments data
-const mockComments: TaskComment[] = [
-  {
-    id: "c1",
-    taskId: "t1",
-    user: mockUsers[1],
-    content: "翻译稿已上传，请审核一下第三段的措辞",
-    fileVersionId: "fv1",
-    lineNumber: undefined,
-    mentions: [],
-    createdAt: "2024-06-20T10:00:00Z",
-  },
-  {
-    id: "c2",
-    taskId: "t1",
-    user: mockUsers[2],
-    content: "@小红 第三段的「不可能」改成「怎么会」会更自然一些",
-    fileVersionId: "fv1",
-    lineNumber: 15,
-    mentions: ["u2"],
-    createdAt: "2024-06-20T11:30:00Z",
-  },
-  {
-    id: "c3",
-    taskId: "t1",
-    user: mockUsers[1],
-    content: "好的，已修改",
-    fileVersionId: undefined,
-    lineNumber: undefined,
-    mentions: [],
-    createdAt: "2024-06-20T12:00:00Z",
-  },
-];
+// Mock file versions (empty)
+const mockFileVersions: { id: string; fileId: string; versionNumber: number; label: string }[] = [];
 
-// Mock file versions
-const mockFileVersions = [
-  { id: "fv1", fileId: "f2", versionNumber: 1, label: "v1.0 - 初稿" },
-  { id: "fv2", fileId: "f2", versionNumber: 2, label: "v1.1 - 修订" },
-  { id: "fv3", fileId: "f2", versionNumber: 3, label: "v1.2 - 终稿" },
-];
-
-// Mock ASS lines for line-level commenting
-const mockAssLines = [
-  { number: 1, time: "0:00:05.00", text: "Dialogue: 0,0:00:05.00,0:00:07.50,Default,,0,0,0,,夏天又要结束了" },
-  { number: 5, time: "0:00:15.00", text: "Dialogue: 0,0:00:15.00,0:00:18.00,Default,,0,0,0,,这不可能..." },
-  { number: 10, time: "0:00:25.00", text: "Dialogue: 0,0:00:25.00,0:00:28.00,Default,,0,0,0,,谢谢你一直以来的照顾" },
-  { number: 15, time: "0:00:35.00", text: "Dialogue: 0,0:00:35.00,0:00:38.00,Default,,0,0,0,,明天见" },
-  { number: 20, time: "0:00:45.00", text: "Dialogue: 0,0:00:45.00,0:00:48.00,Default,,0,0,0,,我回来了" },
-];
+// Mock ASS lines for line-level commenting (empty)
+const mockAssLines: { number: number; time: string; text: string }[] = [];
 
 interface TaskCommentPanelProps {
   taskId: string;
@@ -78,7 +34,7 @@ interface TaskCommentPanelProps {
 
 export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
   const currentUser = useAuthStore((s) => s.user);
-  const [comments, setComments] = useState<TaskComment[]>(mockComments);
+  const [comments, setComments] = useState<TaskComment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [selectedFileVersion, setSelectedFileVersion] = useState<string>("");
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
@@ -87,9 +43,16 @@ export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
   const [mentionIndex, setMentionIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [cursorPosition, setCursorPosition] = useState(0);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+
+  useEffect(() => {
+    memberApi.getMembers()
+      .then((data) => setAllUsers(data.items || []))
+      .catch(() => {});
+  }, []);
 
   // Filter users for mention
-  const mentionableUsers = mockUsers.filter(
+  const mentionableUsers = allUsers.filter(
     (u) =>
       u.id !== currentUser?.id &&
       (mentionQuery === "" || u.username.toLowerCase().includes(mentionQuery.toLowerCase()))
@@ -162,7 +125,7 @@ export function TaskCommentPanel({ taskId }: TaskCommentPanelProps) {
     let match: RegExpExecArray | null = null;
     while ((match = mentionPattern.exec(newComment)) !== null) {
       const username = match[1];
-      const mentionedUser = mockUsers.find((u) => u.username === username);
+      const mentionedUser = allUsers.find((u) => u.username === username);
       if (mentionedUser) {
         mentions.push(mentionedUser.id);
       }

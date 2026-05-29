@@ -13,7 +13,6 @@ import {
   Form,
 } from "@/components/ui/form";
 import { useNotificationStore } from "@/stores/notificationStore";
-import { mockNotifications } from "@/lib/mockData";
 import type { NotificationType, NotificationChannel } from "@/types";
 import {
   Bell,
@@ -383,54 +382,15 @@ function ChannelPreferenceRow({
 }
 
 function DeliveryStatusView() {
-  // Mock delivery status data
-  const deliveryRecords = mockNotifications.map((n) => ({
-    ...n,
-    deliveries: n.channels.map((ch) => ({
-      channel: ch,
-      status: Math.random() > 0.2 ? "delivered" : Math.random() > 0.5 ? "pending" : "failed",
-      sentAt: n.createdAt,
-    })),
-  }));
-
   return (
     <Card>
       <CardHeader className="py-4">
         <CardTitle className="text-h2">最近投递记录</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="divide-y divide-gray-100">
-          {deliveryRecords.map((record) => (
-            <div key={record.id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    {typeIcons[record.type]}
-                    <p className="text-sm font-medium text-gray-800">{record.title}</p>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-0.5">{record.content}</p>
-                  <span className="text-caption text-gray-400 mt-1 block">
-                    {formatRelativeTime(record.createdAt)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {record.deliveries.map((d) => {
-                    const status = statusConfig[d.status];
-                    return (
-                      <Badge
-                        key={d.channel}
-                        variant="outline"
-                        className={cn("text-[10px] flex items-center gap-0.5", status.className)}
-                      >
-                        {channelIcons[d.channel]}
-                        {channelLabels[d.channel]}
-                      </Badge>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="flex flex-col items-center py-16 text-center">
+          <Info className="w-10 h-10 text-gray-300" />
+          <p className="text-sm text-gray-500 mt-3">暂无投递记录</p>
         </div>
       </CardContent>
     </Card>

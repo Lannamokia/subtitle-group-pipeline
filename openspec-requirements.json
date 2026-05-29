@@ -1,0 +1,475 @@
+{
+  "modules": [
+    {
+      "name": "Auth",
+      "features": [
+        {
+          "name": "用户注册",
+          "description": "支持三种注册模式：禁止注册、允许直接注册、允许注册但需要QQ群验证。注册用户可自选资格标签。",
+          "frontend": ["注册页面", "注册表单", "资格标签选择"],
+          "backendApis": [
+            {"method": "POST", "path": "/auth/register", "purpose": "创建用户账号"},
+            {"method": "GET", "path": "/auth/registration-policy", "purpose": "获取当前注册策略配置"}
+          ]
+        },
+        {
+          "name": "用户登录",
+          "description": "正常用户登录。待验证账号登录时返回专用待批准响应，包含QQ群号和验证指令。",
+          "frontend": ["登录页面", "登录表单", "待验证提示页"],
+          "backendApis": [
+            {"method": "POST", "path": "/auth/login", "purpose": "用户登录认证"}
+          ]
+        },
+        {
+          "name": "QQ群验证",
+          "description": "待验证账号生成8位随机验证码，用户需在指定QQ群发送/verify <code>指令完成验证。验证码验证前永不过期，验证成功后清除关联。",
+          "frontend": ["待验证状态页", "验证指令复制按钮"],
+          "backendApis": [
+            {"method": "POST", "path": "/auth/verify/nonebot", "purpose": "接收NoneBot验证事件"},
+            {"method": "POST", "path": "/auth/verify/reset", "purpose": "管理员重置验证码"}
+          ]
+        },
+        {
+          "name": "用户资料管理",
+          "description": "用户可修改昵称和上传头像。头像通过统一存储适配层上传到系统默认存储后端。",
+          "frontend": ["用户资料页", "昵称编辑", "头像上传组件", "头像预览"],
+          "backendApis": [
+            {"method": "GET", "path": "/auth/profile", "purpose": "获取用户资料"},
+            {"method": "PUT", "path": "/auth/profile", "purpose": "更新用户资料（昵称）"},
+            {"method": "POST", "path": "/auth/avatar", "purpose": "上传用户头像"}
+          ]
+        },
+        {
+          "name": "资格标签申请与审批",
+          "description": "用户注册时可自选意向资格标签（如压制、后期、翻译）。管理员考核后手动授予或拒绝，系统维护申请中/已授予状态。",
+          "frontend": ["技能档案页", "资格标签申请页", "标签审批管理页"],
+          "backendApis": [
+            {"method": "POST", "path": "/auth/tags/apply", "purpose": "申请资格标签"},
+            {"method": "GET", "path": "/auth/tags/applications", "purpose": "获取标签申请列表"},
+            {"method": "PUT", "path": "/auth/tags/applications/:id", "purpose": "审批标签申请（授予/拒绝）"},
+            {"method": "GET", "path": "/auth/tags", "purpose": "获取用户标签状态"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "features": [
+        {
+          "name": "注册策略配置",
+          "description": "管理员在后台配置全局注册模式（禁止/直接/QQ群验证）和QQ群号。",
+          "frontend": ["管理员后台-注册设置页"],
+          "backendApis": [
+            {"method": "GET", "path": "/admin/registration-settings", "purpose": "获取注册策略配置"},
+            {"method": "PUT", "path": "/admin/registration-settings", "purpose": "更新注册策略配置"}
+          ]
+        },
+        {
+          "name": "存储后端管理",
+          "description": "管理员可配置多个存储后端实例（S3或本地），每个实例可设置空间配额。",
+          "frontend": ["管理员后台-存储后端管理页", "存储后端增删改查", "配额配置", "用量统计"],
+          "backendApis": [
+            {"method": "GET", "path": "/admin/storage-backends", "purpose": "获取存储后端列表"},
+            {"method": "POST", "path": "/admin/storage-backends", "purpose": "创建存储后端"},
+            {"method": "PUT", "path": "/admin/storage-backends/:id", "purpose": "更新存储后端配置"},
+            {"method": "DELETE", "path": "/admin/storage-backends/:id", "purpose": "删除存储后端"}
+          ]
+        },
+        {
+          "name": "数据保留与清理配置",
+          "description": "管理员设置归档版本清理天数和回收站保留天数。",
+          "frontend": ["管理员后台-数据保留设置页"],
+          "backendApis": [
+            {"method": "GET", "path": "/admin/retention-settings", "purpose": "获取数据保留配置"},
+            {"method": "PUT", "path": "/admin/retention-settings", "purpose": "更新数据保留配置"}
+          ]
+        },
+        {
+          "name": "全局公告管理",
+          "description": "组管理员发布全局公告，所有登录用户可见。",
+          "frontend": ["管理员后台-全局公告管理页", "公告编辑器"],
+          "backendApis": [
+            {"method": "GET", "path": "/admin/announcements", "purpose": "获取全局公告列表"},
+            {"method": "POST", "path": "/admin/announcements", "purpose": "创建全局公告"},
+            {"method": "PUT", "path": "/admin/announcements/:id", "purpose": "更新全局公告"},
+            {"method": "DELETE", "path": "/admin/announcements/:id", "purpose": "删除全局公告"}
+          ]
+        },
+        {
+          "name": "全局工作负载视图",
+          "description": "管理员查看所有成员在所有项目中的任务分布。",
+          "frontend": ["管理员全局看板"],
+          "backendApis": [
+            {"method": "GET", "path": "/admin/workload", "purpose": "获取全局工作负载数据"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Project",
+      "features": [
+        {
+          "name": "项目模板管理",
+          "description": "创建和维护项目模板，定义岗位、依赖、人员槽位、上传策略、通知策略、ASS处理策略、成品配置和交付清单。",
+          "frontend": ["模板管理页", "模板创建/编辑表单", "模板列表"],
+          "backendApis": [
+            {"method": "GET", "path": "/templates", "purpose": "获取模板列表"},
+            {"method": "POST", "path": "/templates", "purpose": "创建模板"},
+            {"method": "GET", "path": "/templates/:id", "purpose": "获取模板详情"},
+            {"method": "PUT", "path": "/templates/:id", "purpose": "更新模板"},
+            {"method": "DELETE", "path": "/templates/:id", "purpose": "删除模板"}
+          ]
+        },
+        {
+          "name": "项目创建",
+          "description": "从模板快速创建项目，继承任务图、上传约束、通知策略和ASS处理设置。创建时需选择存储后端，按季定义项目单元。",
+          "frontend": ["项目创建页", "模板选择器", "存储后端选择", "季维度项目单元配置"],
+          "backendApis": [
+            {"method": "POST", "path": "/projects", "purpose": "从模板创建项目"},
+            {"method": "GET", "path": "/projects", "purpose": "获取项目列表"}
+          ]
+        },
+        {
+          "name": "项目列表与搜索",
+          "description": "项目列表支持按名称模糊查询和标签筛选。",
+          "frontend": ["项目列表页", "搜索框", "标签筛选器"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects", "purpose": "获取项目列表（支持搜索过滤）"},
+            {"method": "GET", "path": "/projects/:id", "purpose": "获取项目详情"}
+          ]
+        },
+        {
+          "name": "项目详情与任务视图",
+          "description": "展示项目详情、任务状态、依赖关系、审核状态。支持任务指派、领取、退回、审核提交/通过/驳回。",
+          "frontend": ["项目详情页", "任务看板", "任务指派面板", "审核面板", "依赖状态展示"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id", "purpose": "获取项目详情"},
+            {"method": "GET", "path": "/projects/:id/tasks", "purpose": "获取项目任务列表"},
+            {"method": "PUT", "path": "/tasks/:id/assign", "purpose": "指派任务"},
+            {"method": "PUT", "path": "/tasks/:id/claim", "purpose": "领取任务"},
+            {"method": "PUT", "path": "/tasks/:id/return", "purpose": "退回任务"},
+            {"method": "PUT", "path": "/tasks/:id/submit", "purpose": "提交任务审核"},
+            {"method": "PUT", "path": "/tasks/:id/approve", "purpose": "审核通过任务"},
+            {"method": "PUT", "path": "/tasks/:id/reject", "purpose": "审核驳回任务"},
+            {"method": "PUT", "path": "/tasks/:id/cancel", "purpose": "取消任务"},
+            {"method": "PUT", "path": "/tasks/:id/reset", "purpose": "重置任务状态"}
+          ]
+        },
+        {
+          "name": "项目成员管理",
+          "description": "成员主动进组申请，监制审批。空槽位由监制手动指派或配置为开放领取。",
+          "frontend": ["项目成员页", "进组申请列表", "成员指派面板"],
+          "backendApis": [
+            {"method": "POST", "path": "/projects/:id/join", "purpose": "申请加入项目"},
+            {"method": "GET", "path": "/projects/:id/join-requests", "purpose": "获取进组申请列表"},
+            {"method": "PUT", "path": "/join-requests/:id", "purpose": "审批进组申请"},
+            {"method": "GET", "path": "/projects/:id/members", "purpose": "获取项目成员列表"}
+          ]
+        },
+        {
+          "name": "竞争式翻译区间领取",
+          "description": "翻译者自行申报时间区间，系统校验无重叠且未超个人限额后生成翻译子任务。全部片段被领完后锁定。",
+          "frontend": ["翻译区间领取页", "时间区间选择器", "区间占用可视化"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/units/:unitId/translation-claims", "purpose": "获取已领取的翻译区间"},
+            {"method": "POST", "path": "/projects/:id/units/:unitId/translation-claims", "purpose": "申报翻译区间"},
+            {"method": "PUT", "path": "/translation-claims/:id/release", "purpose": "释放翻译区间"}
+          ]
+        },
+        {
+          "name": "项目归档与回收站",
+          "description": "项目归档后只读但允许复盘评论。支持取消归档恢复。删除需先归档，软删除后进入回收站，超期物理清理。",
+          "frontend": ["归档操作按钮", "回收站管理页", "取消归档按钮", "恢复按钮"],
+          "backendApis": [
+            {"method": "PUT", "path": "/projects/:id/archive", "purpose": "归档项目"},
+            {"method": "PUT", "path": "/projects/:id/unarchive", "purpose": "取消归档"},
+            {"method": "DELETE", "path": "/projects/:id", "purpose": "软删除项目（需先归档）"},
+            {"method": "GET", "path": "/projects/recycle-bin", "purpose": "获取回收站项目列表"},
+            {"method": "PUT", "path": "/projects/:id/restore", "purpose": "从回收站恢复项目"}
+          ]
+        },
+        {
+          "name": "项目公告",
+          "description": "监制或组管理员在项目内发布公告，仅该项目成员可见。",
+          "frontend": ["项目公告编辑器", "项目公告展示"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/announcements", "purpose": "获取项目公告列表"},
+            {"method": "POST", "path": "/projects/:id/announcements", "purpose": "创建项目公告"},
+            {"method": "PUT", "path": "/projects/:id/announcements/:announcementId", "purpose": "更新项目公告"},
+            {"method": "DELETE", "path": "/projects/:id/announcements/:announcementId", "purpose": "删除项目公告"}
+          ]
+        },
+        {
+          "name": "项目动态时间线",
+          "description": "项目级时间线展示该项目下的全部事件（任务状态变更、文件上传、成员进出、审核记录等）。",
+          "frontend": ["项目动态Tab", "时间线事件列表"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/timeline", "purpose": "获取项目级时间线事件"}
+          ]
+        },
+        {
+          "name": "个人全局动态时间线",
+          "description": "聚合展示当前用户参与的所有项目的最新动态。",
+          "frontend": ["个人首页", "全局动态聚合视图"],
+          "backendApis": [
+            {"method": "GET", "path": "/timeline/personal", "purpose": "获取个人全局时间线"}
+          ]
+        },
+        {
+          "name": "交付清单管理",
+          "description": "项目模板定义默认交付清单，项目级监制可覆盖编辑。结项时按清单校验。",
+          "frontend": ["交付清单编辑页"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/delivery-checklist", "purpose": "获取项目交付清单"},
+            {"method": "PUT", "path": "/projects/:id/delivery-checklist", "purpose": "更新项目交付清单"}
+          ]
+        },
+        {
+          "name": "成品配置管理",
+          "description": "压制任务的成品配置（分辨率、码率、编码器、封装格式、命名规则等）由模板预设，项目级可覆盖。",
+          "frontend": ["成品配置编辑页"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/product-config", "purpose": "获取项目成品配置"},
+            {"method": "PUT", "path": "/projects/:id/product-config", "purpose": "更新项目成品配置"}
+          ]
+        },
+        {
+          "name": "批量操作",
+          "description": "支持批量指派（将一个项目单元下的多个任务一次性指派给同一人）和批量归档（结项时一次性归档整个项目的所有单元）。",
+          "frontend": ["批量指派面板", "批量归档按钮"],
+          "backendApis": [
+            {"method": "POST", "path": "/projects/:id/batch-assign", "purpose": "批量指派任务"},
+            {"method": "POST", "path": "/projects/:id/batch-archive", "purpose": "批量归档项目单元"}
+          ]
+        },
+        {
+          "name": "项目级工作负载视图",
+          "description": "监制查看其负责的项目下的所有成员及对应任务状态。",
+          "frontend": ["监制项目级看板"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/workload", "purpose": "获取项目级工作负载数据"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "File",
+      "features": [
+        {
+          "name": "文件上传",
+          "description": "按角色上传策略控制允许提交的文件类型。每次上传创建独立文件实体，同名不自动合并。支持显式替换已有文件。",
+          "frontend": ["文件上传组件", "上传策略提示", "替换文件选择器"],
+          "backendApis": [
+            {"method": "POST", "path": "/files/upload", "purpose": "上传文件"},
+            {"method": "POST", "path": "/files/:id/versions", "purpose": "为现有文件实体上传新版本"}
+          ]
+        },
+        {
+          "name": "项目文件筒",
+          "description": "项目级文件聚合视图，展示所有二进制文件和网盘链接。支持按项目单元、岗位、任务、上传人、资产类型、上传时间过滤。多版本文件显示标记和右键历史入口。",
+          "frontend": ["项目文件筒页", "文件列表", "过滤面板", "多版本标记", "右键历史菜单"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/files", "purpose": "获取项目文件筒列表"},
+            {"method": "GET", "path": "/files/:id", "purpose": "获取文件详情"}
+          ]
+        },
+        {
+          "name": "版本历史管理",
+          "description": "每个文件实体维护当前版本、最新版本、最新审核通过版本三个指针。版本历史面板展示版本号、变更说明、上传人、上传时间、审核状态。",
+          "frontend": ["版本历史面板", "版本对比", "版本下载/回滚"],
+          "backendApis": [
+            {"method": "GET", "path": "/files/:id/versions", "purpose": "获取文件版本历史"},
+            {"method": "GET", "path": "/files/:id/versions/:versionId", "purpose": "获取指定版本详情"}
+          ]
+        },
+        {
+          "name": "网盘链接管理",
+          "description": "网盘链接类交付物使用独立历史记录模型，不走二进制文件版本链。记录链接地址、提取码、有效期、来源说明。",
+          "frontend": ["网盘链接提交表单", "链接历史记录"],
+          "backendApis": [
+            {"method": "POST", "path": "/projects/:id/links", "purpose": "提交网盘链接"},
+            {"method": "GET", "path": "/projects/:id/links", "purpose": "获取网盘链接历史"},
+            {"method": "PUT", "path": "/links/:id", "purpose": "更新网盘链接"}
+          ]
+        },
+        {
+          "name": "文件下载",
+          "description": "通过临时链接下载文件。S3使用预签名URL，本地存储使用数据库临时链接。支持敏感标签控制访问范围。复用未失效链接，临期自动换新。",
+          "frontend": ["下载按钮", "临时链接生成"],
+          "backendApis": [
+            {"method": "POST", "path": "/files/:id/download", "purpose": "生成临时下载链接"},
+            {"method": "GET", "path": "/download/:token", "purpose": "通过临时令牌下载文件"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Subtitle",
+      "features": [
+        {
+          "name": "ASS解析与结构化提取",
+          "description": "服务端解析ASS文件，提取脚本元数据、样式、事件时间、图层、注释和对话文本。",
+          "frontend": [],
+          "backendApis": [
+            {"method": "POST", "path": "/subtitles/parse", "purpose": "解析ASS文件"}
+          ]
+        },
+        {
+          "name": "翻译稿提交",
+          "description": "翻译者上传ASS翻译稿，直接进入文件版本链。记录覆盖时间段、来源任务、上传人。",
+          "frontend": ["翻译稿上传组件"],
+          "backendApis": [
+            {"method": "POST", "path": "/subtitles/submissions", "purpose": "提交翻译稿"},
+            {"method": "GET", "path": "/subtitles/submissions", "purpose": "获取翻译稿列表"}
+          ]
+        },
+        {
+          "name": "服务端合并与去重",
+          "description": "服务端合并多人翻译稿，自动去重完全重复内容，对时间轴重合且文本冲突的条目生成冲突记录。合并结果作为独立文件实体。",
+          "frontend": [],
+          "backendApis": [
+            {"method": "POST", "path": "/subtitles/merge-jobs", "purpose": "创建合并作业"},
+            {"method": "GET", "path": "/subtitles/merge-jobs/:id", "purpose": "获取合并作业状态"},
+            {"method": "GET", "path": "/subtitles/merge-jobs/:id/conflicts", "purpose": "获取冲突记录"}
+          ]
+        },
+        {
+          "name": "在线去重页面",
+          "description": "支持版本间对比、时间轴重叠可视化（灰色=无重叠，红色=重叠）、冲突解决。仅对监制和指定角色开放编辑。",
+          "frontend": ["在线去重页", "版本对比视图", "时间轴可视化", "冲突详情面板", "冲突解决操作"],
+          "backendApis": [
+            {"method": "GET", "path": "/subtitles/compare", "purpose": "获取版本对比数据"},
+            {"method": "GET", "path": "/subtitles/timeline", "purpose": "获取时间轴重叠数据"},
+            {"method": "POST", "path": "/subtitles/resolve", "purpose": "提交冲突解决结果"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wiki",
+      "features": [
+        {
+          "name": "项目Wiki页面",
+          "description": "项目级知识面板，支持Markdown文档块和结构化表格块混合编辑。用于维护专有名词、命名规范、术语说明、翻译约定和制作备注。",
+          "frontend": ["项目Wiki页", "Markdown编辑器", "表格编辑器", "Wiki内容展示"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/wiki", "purpose": "获取项目Wiki内容"},
+            {"method": "PUT", "path": "/projects/:id/wiki", "purpose": "更新Wiki内容"}
+          ]
+        },
+        {
+          "name": "Wiki审批流",
+          "description": "管理员全局配置是否需要Wiki审批，项目上监制可手动覆盖。开启审批后，wiki修改需经监制审批通过才生效。以diff形式查看待审内容。",
+          "frontend": ["Wiki审批状态指示器", "待审内容diff视图", "审批操作按钮"],
+          "backendApis": [
+            {"method": "GET", "path": "/projects/:id/wiki/pending", "purpose": "获取待审Wiki内容"},
+            {"method": "PUT", "path": "/projects/:id/wiki/approve", "purpose": "审批通过Wiki修改"},
+            {"method": "PUT", "path": "/projects/:id/wiki/reject", "purpose": "审批驳回Wiki修改"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Notification",
+      "features": [
+        {
+          "name": "通知投递",
+          "description": "任务、审核、进组审批、文件处理和字幕合并等事件统一进入通知模块，通过邮件和QQ NoneBot投递。QQ渠道发送群消息并@提醒对应人员。",
+          "frontend": ["通知中心", "通知列表", "通知详情"],
+          "backendApis": [
+            {"method": "GET", "path": "/notifications", "purpose": "获取用户通知列表"},
+            {"method": "PUT", "path": "/notifications/:id/read", "purpose": "标记通知已读"},
+            {"method": "POST", "path": "/notifications/deliver", "purpose": "内部通知投递触发"}
+          ]
+        },
+        {
+          "name": "通知偏好设置",
+          "description": "用户可配置通知渠道偏好。支持渠道升级策略：站内未读N小时后升级邮件，邮件未读N小时后升级QQ。",
+          "frontend": ["通知偏好设置页", "渠道选择器", "升级时间配置"],
+          "backendApis": [
+            {"method": "GET", "path": "/notifications/preferences", "purpose": "获取通知偏好"},
+            {"method": "PUT", "path": "/notifications/preferences", "purpose": "更新通知偏好"}
+          ]
+        },
+        {
+          "name": "送达日志与重试",
+          "description": "每次投递写入送达日志，失败进入重试队列。",
+          "frontend": ["送达状态展示", "投递记录"],
+          "backendApis": [
+            {"method": "GET", "path": "/notifications/deliveries", "purpose": "获取送达日志"},
+            {"method": "POST", "path": "/notifications/retry", "purpose": "手动重试失败通知"}
+          ]
+        },
+        {
+          "name": "任务评论与@通知",
+          "description": "任务评论区普通评论不触发通知，仅@提到的成员收到定向通知。支持引用已有文件版本和ASS行级评论。",
+          "frontend": ["任务评论区", "@提及高亮", "行级评论标记"],
+          "backendApis": [
+            {"method": "GET", "path": "/tasks/:id/comments", "purpose": "获取任务评论"},
+            {"method": "POST", "path": "/tasks/:id/comments", "purpose": "发表评论"},
+            {"method": "PUT", "path": "/comments/:id", "purpose": "更新评论"},
+            {"method": "DELETE", "path": "/comments/:id", "purpose": "删除评论"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Task",
+      "features": [
+        {
+          "name": "任务状态流转",
+          "description": "支持片源→时轴→翻译→后期→压制→发布的严格串行流水线。翻译支持多人并行分段处理。任务状态包括：待发布、可领取、已指派、进行中、已提交、审核通过、已驳回、已取消、已超期。",
+          "frontend": ["任务状态看板", "状态流转按钮"],
+          "backendApis": [
+            {"method": "GET", "path": "/tasks/:id", "purpose": "获取任务详情"},
+            {"method": "PUT", "path": "/tasks/:id/status", "purpose": "更新任务状态"}
+          ]
+        },
+        {
+          "name": "流水线审核关卡",
+          "description": "翻译、后期、压制、发布提交后均需监制审核通过才能进入下一阶段。片源和时轴不需要单独审核。",
+          "frontend": ["审核提交面板", "审核通过/驳回按钮"],
+          "backendApis": [
+            {"method": "POST", "path": "/tasks/:id/review", "purpose": "提交审核"},
+            {"method": "PUT", "path": "/reviews/:id/approve", "purpose": "审核通过"},
+            {"method": "PUT", "path": "/reviews/:id/reject", "purpose": "审核驳回"},
+            {"method": "GET", "path": "/reviews/:id/snapshot", "purpose": "获取审核快照"}
+          ]
+        },
+        {
+          "name": "下游级联重置",
+          "description": "前置任务修改或重置时，下游已完成任务自动级联重置。非发布岗位保留文件历史，发布岗位丢弃已上传产物。",
+          "frontend": ["级联重置警告提示"],
+          "backendApis": [
+            {"method": "POST", "path": "/tasks/:id/cascade-reset", "purpose": "触发下游级联重置"}
+          ]
+        },
+        {
+          "name": "超期任务处理",
+          "description": "超期任务自动标记为超期状态，在看板中以红色高亮显示，并向监制和管理员发送升级通知。不做自动回收。",
+          "frontend": ["超期任务高亮标记"],
+          "backendApis": [
+            {"method": "GET", "path": "/tasks/overdue", "purpose": "获取超期任务列表"}
+          ]
+        },
+        {
+          "name": "个人工作负载视图",
+          "description": "个人看板展示当前用户自己接取或被分配的全部任务。",
+          "frontend": ["个人任务看板"],
+          "backendApis": [
+            {"method": "GET", "path": "/tasks/my", "purpose": "获取当前用户的任务列表"}
+          ]
+        },
+        {
+          "name": "发布任务管理",
+          "description": "发布为独立岗位，支持任务类型配置（种子/种子+网盘/网盘/其他渠道）。前置修改后自动重置并丢弃旧产物。",
+          "frontend": ["发布任务面板", "发布产物上传"],
+          "backendApis": [
+            {"method": "POST", "path": "/tasks/:id/release", "purpose": "提交发布产物"},
+            {"method": "PUT", "path": "/tasks/:id/release/reset", "purpose": "重置发布任务"}
+          ]
+        }
+      ]
+    }
+  ]
+}

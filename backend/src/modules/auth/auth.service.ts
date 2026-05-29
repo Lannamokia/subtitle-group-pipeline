@@ -9,6 +9,10 @@ import type {
   UpdateProfileInput,
   VerifyQQInput,
   RefreshTokenInput,
+  CreateRoleTagInput,
+  UpdateRoleTagInput,
+  CreateTagApplicationInput,
+  ReviewTagApplicationInput,
 } from "./auth.schema";
 
 function generateVerificationCode(): string {
@@ -518,12 +522,126 @@ export async function requestPasswordReset(username: string) {
   });
 
   // In a real system, this would send an email or QQ message
-  // For now, we return the token for testing purposes
+
   return {
     success: true,
     message:
       "If an account with that username exists, a reset link has been sent.",
-    // This would normally not be returned - only for development/testing
-    resetToken: resetCode,
   };
+}
+
+export async function getRoleTags() {
+  return prisma.roleTag.findMany({
+    orderBy: { name: "asc" },
+  });
+}
+
+export async function createRoleTag(data: CreateRoleTagInput) {
+  return prisma.roleTag.create({
+    data: {
+      name: data.name,
+      description: data.description,
+      color: data.color,
+    },
+  });
+}
+
+export async function updateRoleTag(tagId: string, data: UpdateRoleTagInput) {
+  return prisma.roleTag.update({
+    where: { id: tagId },
+    data: {
+      name: data.name,
+      description: data.description,
+      color: data.color,
+    },
+  });
+}
+
+export async function deleteRoleTag(tagId: string) {
+  return prisma.roleTag.delete({
+    where: { id: tagId },
+  });
+}
+
+export async function getMyRoleTagStatuses(userId: string) {
+  const [tags, applications] = await Promise.all([
+    prisma.roleTag.findMany({ orderBy: { name: "asc" } }),
+    prisma.tagApplication.findMany({
+      where: { user_id: userId },
+      include: { tag: true },
+      orderBy: { created_at: "desc" },
+    }),
+  ]);
+
+  return tags.map((tag) => {
+    const app = applications.find((a) => a.tag_id === tag.id);
+    let status: string;
+    if (!app) {
+      status = "not_applied";
+    } else if (app.approved === true) {
+      status = "granted";
+    } else if (app.approved === false && app.approved_by) {
+      status = "rejected";
+    } else {
+      status = "pending";
+    }
+    return { tag, status };
+  });
+}
+
+export async function createTagApplication(userId: string, data: CreateTagApplicationInput) {
+  const existing = await prisma.tagApplication.findUnique({
+    where: { user_id_tag_id: { user_id: userId, tag_id: data.tag_id } },
+  });
+  if (existing) {
+    throw new AppError("You have already applied for this tag", "DUPLICATE_ERROR", 409);
+  }
+  return prisma.tagApplication.create({
+    data: {
+      user_id: userId,
+      tag_id: data.tag_id,
+      reason: data.reason,
+    },
+    include: { tag: true },
+  });
+}
+
+export async function getMyTagApplications(userId: string) {
+  return prisma.tagApplication.findMany({
+    where: { user_id: userId },
+    include: { tag: true },
+    orderBy: { created_at: "desc" },
+  });
+}
+
+export async function getPendingTagApplications() {
+  return prisma.tagApplication.findMany({
+    where: { approved: false },
+    include: {
+      tag: true,
+      user: { select: { id: true, username: true, nickname: true } },
+    },
+    orderBy: { created_at: "desc" },
+  });
+}
+
+export async function reviewTagApplication(adminId: string, data: ReviewTagApplicationInput) {
+  const application = await prisma.tagApplication.findUnique({
+    where: { id: data.application_id },
+  });
+  if (!application) {
+    throw new AppError("Application not found", "NOT_FOUND", 404);
+  }
+  return prisma.tagApplication.update({
+    where: { id: data.application_id },
+    data: {
+      approved: data.approved,
+      approved_by: adminId,
+      approved_at: new Date(),
+    },
+    include: {
+      tag: true,
+      user: { select: { id: true, username: true, nickname: true } },
+    },
+  });
 }

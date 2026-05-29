@@ -13,6 +13,7 @@ import {
   resetTaskSchema,
   updateTaskDeadlineSchema,
 } from "./task.schema";
+import { createCommentSchema } from "../wiki/wiki.schema";
 import { z } from "zod";
 
 const router = Router();
@@ -58,6 +59,10 @@ router.post("/:id/submit-translation", authenticate, validateParams(idParamSchem
 // Dependencies
 router.post("/:id/dependencies", authenticate, validateParams(idParamSchema), validateBody(createDependencySchema), controller.createDependency);
 router.delete("/:id/dependencies/:dependencyId", authenticate, validateParams(depParamSchema), controller.removeDependency);
+
+// Task comments
+router.get("/:id/comments", authenticate, validateParams(idParamSchema), controller.getTaskComments);
+router.post("/:id/comments", authenticate, validateParams(idParamSchema), validateBody(createCommentSchema), controller.createTaskComment);
 
 // Workload dashboard
 router.get("/workload/personal", authenticate, controller.getPersonalWorkload);

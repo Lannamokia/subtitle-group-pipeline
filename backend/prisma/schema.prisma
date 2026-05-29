@@ -356,6 +356,7 @@ model Project {
   template_id       String?
   storage_backend_id String?
   current_season    Int           @default(1)
+  delivery_checklist String?       // JSON: array of checklist items, inherited from template, editable at project level
   is_archived       Boolean       @default(false)
   archived_at       DateTime?
   deleted_at        DateTime?
@@ -479,6 +480,7 @@ model Task {
   submissions  TranslationSubmission[]
   reviews      Review[]
   notifications Notification[]
+  comments     Comment[]
 
   @@index([project_id])
   @@index([unit_id])
@@ -857,6 +859,7 @@ model Comment {
   content         String
   file_version_id String?
   wiki_id         String?
+  task_id         String?
   line_number     Int?      // for ASS line-level comments
   parent_id       String?   // for threaded replies
   created_at      DateTime  @default(now())
@@ -866,12 +869,14 @@ model Comment {
   user     User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
   file     FileEntity?   @relation(fields: [file_version_id], references: [id])
   wiki     WikiDocument? @relation(fields: [wiki_id], references: [id])
+  task     Task?         @relation(fields: [task_id], references: [id], onDelete: Cascade)
   parent   Comment?      @relation("CommentReplies", fields: [parent_id], references: [id])
   replies  Comment[]     @relation("CommentReplies")
 
   @@index([user_id])
   @@index([file_version_id])
   @@index([wiki_id])
+  @@index([task_id])
   @@index([parent_id])
   @@index([line_number])
   @@index([created_at])

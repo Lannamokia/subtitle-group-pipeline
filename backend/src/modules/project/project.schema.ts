@@ -19,11 +19,19 @@ export const createProjectFromTemplateSchema = z.object({
   episode_length: z.number().int().min(1).optional().nullable(), // in seconds
 });
 
+const deliveryItemSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  role: z.nativeEnum(TaskRole),
+  required: z.boolean().default(true),
+});
+
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).optional().nullable(),
   status: z.nativeEnum(ProjectStatus).optional(),
   current_season: z.number().int().min(1).optional(),
+  delivery_checklist: z.array(deliveryItemSchema).optional(),
 });
 
 export const projectQuerySchema = z.object({

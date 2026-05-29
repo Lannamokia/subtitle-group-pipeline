@@ -103,10 +103,10 @@ export function ProjectCreatePage() {
   useEffect(() => {
     const fetchTemplates = async () => {
       try {
-        const res = await api.get<ProjectTemplate[]>("/templates");
-        setTemplates(res.data);
+        const res = await api.get<{ data: ProjectTemplate[] }>("/templates");
+        setTemplates(res.data.data);
         if (preselectedTemplateId) {
-          const tmpl = res.data.find((t) => t.id === preselectedTemplateId);
+          const tmpl = res.data.data.find((t) => t.id === preselectedTemplateId);
           if (tmpl) {
             setSelectedTemplate(tmpl);
             form.setValue("type", tmpl.type);

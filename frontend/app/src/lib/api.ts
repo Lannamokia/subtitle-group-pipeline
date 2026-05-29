@@ -25,7 +25,7 @@ import type {
 
 // Create axios instance
 export const api: AxiosInstance = axios.create({
-  baseURL: 'http://localhost:3001/api',
+  baseURL: 'http://localhost:3000/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -113,28 +113,34 @@ export const authApi = {
 
 export const roleTagApi = {
   getAllTags: () =>
-    api.get<ApiResponse<RoleTagDefinition[]>>('/role-tags').then(extractData),
+    api.get<ApiResponse<RoleTagDefinition[]>>('/auth/role-tags').then(extractData),
 
   createTag: (data: { name: string; roleType: string; description?: string }) =>
-    api.post<ApiResponse<RoleTagDefinition>>('/role-tags', data).then(extractData),
+    api.post<ApiResponse<RoleTagDefinition>>('/auth/role-tags', data).then(extractData),
 
   updateTag: (id: string, data: { name?: string; roleType?: string; description?: string }) =>
-    api.put<ApiResponse<RoleTagDefinition>>(`/role-tags/${id}`, data).then(extractData),
+    api.put<ApiResponse<RoleTagDefinition>>(`/auth/role-tags/${id}`, data).then(extractData),
 
   deleteTag: (id: string) =>
-    api.delete<ApiResponse<void>>(`/role-tags/${id}`).then(extractData),
+    api.delete<ApiResponse<void>>(`/auth/role-tags/${id}`).then(extractData),
 
   getMyTagStatuses: () =>
-    api.get<ApiResponse<UserRoleTagStatus[]>>('/role-tags/my-status').then(extractData),
+    api.get<ApiResponse<UserRoleTagStatus[]>>('/auth/role-tags/my-status').then(extractData),
 
   applyForTag: (tagId: string, reason: string) =>
-    api.post<ApiResponse<RoleTagApplication>>('/role-tags/apply', { tagId, reason }).then(extractData),
+    api.post<ApiResponse<RoleTagApplication>>('/auth/tag-applications', { tag_id: tagId, reason }).then(extractData),
 
-  getApplications: (params?: { status?: string; page?: number; pageSize?: number }) =>
-    api.get<ApiResponse<PaginatedResponse<RoleTagApplication>>>('/role-tags/applications', { params }).then(extractData),
+  getApplications: (params?: { status?: string; page?: number; pageSize?: number }) => {
+    const url = params?.status === 'pending' ? '/auth/tag-applications/pending' : '/auth/tag-applications/my';
+    return api.get<ApiResponse<RoleTagApplication[]>>(url, { params }).then(extractData);
+  },
 
   reviewApplication: (id: string, data: { status: 'approved' | 'rejected'; comment?: string }) =>
-    api.post<ApiResponse<RoleTagApplication>>(`/role-tags/applications/${id}/review`, data).then(extractData),
+    api.post<ApiResponse<RoleTagApplication>>('/auth/tag-applications/review', {
+      application_id: id,
+      approved: data.status === 'approved',
+      rejection_reason: data.status === 'rejected' ? data.comment : undefined,
+    }).then(extractData),
 };
 
 // ========== Storage API ==========
@@ -272,6 +278,32 @@ export const templateApi = {
 export const timelineApi = {
   getEvents: (params?: { projectId?: string; limit?: number }) =>
     api.get<ApiResponse<TimelineEvent[]>>('/timeline', { params }).then(extractData),
+
+  getGlobalEvents: () =>
+    api.get<ApiResponse<TimelineEvent[]>>('/timeline/global').then(extractData),
+};
+
+// ========== Wiki API ==========
+
+export const wikiApi = {
+  getWiki: (projectId: string) =>
+    api.get<ApiResponse<WikiDocument>>(`/wiki/${projectId}`).then(extractData),
+};
+
+// ========== Announcement API ==========
+
+export const announcementApi = {
+  getAnnouncements: (params?: { type?: string }) =>
+    api.get<ApiResponse<Announcement[]>>(`/announcements`, { params }).then(extractData),
+
+  createAnnouncement: (data: Partial<Announcement>) =>
+    api.post<ApiResponse<Announcement>>(`/announcements`, data).then(extractData),
+
+  updateAnnouncement: (id: string, data: Partial<Announcement>) =>
+    api.put<ApiResponse<Announcement>>(`/announcements/${id}`, data).then(extractData),
+
+  deleteAnnouncement: (id: string) =>
+    api.delete<ApiResponse<void>>(`/announcements/${id}`).then(extractData),
 };
 
 // ========== Member API ==========

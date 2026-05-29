@@ -119,7 +119,7 @@ export async function createProjectFromTemplate(
     templateRoles = [];
   }
 
-  // Create project
+  // Create project (inherit delivery checklist from template)
   const project = await prisma.project.create({
     data: {
       name: data.name,
@@ -128,6 +128,7 @@ export async function createProjectFromTemplate(
       owner_id: ownerId,
       template_id: template.id,
       storage_backend_id: data.storage_backend_id,
+      delivery_checklist: template.delivery_checklist,
       status: "draft",
     },
     include: {
@@ -420,14 +421,19 @@ export async function updateProject(
     throw new AppError("Cannot update a deleted project", "BAD_REQUEST", 400);
   }
 
+  const updateData: Record<string, unknown> = {
+    name: data.name,
+    description: data.description,
+    status: data.status,
+    current_season: data.current_season,
+  };
+  if (data.delivery_checklist !== undefined) {
+    updateData.delivery_checklist = JSON.stringify(data.delivery_checklist);
+  }
+
   const project = await prisma.project.update({
     where: { id: projectId },
-    data: {
-      name: data.name,
-      description: data.description,
-      status: data.status,
-      current_season: data.current_season,
-    },
+    data: updateData,
   });
 
   await auditService.log({

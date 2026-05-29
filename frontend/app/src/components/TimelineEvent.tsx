@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { cn, formatRelativeTime, TIMELINE_EVENT_MAP } from "@/lib/utils";
+import { timelineApi } from "@/lib/api";
 import type { TimelineEvent as TimelineEventType, TimelineEventType as EventType } from "@/types";
 import {
   ArrowRightCircle,
@@ -11,11 +12,9 @@ import {
   ChevronDown,
   Loader2,
 } from "lucide-react";
-import { mockTimelineEvents, mockUsers } from "@/lib/mockData";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { User } from "@/types";
 
 interface TimelineEventProps {
   event: TimelineEventType;
@@ -236,19 +235,13 @@ export function EnhancedTimeline({
 /* ---------- Global Timeline Page Component ---------- */
 
 export function GlobalTimelinePage() {
-  const [events] = useState<TimelineEventType[]>([
-    ...mockTimelineEvents,
-    // Add more mock events for pagination demo
-    ...Array.from({ length: 25 }, (_, i) => ({
-      id: `e-extra-${i}`,
-      type: (["task_status", "file_upload", "review", "member_join", "system"] as EventType[])[i % 5],
-      projectId: i % 2 === 0 ? "p1" : "p2",
-      projectName: i % 2 === 0 ? "夏日重现" : "进击的巨人 最终季",
-      description: `示例动态事件 ${i + 1}`,
-      user: mockUsers[i % mockUsers.length] as User,
-      createdAt: new Date(new Date().getTime() - (i + 1) * 3600000).toISOString(),
-    })),
-  ]);
+  const [events, setEvents] = useState<TimelineEventType[]>([]);
+
+  useEffect(() => {
+    timelineApi.getGlobalEvents()
+      .then(setEvents)
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">

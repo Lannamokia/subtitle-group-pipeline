@@ -124,3 +124,120 @@ export async function requestPasswordReset(
     next(error);
   }
 }
+
+export async function getRoleTags(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.getRoleTags();
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createRoleTag(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.createRoleTag(req.body);
+    successResponse(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateRoleTag(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.updateRoleTag(String(req.params.id), req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteRoleTag(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    await authService.deleteRoleTag(String(req.params.id));
+    successResponse(res, { deleted: true });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getMyRoleTagStatuses(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.getMyRoleTagStatuses(req.user!.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createTagApplication(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.createTagApplication(req.user!.id, req.body);
+    successResponse(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getMyTagApplications(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.getMyTagApplications(req.user!.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getPendingTagApplications(
+  _req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.getPendingTagApplications();
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function reviewTagApplication(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.reviewTagApplication(req.user!.id, req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}

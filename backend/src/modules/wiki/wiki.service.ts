@@ -440,9 +440,9 @@ export async function createComment(
   userId: string,
   data: CreateCommentInput
 ) {
-  if (!data.file_version_id && !data.wiki_id) {
+  if (!data.file_version_id && !data.wiki_id && !data.task_id) {
     throw new AppError(
-      "Comment must be associated with a file or wiki document",
+      "Comment must be associated with a file, wiki document, or task",
       "BAD_REQUEST",
       400
     );
@@ -454,6 +454,7 @@ export async function createComment(
       content: data.content,
       file_version_id: data.file_version_id,
       wiki_id: data.wiki_id,
+      task_id: data.task_id,
       line_number: data.line_number,
       parent_id: data.parent_id,
     },
@@ -476,6 +477,41 @@ export async function getComments(wikiId: string) {
   const comments = await prisma.comment.findMany({
     where: {
       wiki_id: wikiId,
+      deleted_at: null,
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+          avatar_url: true,
+        },
+      },
+      replies: {
+        where: { deleted_at: null },
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              nickname: true,
+              avatar_url: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: { created_at: "asc" },
+  });
+
+  return comments;
+}
+
+export async function getTaskComments(taskId: string) {
+  const comments = await prisma.comment.findMany({
+    where: {
+      task_id: taskId,
       deleted_at: null,
     },
     include: {

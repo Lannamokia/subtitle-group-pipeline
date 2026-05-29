@@ -33,6 +33,7 @@ export const createCommentSchema = z.object({
   content: z.string().min(1, "Comment is required").max(5000),
   file_version_id: z.string().uuid().optional().nullable(),
   wiki_id: z.string().uuid().optional().nullable(),
+  task_id: z.string().uuid().optional().nullable(),
   line_number: z.number().int().min(1).optional().nullable(),
   parent_id: z.string().uuid().optional().nullable(),
 });

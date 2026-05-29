@@ -1,18 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn, formatFullDate, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { taskApi, timelineApi, announcementApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TaskCard } from "@/components/TaskCard";
 import { TimelineEventItem } from "@/components/TimelineEvent";
-import {
-  mockTasks,
-  mockTimelineEvents,
-  mockAnnouncements,
-} from "@/lib/mockData";
+import type { Task, TimelineEvent, Announcement } from "@/types";
 import {
   ClipboardList,
   CheckCircle2,
@@ -32,10 +29,32 @@ export function DashboardPage() {
     return !localStorage.getItem("onboarding-dismissed");
   });
 
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [tasksRes, timelineRes, announcementsRes] = await Promise.all([
+          taskApi.getTasks(),
+          timelineApi.getGlobalEvents(),
+          announcementApi.getAnnouncements(),
+        ]);
+        setTasks(tasksRes);
+        setTimelineEvents(timelineRes);
+        setAnnouncements(announcementsRes);
+      } catch {
+        // 保持空数组
+      }
+    };
+    fetchData();
+  }, []);
+
   // Stats
-  const inProgressTasks = mockTasks.filter((t) => t.status === "in_progress");
-  const submittedTasks = mockTasks.filter((t) => t.status === "submitted");
-  const overdueTasks = mockTasks.filter((t) => t.status === "overdue");
+  const inProgressTasks = tasks.filter((t) => t.status === "in_progress");
+  const submittedTasks = tasks.filter((t) => t.status === "submitted");
+  const overdueTasks = tasks.filter((t) => t.status === "overdue");
   const unreadCount = 5;
 
   const filteredTasks =
@@ -45,7 +64,7 @@ export function DashboardPage() {
         ? submittedTasks
         : taskTab === "overdue"
           ? overdueTasks
-          : mockTasks;
+          : tasks;
 
   const dismissOnboarding = () => {
     setShowOnboarding(false);
@@ -53,8 +72,8 @@ export function DashboardPage() {
   };
 
   // Get latest global and project announcements
-  const globalAnnouncements = mockAnnouncements.filter((a) => a.type === "global");
-  const projectAnnouncements = mockAnnouncements.filter((a) => a.type === "project");
+  const globalAnnouncements = announcements.filter((a) => a.type === "global");
+  const projectAnnouncements = announcements.filter((a) => a.type === "project");
   const latestGlobalAnnouncement = globalAnnouncements[0];
 
   return (
@@ -163,7 +182,7 @@ export function DashboardPage() {
                     <TabsTrigger value="all">
                       全部
                       <span className="ml-1.5 text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                        {mockTasks.length}
+                        {tasks.length}
                       </span>
                     </TabsTrigger>
                   </TabsList>
@@ -247,7 +266,7 @@ export function DashboardPage() {
                 </Button>
               </div>
               <div className="space-y-0">
-                {mockTimelineEvents.slice(0, 6).map((event) => (
+                {timelineEvents.slice(0, 6).map((event) => (
                   <TimelineEventItem key={event.id} event={event} compact />
                 ))}
               </div>

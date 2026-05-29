@@ -1,0 +1,4 @@
+endpoint: "http://192.168.31.1:9001"
+region: "us-east-1“
+key_id: "17ehkCI32BbLTVEckS2V"
+key_secret: "xQDIhiCr5rJx9an4hJ9CuyqqaRhcWBnE81BpByVo"

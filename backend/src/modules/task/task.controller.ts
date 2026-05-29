@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as taskService from "./task.service";
+import * as wikiService from "../wiki/wiki.service";
+import type { CreateCommentInput } from "../wiki/wiki.schema";
 
 function getParam(req: Request, name: string): string {
   const val = req.params[name];
@@ -337,6 +339,37 @@ export async function getGlobalWorkload(
   try {
     const result = await taskService.getGlobalWorkload();
     successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ==================== TASK COMMENTS ====================
+
+export async function getTaskComments(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await wikiService.getTaskComments(getParam(req, "id"));
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createTaskComment(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await wikiService.createComment(req.user!.id, {
+      ...req.body,
+      task_id: getParam(req, "id"),
+    } as CreateCommentInput);
+    successResponse(res, result, 201);
   } catch (error) {
     next(error);
   }

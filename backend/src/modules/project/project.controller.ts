@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as projectService from "./project.service";
+import * as subtitleService from "../subtitle/subtitle.service";
+import type { ResolveConflictInput } from "../subtitle/subtitle.schema";
 
 function getParam(req: Request, name: string): string {
   const val = req.params[name];
@@ -70,6 +72,40 @@ export async function updateProject(
 ): Promise<void> {
   try {
     const result = await projectService.updateProject(getParam(req, "id"), req.body, req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getProjectConflicts(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await subtitleService.getConflicts({
+      ...(req.query as Record<string, unknown>),
+      project_id: getParam(req, "id"),
+    } as Parameters<typeof subtitleService.getConflicts>[0]);
+    successResponse(res, result.conflicts, 200, result.meta);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function resolveProjectConflict(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await subtitleService.resolveConflict(
+      getParam(req, "conflictId"),
+      req.user!.id,
+      req.user!.role,
+      req.body as ResolveConflictInput
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);

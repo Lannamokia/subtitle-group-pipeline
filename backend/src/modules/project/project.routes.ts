@@ -13,6 +13,7 @@ import {
   joinRequestSchema,
   updateJoinRequestSchema,
 } from "./project.schema";
+import { conflictQuerySchema, resolveConflictSchema } from "../subtitle/subtitle.schema";
 import { z } from "zod";
 
 const router = Router();
@@ -56,5 +57,22 @@ router.get("/:id/join-requests", authenticate, validateParams(idParamSchema), co
 router.post("/:id/join", authenticate, validateParams(idParamSchema), validateBody(joinRequestSchema), controller.joinRequest);
 router.post("/join-requests/:requestId/respond", authenticate, validateParams(requestIdParamSchema), validateBody(updateJoinRequestSchema), controller.respondJoinRequest);
 router.post("/:id/join-requests/:requestId/respond", authenticate, validateParams(z.object({ id: z.string().uuid(), requestId: z.string().uuid() })), validateBody(updateJoinRequestSchema), controller.respondJoinRequest);
+
+// Subtitle conflicts (project-scoped)
+router.get(
+  "/:id/conflicts",
+  authenticate,
+  validateParams(idParamSchema),
+  validateQuery(conflictQuerySchema),
+  controller.getProjectConflicts
+);
+router.post(
+  "/:id/conflicts/:conflictId/resolve",
+  authenticate,
+  requireRole("supervisor", "super_admin", "group_admin"),
+  validateParams(z.object({ id: z.string().uuid(), conflictId: z.string().uuid() })),
+  validateBody(resolveConflictSchema),
+  controller.resolveProjectConflict
+);
 
 export default router;

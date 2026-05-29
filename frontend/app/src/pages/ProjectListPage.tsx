@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
+import { projectApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AvatarGroup } from "@/components/UserAvatar";
 import { Progress } from "@/components/ui/progress";
-import { mockProjects } from "@/lib/mockData";
+import type { Project } from "@/types";
 import {
   FolderKanban,
   Layers,
@@ -22,8 +23,15 @@ export function ProjectListPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus>("all");
   const [scope, setScope] = useState<"mine" | "all">("mine");
+  const [projects, setProjects] = useState<Project[]>([]);
 
-  const filteredProjects = mockProjects.filter((p) => {
+  useEffect(() => {
+    projectApi.getProjects()
+      .then((data) => setProjects(data.items || []))
+      .catch(() => {});
+  }, []);
+
+  const filteredProjects = projects.filter((p) => {
     if (searchQuery && !p.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     if (statusFilter !== "all" && p.status !== statusFilter) return false;
     if (scope === "mine") {
@@ -105,7 +113,7 @@ export function ProjectListPage() {
   );
 }
 
-function ProjectCard({ project }: { project: typeof mockProjects[0] }) {
+function ProjectCard({ project }: { project: Project }) {
   const navigate = useNavigate();
   const statusLabels: Record<string, { label: string; className: string }> = {
     active: { label: "进行中", className: "badge-info" },

@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { announcementApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +36,6 @@ import {
   FormLabel,
   FormControl,
 } from "@/components/ui/form";
-import { mockAnnouncements, mockUsers } from "@/lib/mockData";
 import type { Announcement } from "@/types";
 import {
   Megaphone,
@@ -57,10 +57,16 @@ type AnnouncementFormValues = z.infer<typeof announcementSchema>;
 
 export function AnnouncementAdminPage() {
   const currentUser = useAuthStore((s) => s.user);
-  const [announcements, setAnnouncements] = useState<Announcement[]>(mockAnnouncements.filter((a) => a.type === "global"));
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    announcementApi.getAnnouncements({ type: "global" })
+      .then(setAnnouncements)
+      .catch(() => {});
+  }, []);
 
   const form = useForm<AnnouncementFormValues>({
     resolver: zodResolver(announcementSchema),
@@ -108,7 +114,7 @@ export function AnnouncementAdminPage() {
           type: "global",
           title: data.title,
           content: data.content,
-          createdBy: currentUser || mockUsers[0],
+          createdBy: currentUser || { id: 'unknown', username: '未知', role: 'member', status: 'active', createdAt: new Date().toISOString() },
           createdAt: new Date().toISOString(),
         };
         setAnnouncements((prev) => [newAnnouncement, ...prev]);

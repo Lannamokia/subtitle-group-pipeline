@@ -17,6 +17,7 @@ import wikiRoutes from "./modules/wiki/wiki.routes";
 import storageRoutes from "./modules/storage/storage.routes";
 import announcementRoutes from "./modules/announcement/announcement.routes";
 import timelineRoutes from "./modules/timeline/timeline.routes";
+import { downloadByToken } from "./modules/file/file.controller";
 
 export function createApp(): Application {
   const app = express();
@@ -44,6 +45,35 @@ export function createApp(): Application {
   // Health check
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Root redirect to frontend
+  app.get("/", (_req, res) => {
+    res.redirect(env.CORS_ORIGIN);
+  });
+
+  // Public download route (no auth required)
+  app.get("/download/:token", downloadByToken);
+
+  // NoneBot QQ verification webhook (public)
+  app.post("/webhook/qq-verify", async (req, res, next) => {
+    try {
+      const { message, group_id } = req.body || {};
+      if (!message || typeof message !== "string") {
+        res.status(400).json({ success: false, error: "Missing message" });
+        return;
+      }
+      const match = message.trim().match(/^\/verify\s+([A-Za-z0-9]+)$/);
+      if (!match) {
+        res.status(400).json({ success: false, error: "Invalid command format" });
+        return;
+      }
+      const { verifyByQQ } = await import("./modules/auth/auth.service");
+      const result = await verifyByQQ({ code: match[1], qq_group: group_id });
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
   });
 
   // API routes

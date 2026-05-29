@@ -1,13 +1,13 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn, formatRelativeTime, getRoleColor, getRoleLabel, getTaskStatusColor, TASK_STATUS_MAP } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { taskApi, projectApi } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { UserAvatar } from "@/components/UserAvatar";
-import { mockTasks, mockProjects } from "@/lib/mockData";
-import type { Task, TaskStatus, User } from "@/types";
+import type { Task, TaskStatus, User, Project } from "@/types";
 import {
   LayoutDashboard,
   Users,
@@ -47,6 +47,21 @@ export function WorkloadPage() {
     return views;
   }, [isSupervisor, isAdmin]);
 
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+
+  useEffect(() => {
+    Promise.all([
+      taskApi.getTasks(),
+      projectApi.getProjects(),
+    ])
+      .then(([tasksData, projectsData]) => {
+        setTasks(tasksData);
+        setProjects(projectsData.items || []);
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -81,17 +96,17 @@ export function WorkloadPage() {
       )}
 
       {/* Content */}
-      {activeView === "personal" && <PersonalView user={user} navigate={navigate} />}
-      {activeView === "supervisor" && <SupervisorView navigate={navigate} />}
-      {activeView === "admin" && <AdminView navigate={navigate} />}
+      {activeView === "personal" && <PersonalView user={user} navigate={navigate} tasks={tasks} />}
+      {activeView === "supervisor" && <SupervisorView navigate={navigate} tasks={tasks} projects={projects} user={user} />}
+      {activeView === "admin" && <AdminView tasks={tasks} />}
     </div>
   );
 }
 
 /* ---------- Personal View ---------- */
 
-function PersonalView({ user, navigate }: { user: User | null; navigate: ReturnType<typeof useNavigate> }) {
-  const myTasks = mockTasks.filter((t) => t.assigneeId === user?.id);
+function PersonalView({ user, navigate, tasks }: { user: User | null; navigate: ReturnType<typeof useNavigate>; tasks: Task[] }) {
+  const myTasks = tasks.filter((t) => t.assigneeId === user?.id);
 
   const stats = useMemo(() => {
     const total = myTasks.length;
@@ -145,13 +160,13 @@ function PersonalView({ user, navigate }: { user: User | null; navigate: ReturnT
 
 /* ---------- Supervisor View ---------- */
 
-function SupervisorView({ navigate }: { navigate: ReturnType<typeof useNavigate> }) {
+function SupervisorView({ navigate, tasks, projects, user }: { navigate: ReturnType<typeof useNavigate>; tasks: Task[]; projects: Project[]; user: User | null }) {
   // Group tasks by member for supervised projects
-  const supervisedProjectIds = mockProjects
-    .filter((p) => p.supervisorId === "u1")
+  const supervisedProjectIds = projects
+    .filter((p) => p.supervisorId === user?.id)
     .map((p) => p.id);
 
-  const supervisedTasks = mockTasks.filter((t) => supervisedProjectIds.includes(t.projectId));
+  const supervisedTasks = tasks.filter((t) => supervisedProjectIds.includes(t.projectId));
 
   // Group by assignee
   const memberTasks = useMemo(() => {
@@ -238,9 +253,9 @@ function SupervisorView({ navigate }: { navigate: ReturnType<typeof useNavigate>
 
 /* ---------- Admin View ---------- */
 
-function AdminView() {
+function AdminView({ tasks }: { tasks: Task[] }) {
   // All tasks across all projects
-  const allTasks = mockTasks;
+  const allTasks = tasks;
 
   const stats = useMemo(() => {
     const total = allTasks.length;

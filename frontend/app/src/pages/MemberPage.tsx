@@ -1,18 +1,28 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/UserAvatar";
-import { mockUsers } from "@/lib/mockData";
+import { memberApi } from "@/lib/api";
+import type { User } from "@/types";
 import { Search, UserPlus } from "lucide-react";
 
 export function MemberPage() {
+  const [users, setUsers] = useState<User[]>([]);
+
+  useEffect(() => {
+    memberApi.getMembers()
+      .then((data) => setUsers(data.items || []))
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-display text-gray-800">成员管理</h1>
-          <p className="text-sm text-gray-500 mt-1">共 {mockUsers.length} 名成员</p>
+          <p className="text-sm text-gray-500 mt-1">共 {users.length} 名成员</p>
         </div>
         <Button>
           <UserPlus className="w-4 h-4 mr-1.5" />
@@ -29,7 +39,7 @@ export function MemberPage() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-gray-100">
-            {mockUsers.map((user) => (
+            {users.map((user) => (
               <div key={user.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 hover:bg-gray-50 gap-2">
                 <div className="flex items-center gap-3">
                   <UserAvatar user={user} size="md" />

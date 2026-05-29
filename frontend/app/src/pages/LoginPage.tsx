@@ -104,7 +104,7 @@ export function LoginPage() {
     setIsLoading(true);
     try {
       const result = await authApi.login(data);
-      login(result.user);
+      login({ ...result.user, token: result.token });
       toast.success("登录成功");
       navigate("/dashboard");
     } catch (error) {

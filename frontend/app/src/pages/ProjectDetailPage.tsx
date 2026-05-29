@@ -115,18 +115,18 @@ export function ProjectDetailPage() {
     setLoading(true);
     try {
       const [projectRes, tasksRes, filesRes, eventsRes, wikiRes] = await Promise.all([
-        api.get<Project>(`/projects/${projectId}`),
-        api.get<Task[]>(`/tasks`, { params: { projectId } }),
-        api.get<FileEntity[]>(`/files`, { params: { projectId } }),
-        api.get<TimelineEvent[]>(`/projects/${projectId}/timeline`),
-        api.get<WikiDocument>(`/projects/${projectId}/wiki`).catch(() => ({ data: null })),
+        api.get<{ data: Project }>(`/projects/${projectId}`),
+        api.get<{ data: Task[] }>(`/tasks`, { params: { projectId } }),
+        api.get<{ data: FileEntity[] }>(`/files`, { params: { projectId } }),
+        api.get<{ data: TimelineEvent[] }>(`/timeline/project/${projectId}`),
+        api.get<{ data: { wikis: WikiDocument[] } }>(`/wiki`, { params: { project_id: projectId } }).catch(() => ({ data: { data: { wikis: [] } } })),
       ]);
-      setProject(projectRes.data);
-      setTasks(tasksRes.data);
-      setFiles(filesRes.data);
-      setEvents(eventsRes.data);
-      setWiki(wikiRes.data);
-    } catch {
+      setProject(projectRes.data.data);
+      setTasks(tasksRes.data.data);
+      setFiles(filesRes.data.data);
+      setEvents(eventsRes.data.data);
+      setWiki(wikiRes.data.data?.wikis?.[0] ?? null);
+    } catch (error) {
       toast.error("获取项目信息失败: " + getErrorMessage(error));
     } finally {
       setLoading(false);

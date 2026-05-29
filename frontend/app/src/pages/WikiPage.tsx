@@ -1,6 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams } from "react-router";
 import { cn, formatDate } from "@/lib/utils";
+import { wikiApi } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthStore } from "@/stores/authStore";
-import { mockWiki } from "@/lib/mockData";
-import type { WikiBlock, WikiBlockType, WikiStatus } from "@/types";
+import type { WikiBlock, WikiBlockType, WikiStatus, WikiDocument } from "@/types";
 import {
   Edit3,
   Eye,
@@ -385,14 +385,27 @@ export function WikiPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const isSupervisor = useAuthStore((s) => s.isSupervisor)();
 
-  const [blocks, setBlocks] = useState<WikiBlock[]>(mockWiki.blocks);
-  const [status, setStatus] = useState<WikiStatus>(mockWiki.status);
+  const [wiki, setWiki] = useState<WikiDocument | null>(null);
+  const [blocks, setBlocks] = useState<WikiBlock[]>([]);
+  const [status, setStatus] = useState<WikiStatus>("draft");
   const [isEditing, setIsEditing] = useState(false);
   const [pendingBlocks, setPendingBlocks] = useState<WikiBlock[] | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [activeTab, setActiveTab] = useState<"view" | "edit" | "diff">("view");
-  const [title, setTitle] = useState(mockWiki.title);
+  const [title, setTitle] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!projectId) return;
+    wikiApi.getWiki(projectId)
+      .then((data) => {
+        setWiki(data);
+        setBlocks(data.blocks);
+        setStatus(data.status);
+        setTitle(data.title);
+      })
+      .catch(() => {});
+  }, [projectId]);
 
   const handleAddBlock = (type: WikiBlockType) => {
     const newBlock: WikiBlock = {
@@ -536,7 +549,7 @@ export function WikiPage() {
                   onClick={() => {
                     setIsEditing(false);
                     setActiveTab("view");
-                    setBlocks(mockWiki.blocks); // Reset
+                    setBlocks(wiki?.blocks || []); // Reset
                   }}
                 >
                   <X className="w-4 h-4 mr-1.5" />
@@ -552,7 +565,7 @@ export function WikiPage() {
         </div>
         <p className="text-sm text-gray-500 mt-2 flex items-center gap-1">
           <Clock className="w-3.5 h-3.5" />
-          最后更新：{mockWiki.updatedBy.username} · {formatDate(mockWiki.updatedAt)}
+          最后更新：{wiki?.updatedBy?.username || "未知"} · {formatDate(wiki?.updatedAt || new Date().toISOString())}
         </p>
       </div>
 

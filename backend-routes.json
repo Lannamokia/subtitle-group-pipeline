@@ -1,0 +1,243 @@
+{
+  "basePath": "/api/v1",
+  "modules": [
+    {
+      "name": "auth",
+      "prefix": "/auth",
+      "routes": [
+        {"method": "POST", "path": "/register", "auth": false, "roles": [], "controller": "register"},
+        {"method": "POST", "path": "/login", "auth": false, "roles": [], "controller": "login"},
+        {"method": "POST", "path": "/refresh", "auth": false, "roles": [], "controller": "refresh"},
+        {"method": "POST", "path": "/logout", "auth": true, "roles": [], "controller": "logout"},
+        {"method": "GET", "path": "/me", "auth": true, "roles": [], "controller": "me"},
+        {"method": "PUT", "path": "/profile", "auth": true, "roles": [], "controller": "updateProfile"},
+        {"method": "POST", "path": "/change-password", "auth": true, "roles": [], "controller": "changePassword"},
+        {"method": "POST", "path": "/verify-qq", "auth": false, "roles": [], "controller": "verifyQQ"},
+        {"method": "POST", "path": "/request-password-reset", "auth": false, "roles": [], "controller": "requestPasswordReset"},
+        {"method": "GET", "path": "/role-tags", "auth": true, "roles": [], "controller": "getRoleTags"},
+        {"method": "POST", "path": "/role-tags", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "createRoleTag"},
+        {"method": "PUT", "path": "/role-tags/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "updateRoleTag"},
+        {"method": "DELETE", "path": "/role-tags/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "deleteRoleTag"},
+        {"method": "GET", "path": "/role-tags/my-status", "auth": true, "roles": [], "controller": "getMyRoleTagStatuses"},
+        {"method": "POST", "path": "/tag-applications", "auth": true, "roles": [], "controller": "createTagApplication"},
+        {"method": "GET", "path": "/tag-applications/my", "auth": true, "roles": [], "controller": "getMyTagApplications"},
+        {"method": "GET", "path": "/tag-applications/pending", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "getPendingTagApplications"},
+        {"method": "POST", "path": "/tag-applications/review", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "reviewTagApplication"}
+      ]
+    },
+    {
+      "name": "project",
+      "prefix": "/projects",
+      "routes": [
+        {"method": "GET", "path": "/", "auth": false, "roles": [], "controller": "getProjects"},
+        {"method": "GET", "path": "/:id", "auth": false, "roles": [], "controller": "getProject"},
+        {"method": "POST", "path": "/", "auth": true, "roles": [], "controller": "createProject"},
+        {"method": "POST", "path": "/from-template", "auth": true, "roles": [], "controller": "createProjectFromTemplate"},
+        {"method": "PATCH", "path": "/:id", "auth": true, "roles": [], "controller": "updateProject"},
+        {"method": "POST", "path": "/:id/archive", "auth": true, "roles": [], "controller": "archiveProject"},
+        {"method": "POST", "path": "/:id/unarchive", "auth": true, "roles": [], "controller": "unarchiveProject"},
+        {"method": "POST", "path": "/:id/delete", "auth": true, "roles": [], "controller": "softDeleteProject"},
+        {"method": "POST", "path": "/:id/restore", "auth": true, "roles": [], "controller": "restoreProject"},
+        {"method": "DELETE", "path": "/:id", "auth": true, "roles": [], "controller": "softDeleteProject"},
+        {"method": "GET", "path": "/:id/members", "auth": false, "roles": [], "controller": "getProjectMembers"},
+        {"method": "POST", "path": "/:id/members", "auth": true, "roles": [], "controller": "addMember"},
+        {"method": "PATCH", "path": "/:id/members/:userId", "auth": true, "roles": [], "controller": "updateMember"},
+        {"method": "DELETE", "path": "/:id/members/:userId", "auth": true, "roles": [], "controller": "removeMember"},
+        {"method": "POST", "path": "/:id/units", "auth": true, "roles": [], "controller": "createUnit"},
+        {"method": "GET", "path": "/:id/join-requests", "auth": true, "roles": [], "controller": "getJoinRequests"},
+        {"method": "POST", "path": "/:id/join", "auth": true, "roles": [], "controller": "joinRequest"},
+        {"method": "POST", "path": "/join-requests/:requestId/respond", "auth": true, "roles": [], "controller": "respondJoinRequest"},
+        {"method": "POST", "path": "/:id/join-requests/:requestId/respond", "auth": true, "roles": [], "controller": "respondJoinRequest"},
+        {"method": "GET", "path": "/:id/conflicts", "auth": true, "roles": [], "controller": "getProjectConflicts"},
+        {"method": "POST", "path": "/:id/conflicts/:conflictId/resolve", "auth": true, "roles": ["supervisor", "super_admin", "group_admin"], "controller": "resolveProjectConflict"}
+      ]
+    },
+    {
+      "name": "template",
+      "prefix": "/templates",
+      "routes": [
+        {"method": "GET", "path": "/", "auth": false, "roles": [], "controller": "getTemplates"},
+        {"method": "GET", "path": "/:id", "auth": false, "roles": [], "controller": "getTemplate"},
+        {"method": "POST", "path": "/", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "createTemplate"},
+        {"method": "PATCH", "path": "/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "updateTemplate"},
+        {"method": "DELETE", "path": "/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "deleteTemplate"},
+        {"method": "POST", "path": "/:id/set-default", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "setDefaultTemplate"}
+      ]
+    },
+    {
+      "name": "task",
+      "prefix": "/tasks",
+      "routes": [
+        {"method": "GET", "path": "/", "auth": false, "roles": [], "controller": "getTasks"},
+        {"method": "GET", "path": "/:id", "auth": false, "roles": [], "controller": "getTask"},
+        {"method": "POST", "path": "/", "auth": true, "roles": [], "controller": "createTask"},
+        {"method": "PATCH", "path": "/:id", "auth": true, "roles": [], "controller": "updateTask"},
+        {"method": "PUT", "path": "/:id", "auth": true, "roles": [], "controller": "updateTask"},
+        {"method": "DELETE", "path": "/:id", "auth": true, "roles": [], "controller": "deleteTask"},
+        {"method": "POST", "path": "/:id/claim", "auth": true, "roles": [], "controller": "claimTask"},
+        {"method": "POST", "path": "/:id/assign", "auth": true, "roles": [], "controller": "assignTask"},
+        {"method": "POST", "path": "/:id/return", "auth": true, "roles": [], "controller": "returnTask"},
+        {"method": "POST", "path": "/:id/start", "auth": true, "roles": [], "controller": "startTask"},
+        {"method": "POST", "path": "/:id/submit", "auth": true, "roles": [], "controller": "submitTask"},
+        {"method": "POST", "path": "/:id/cancel", "auth": true, "roles": [], "controller": "cancelTask"},
+        {"method": "POST", "path": "/:id/approve", "auth": true, "roles": [], "controller": "approveTask"},
+        {"method": "POST", "path": "/:id/reject", "auth": true, "roles": [], "controller": "rejectTask"},
+        {"method": "POST", "path": "/:id/reset", "auth": true, "roles": [], "controller": "resetTask"},
+        {"method": "PATCH", "path": "/:id/deadline", "auth": true, "roles": [], "controller": "updateTaskDeadline"},
+        {"method": "POST", "path": "/:id/claim-segment", "auth": true, "roles": [], "controller": "claimSegment"},
+        {"method": "POST", "path": "/:id/abandon-segment/:claimId", "auth": true, "roles": [], "controller": "abandonSegment"},
+        {"method": "POST", "path": "/:id/submit-translation", "auth": true, "roles": [], "controller": "submitTranslation"},
+        {"method": "POST", "path": "/:id/dependencies", "auth": true, "roles": [], "controller": "createDependency"},
+        {"method": "DELETE", "path": "/:id/dependencies/:dependencyId", "auth": true, "roles": [], "controller": "removeDependency"},
+        {"method": "GET", "path": "/:id/comments", "auth": true, "roles": [], "controller": "getTaskComments"},
+        {"method": "POST", "path": "/:id/comments", "auth": true, "roles": [], "controller": "createTaskComment"},
+        {"method": "GET", "path": "/workload/personal", "auth": true, "roles": [], "controller": "getPersonalWorkload"},
+        {"method": "GET", "path": "/workload/project/:projectId", "auth": true, "roles": [], "controller": "getProjectWorkload"},
+        {"method": "GET", "path": "/workload/global", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "getGlobalWorkload"}
+      ]
+    },
+    {
+      "name": "file",
+      "prefix": "/files",
+      "routes": [
+        {"method": "POST", "path": "/upload", "auth": true, "roles": [], "controller": "uploadFile"},
+        {"method": "GET", "path": "/", "auth": true, "roles": [], "controller": "getProjectFiles"},
+        {"method": "POST", "path": "/links", "auth": true, "roles": [], "controller": "createLink"},
+        {"method": "GET", "path": "/links", "auth": true, "roles": [], "controller": "getLinks"},
+        {"method": "POST", "path": "/:fileId/replace", "auth": true, "roles": [], "controller": "replaceFile"},
+        {"method": "GET", "path": "/:fileId/versions", "auth": true, "roles": [], "controller": "getFileVersions"},
+        {"method": "POST", "path": "/:fileId/versions/:versionId/approve", "auth": true, "roles": [], "controller": "approveVersion"},
+        {"method": "GET", "path": "/:fileId/download-link", "auth": true, "roles": [], "controller": "getDownloadLink"},
+        {"method": "POST", "path": "/:fileId/download-link", "auth": true, "roles": [], "controller": "getDownloadLink"},
+        {"method": "GET", "path": "/:fileId", "auth": true, "roles": [], "controller": "getFile"},
+        {"method": "DELETE", "path": "/:fileId", "auth": true, "roles": [], "controller": "deleteFile"},
+        {"method": "POST", "path": "/projects/:projectId/files", "auth": true, "roles": [], "controller": "uploadFile"},
+        {"method": "GET", "path": "/projects/:projectId/files", "auth": true, "roles": [], "controller": "getProjectFiles"},
+        {"method": "POST", "path": "/projects/:projectId/files/:fileId/replace", "auth": true, "roles": [], "controller": "replaceFile"},
+        {"method": "GET", "path": "/files/:fileId", "auth": true, "roles": [], "controller": "getFile"},
+        {"method": "DELETE", "path": "/files/:fileId", "auth": true, "roles": [], "controller": "deleteFile"},
+        {"method": "GET", "path": "/files/:fileId/versions", "auth": true, "roles": [], "controller": "getFileVersions"},
+        {"method": "POST", "path": "/files/:fileId/versions/:versionId/approve", "auth": true, "roles": [], "controller": "approveVersion"},
+        {"method": "GET", "path": "/files/:fileId/download", "auth": true, "roles": [], "controller": "getDownloadLink"},
+        {"method": "GET", "path": "/download/:token", "auth": false, "roles": [], "controller": "downloadByToken"},
+        {"method": "POST", "path": "/projects/:projectId/links", "auth": true, "roles": [], "controller": "createLink"},
+        {"method": "GET", "path": "/projects/:projectId/links", "auth": true, "roles": [], "controller": "getLinks"},
+        {"method": "GET", "path": "/upload-policy", "auth": false, "roles": [], "controller": "getUploadPolicy"},
+        {"method": "POST", "path": "/upload-policy", "auth": true, "roles": ["super_admin", "group_admin", "supervisor"], "controller": "updateUploadPolicy"}
+      ]
+    },
+    {
+      "name": "notification",
+      "prefix": "/notifications",
+      "routes": [
+        {"method": "GET", "path": "/", "auth": true, "roles": [], "controller": "getNotifications"},
+        {"method": "GET", "path": "/unread-count", "auth": true, "roles": [], "controller": "getUnreadCount"},
+        {"method": "POST", "path": "/:id/read", "auth": true, "roles": [], "controller": "markAsRead"},
+        {"method": "POST", "path": "/read-all", "auth": true, "roles": [], "controller": "markAllAsRead"},
+        {"method": "DELETE", "path": "/:id", "auth": true, "roles": [], "controller": "dismissNotification"},
+        {"method": "GET", "path": "/preferences", "auth": true, "roles": [], "controller": "getPreferences"},
+        {"method": "PUT", "path": "/preferences", "auth": true, "roles": [], "controller": "updatePreferences"},
+        {"method": "PUT", "path": "/:id/read", "auth": true, "roles": [], "controller": "markAsRead"},
+        {"method": "PUT", "path": "/read-all", "auth": true, "roles": [], "controller": "markAllAsRead"},
+        {"method": "PUT", "path": "/:id/dismiss", "auth": true, "roles": [], "controller": "dismissNotification"}
+      ]
+    },
+    {
+      "name": "subtitle",
+      "prefix": "/subtitles",
+      "routes": [
+        {"method": "POST", "path": "/projects/:projectId/units/:unitId/claims", "auth": true, "roles": [], "controller": "createTranslationClaim"},
+        {"method": "DELETE", "path": "/claims/:claimId", "auth": true, "roles": [], "controller": "releaseTranslationClaim"},
+        {"method": "GET", "path": "/projects/:projectId/units/:unitId/claims", "auth": true, "roles": [], "controller": "getTranslationClaims"},
+        {"method": "GET", "path": "/claims/:claimId", "auth": true, "roles": [], "controller": "getTranslationClaimById"},
+        {"method": "POST", "path": "/tasks/:taskId/submissions", "auth": true, "roles": [], "controller": "submitTranslation"},
+        {"method": "GET", "path": "/tasks/:taskId/submissions", "auth": true, "roles": [], "controller": "getSubmissionsByTask"},
+        {"method": "POST", "path": "/units/:unitId/merge-jobs", "auth": true, "roles": [], "controller": "createMergeJob"},
+        {"method": "GET", "path": "/merge-jobs/:jobId", "auth": true, "roles": [], "controller": "getMergeJob"},
+        {"method": "GET", "path": "/merge-jobs/:jobId/conflicts", "auth": true, "roles": [], "controller": "getMergeConflicts"},
+        {"method": "GET", "path": "/merge-jobs", "auth": false, "roles": [], "controller": "getMergeJobs"},
+        {"method": "PATCH", "path": "/merge-jobs/:id/status", "auth": true, "roles": [], "controller": "updateMergeJobStatus"},
+        {"method": "POST", "path": "/conflicts/:conflictId/resolve", "auth": true, "roles": ["supervisor", "super_admin", "group_admin"], "controller": "resolveConflict"},
+        {"method": "GET", "path": "/conflicts/:conflictId", "auth": true, "roles": [], "controller": "getConflictDetail"},
+        {"method": "GET", "path": "/conflicts", "auth": false, "roles": [], "controller": "getConflicts"},
+        {"method": "GET", "path": "/conflicts/:id", "auth": false, "roles": [], "controller": "getConflict"},
+        {"method": "GET", "path": "/files/:fileId/compare/:otherFileId", "auth": true, "roles": [], "controller": "compareVersions"},
+        {"method": "GET", "path": "/files/:fileId/timeline", "auth": true, "roles": [], "controller": "getTimelineVisualization"},
+        {"method": "GET", "path": "/projects/:projectId/reviews", "auth": false, "roles": [], "controller": "getReviews"},
+        {"method": "POST", "path": "/reviews", "auth": true, "roles": [], "controller": "createReview"},
+        {"method": "GET", "path": "/reviews/:id", "auth": false, "roles": [], "controller": "getReview"},
+        {"method": "PATCH", "path": "/reviews/:id", "auth": true, "roles": [], "controller": "updateReview"}
+      ]
+    },
+    {
+      "name": "wiki",
+      "prefix": "/wiki",
+      "routes": [
+        {"method": "GET", "path": "/", "auth": false, "roles": [], "controller": "getWikis"},
+        {"method": "GET", "path": "/by-slug/:slug", "auth": false, "roles": [], "controller": "getWikiBySlug"},
+        {"method": "GET", "path": "/slug/:slug", "auth": false, "roles": [], "controller": "getWikiBySlug"},
+        {"method": "GET", "path": "/:id", "auth": false, "roles": [], "controller": "getWiki"},
+        {"method": "POST", "path": "/", "auth": true, "roles": [], "controller": "createWiki"},
+        {"method": "PATCH", "path": "/:id", "auth": true, "roles": [], "controller": "updateWiki"},
+        {"method": "PUT", "path": "/:id", "auth": true, "roles": [], "controller": "updateWiki"},
+        {"method": "POST", "path": "/:id/approve", "auth": true, "roles": ["super_admin", "group_admin", "supervisor"], "controller": "approveWikiChange"},
+        {"method": "POST", "path": "/:id/reject", "auth": true, "roles": ["super_admin", "group_admin", "supervisor"], "controller": "rejectWikiChange"},
+        {"method": "DELETE", "path": "/:id", "auth": true, "roles": [], "controller": "deleteWiki"},
+        {"method": "GET", "path": "/:wikiId/comments", "auth": false, "roles": [], "controller": "getComments"},
+        {"method": "POST", "path": "/:wikiId/comments", "auth": true, "roles": [], "controller": "createComment"},
+        {"method": "POST", "path": "/comments", "auth": true, "roles": [], "controller": "createComment"},
+        {"method": "PATCH", "path": "/comments/:id", "auth": true, "roles": [], "controller": "updateComment"},
+        {"method": "DELETE", "path": "/comments/:id", "auth": true, "roles": [], "controller": "deleteComment"}
+      ]
+    },
+    {
+      "name": "storage",
+      "prefix": "/storage",
+      "routes": [
+        {"method": "GET", "path": "/", "auth": false, "roles": [], "controller": "getBackends"},
+        {"method": "GET", "path": "/default", "auth": false, "roles": [], "controller": "getDefaultBackend"},
+        {"method": "GET", "path": "/:id", "auth": false, "roles": [], "controller": "getBackend"},
+        {"method": "POST", "path": "/", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "createBackend"},
+        {"method": "PATCH", "path": "/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "updateBackend"},
+        {"method": "DELETE", "path": "/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "deleteBackend"},
+        {"method": "GET", "path": "/backends", "auth": false, "roles": [], "controller": "getBackends"},
+        {"method": "GET", "path": "/backends/default", "auth": false, "roles": [], "controller": "getDefaultBackend"},
+        {"method": "GET", "path": "/backends/:id", "auth": false, "roles": [], "controller": "getBackend"},
+        {"method": "POST", "path": "/backends", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "createBackend"},
+        {"method": "PUT", "path": "/backends/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "updateBackend"},
+        {"method": "PATCH", "path": "/backends/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "updateBackend"},
+        {"method": "DELETE", "path": "/backends/:id", "auth": true, "roles": ["super_admin", "group_admin"], "controller": "deleteBackend"},
+        {"method": "POST", "path": "/avatar", "auth": true, "roles": [], "controller": "uploadAvatar"}
+      ]
+    },
+    {
+      "name": "announcement",
+      "prefix": "/announcements",
+      "routes": [
+        {"method": "GET", "path": "/", "auth": false, "roles": [], "controller": "getAnnouncements"},
+        {"method": "GET", "path": "/:id", "auth": false, "roles": [], "controller": "getAnnouncement"},
+        {"method": "POST", "path": "/", "auth": true, "roles": [], "controller": "createAnnouncement"},
+        {"method": "PUT", "path": "/:id", "auth": true, "roles": [], "controller": "updateAnnouncement"},
+        {"method": "DELETE", "path": "/:id", "auth": true, "roles": [], "controller": "deleteAnnouncement"},
+        {"method": "POST", "path": "/:id/pin", "auth": true, "roles": [], "controller": "pinAnnouncement"}
+      ]
+    },
+    {
+      "name": "timeline",
+      "prefix": "/timeline",
+      "routes": [
+        {"method": "GET", "path": "/project/:projectId", "auth": true, "roles": [], "controller": "getProjectTimeline"},
+        {"method": "GET", "path": "/global", "auth": true, "roles": [], "controller": "getGlobalTimeline"},
+        {"method": "GET", "path": "/:projectId", "auth": true, "roles": [], "controller": "getProjectTimeline"},
+        {"method": "GET", "path": "/", "auth": true, "roles": [], "controller": "getGlobalTimeline"}
+      ]
+    }
+  ],
+  "orphanControllers": [],
+  "appLevelRoutes": [
+    {"method": "GET", "path": "/health", "auth": false, "roles": [], "controller": "(inline handler)"},
+    {"method": "GET", "path": "/", "auth": false, "roles": [], "controller": "(inline redirect handler)"},
+    {"method": "GET", "path": "/download/:token", "auth": false, "roles": [], "controller": "downloadByToken"},
+    {"method": "POST", "path": "/webhook/qq-verify", "auth": false, "roles": [], "controller": "(inline QQ verify handler)"}
+  ]
+}

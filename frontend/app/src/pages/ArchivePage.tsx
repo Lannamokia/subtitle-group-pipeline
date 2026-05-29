@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
+import { projectApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Progress } from "@/components/ui/progress";
 import { AvatarGroup } from "@/components/UserAvatar";
-import { mockProjects } from "@/lib/mockData";
 import type { Project } from "@/types";
 import {
   Archive,
@@ -42,13 +42,20 @@ export function ArchivePage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<ArchiveTab>("archived");
   const [searchQuery, setSearchQuery] = useState("");
-  const [archivedProjects, setArchivedProjects] = useState<ProjectWithDeleteInfo[]>(
-    mockProjects
-      .filter((p) => p.status === "archived" || p.status === "completed")
-      .map((p) => ({ ...p, status: "archived" as const }))
-  );
+  const [archivedProjects, setArchivedProjects] = useState<ProjectWithDeleteInfo[]>([]);
   const [recycledProjects, setRecycledProjects] = useState<ProjectWithDeleteInfo[]>([]);
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
+
+  useEffect(() => {
+    projectApi.getProjects()
+      .then((data) => {
+        const filtered = data.items
+          .filter((p) => p.status === "archived" || p.status === "completed")
+          .map((p) => ({ ...p, status: "archived" as const }));
+        setArchivedProjects(filtered);
+      })
+      .catch(() => {});
+  }, []);
 
   const filteredArchived = archivedProjects.filter(
     (p) =>
