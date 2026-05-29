@@ -697,19 +697,19 @@ Dialogue: 0,0:00:06.00,0:00:10.00,Default,,0,0,0,,Shared line`;
         data: {
           user_id: user.id,
           content: `Reviewing version ${version.version_number} of ${file.name}`,
-          file_version_id: file.id,
+          file_version_id: version.id,
         },
       });
 
       expect(comment).toBeDefined();
-      expect(comment.file_version_id).toBe(file.id);
+      expect(comment.file_version_id).toBe(version.id);
       expect(comment.content).toContain(String(version.version_number));
     });
 
     it("should retrieve comments with file version info", async () => {
       const { user } = await createTestUser();
       const project = await createTestProject({ owner_id: user.id });
-      const { file } = await createTestFile({
+      const { version } = await createTestFile({
         project_id: project.id,
         uploader_id: user.id,
       });
@@ -718,19 +718,23 @@ Dialogue: 0,0:00:06.00,0:00:10.00,Default,,0,0,0,,Shared line`;
         data: {
           user_id: user.id,
           content: "Great work on this version!",
-          file_version_id: file.id,
+          file_version_id: version.id,
           line_number: 5,
         },
       });
 
       const comments = await prisma.comment.findMany({
-        where: { file_version_id: file.id },
-        include: { user: { select: { id: true, username: true } } },
+        where: { file_version_id: version.id },
+        include: {
+          user: { select: { id: true, username: true } },
+          file_version: { include: { file: true } },
+        },
       });
 
       expect(comments.length).toBe(1);
       expect(comments[0].line_number).toBe(5);
       expect(comments[0].user.username).toBe(user.username);
+      expect(comments[0].file_version?.id).toBe(version.id);
     });
   });
 });

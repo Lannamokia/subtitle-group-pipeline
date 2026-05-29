@@ -544,6 +544,19 @@ export async function createComment(
           avatar_url: true,
         },
       },
+      file_version: {
+        include: {
+          file: {
+            select: {
+              id: true,
+              name: true,
+              original_name: true,
+              file_type: true,
+              project_id: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -619,6 +632,19 @@ export async function getComments(wikiId: string) {
           avatar_url: true,
         },
       },
+      file_version: {
+        include: {
+          file: {
+            select: {
+              id: true,
+              name: true,
+              original_name: true,
+              file_type: true,
+              project_id: true,
+            },
+          },
+        },
+      },
       replies: {
         where: { deleted_at: null },
         include: {
@@ -652,6 +678,19 @@ export async function getTaskComments(taskId: string) {
           username: true,
           nickname: true,
           avatar_url: true,
+        },
+      },
+      file_version: {
+        include: {
+          file: {
+            select: {
+              id: true,
+              name: true,
+              original_name: true,
+              file_type: true,
+              project_id: true,
+            },
+          },
         },
       },
       replies: {

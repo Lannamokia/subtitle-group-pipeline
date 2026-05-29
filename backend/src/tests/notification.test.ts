@@ -589,7 +589,7 @@ Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Version A`;
       const { user: charlie } = await createTestUser({ username: "charlie" });
       const { user: commenter } = await createTestUser();
       const project = await createTestProject({ owner_id: commenter.id });
-      const { file } = await createTestFile({
+      const { version } = await createTestFile({
         project_id: project.id,
         uploader_id: commenter.id,
       });
@@ -598,7 +598,7 @@ Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Version A`;
         data: {
           user_id: commenter.id,
           content: "@alice @bob please check this file. @alice (duplicate mention)",
-          file_version_id: file.id,
+          file_version_id: version.id,
         },
       });
 

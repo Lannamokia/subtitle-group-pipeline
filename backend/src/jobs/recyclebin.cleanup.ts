@@ -106,8 +106,14 @@ async function permanentlyDeleteProject(project: ProjectToDelete): Promise<void>
   // Step 2: Delete related entities in a transaction
   // Use a transaction to ensure consistency
   await prisma.$transaction(async (tx) => {
-    // Delete file versions first (they have FK to FileEntity)
     const fileIds = project.files.map((f) => f.id);
+
+    // Delete comments on file versions in this project before versions are removed
+    await tx.comment.deleteMany({
+      where: { file_version: { file_id: { in: fileIds } } },
+    });
+
+    // Delete file versions first (they have FK to FileEntity)
     if (fileIds.length > 0) {
       await tx.fileVersion.deleteMany({
         where: { file_id: { in: fileIds } },
@@ -122,11 +128,6 @@ async function permanentlyDeleteProject(project: ProjectToDelete): Promise<void>
     // Delete download links
     await tx.downloadLink.deleteMany({
       where: { project_id: project.id },
-    });
-
-    // Delete comments on files in this project
-    await tx.comment.deleteMany({
-      where: { file: { project_id: project.id } },
     });
 
     // Delete file entities

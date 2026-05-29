@@ -982,17 +982,6 @@ export async function getFileById(fileId: string) {
       link_history: {
         orderBy: { created_at: "desc" },
       },
-      comments: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              username: true,
-              nickname: true,
-            },
-          },
-        },
-      },
       _count: {
         select: { versions: true },
       },
@@ -1010,9 +999,27 @@ export async function getFileById(fileId: string) {
     file.versions.find((version) => version.is_latest) ||
     file.versions[0] ||
     null;
+  const comments = await prisma.comment.findMany({
+    where: {
+      deleted_at: null,
+      file_version: { file_id: fileId },
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+        },
+      },
+      file_version: true,
+    },
+    orderBy: { created_at: "asc" },
+  });
 
   return {
     ...file,
+    comments,
     metadata_json: metadata,
     tag_list: parseTagList(file.tags),
     task_id: getMetadataStringValue(metadata, "task_id", "taskId"),

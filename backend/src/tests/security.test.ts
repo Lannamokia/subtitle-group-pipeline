@@ -104,7 +104,7 @@ describe("Security Tests", () => {
     it("should sanitize or escape XSS in comments", async () => {
       const { user, token } = await createTestUser();
       const project = await createTestProject({ owner_id: user.id });
-      const { file } = await createTestFile({
+      const { file, version } = await createTestFile({
         project_id: project.id,
         uploader_id: user.id,
       });
@@ -113,7 +113,7 @@ describe("Security Tests", () => {
         data: {
           user_id: user.id,
           content: xssPayloads.scriptTag,
-          file_version_id: file.id,
+          file_version_id: version.id,
         },
       });
 

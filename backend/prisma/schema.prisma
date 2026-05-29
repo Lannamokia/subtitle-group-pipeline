@@ -666,7 +666,6 @@ model FileEntity {
   uploader      User           @relation(fields: [uploader_id], references: [id])
   versions      FileVersion[]
   link_history  LinkHistory[]
-  comments      Comment[]
 
   @@index([project_id])
   @@index([uploader_id])
@@ -691,6 +690,7 @@ model FileVersion {
   created_at      DateTime @default(now())
 
   file FileEntity @relation(fields: [file_id], references: [id], onDelete: Cascade)
+  comments Comment[]
 
   @@unique([file_id, version_number])
   @@index([file_id])
@@ -875,7 +875,7 @@ model Comment {
   deleted_at      DateTime?
 
   user     User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  file     FileEntity?   @relation(fields: [file_version_id], references: [id])
+  file_version FileVersion? @relation(fields: [file_version_id], references: [id], onDelete: SetNull)
   wiki     WikiDocument? @relation(fields: [wiki_id], references: [id])
   task     Task?         @relation(fields: [task_id], references: [id], onDelete: Cascade)
   parent   Comment?      @relation("CommentReplies", fields: [parent_id], references: [id])
