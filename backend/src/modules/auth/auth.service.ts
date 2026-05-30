@@ -873,13 +873,23 @@ export async function getAllUsers() {
   return users.map(serializeManagedUser);
 }
 
-export async function updateUserRole(userId: string, data: UpdateUserRoleInput) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
+export async function updateUserRole(userId: string, data: UpdateUserRoleInput, actorId?: string) {
+  const [user, actor] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    actorId ? prisma.user.findUnique({ where: { id: actorId } }) : null,
+  ]);
   if (!user) {
     throw new AppError("User not found", "NOT_FOUND", 404);
   }
+
+  if (!actor) {
+    throw new AppError("Actor not found", "NOT_FOUND", 404);
+  }
+
+  if (actor.id === user.id && actor.role === "super_admin" && data.role !== actor.role) {
+    throw new AppError("Super administrators cannot change their own role", "FORBIDDEN", 403);
+  }
+
   const updated = await prisma.user.update({
     where: { id: userId },
     data: { role: data.role },

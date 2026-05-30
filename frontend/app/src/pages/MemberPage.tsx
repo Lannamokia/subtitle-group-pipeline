@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { UserAvatar } from "@/components/UserAvatar";
 import { getErrorMessage, memberApi, roleTagApi } from "@/lib/api";
+import { useAuthStore } from "@/stores/authStore";
 import type { RoleTagDefinition, User, UserRole, UserStatus } from "@/types";
 import { KeyRound, Loader2, Search, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -71,6 +72,7 @@ const initialMemberForm: MemberFormState = {
 };
 
 export function MemberPage() {
+  const currentUser = useAuthStore((state) => state.user);
   const [users, setUsers] = useState<User[]>([]);
   const [tags, setTags] = useState<RoleTagDefinition[]>([]);
   const [query, setQuery] = useState("");
@@ -112,6 +114,9 @@ export function MemberPage() {
         .some((value) => String(value).toLowerCase().includes(keyword))
     );
   }, [query, users]);
+
+  const isProtectedOwnSuperAdmin = (user: User) =>
+    currentUser?.id === user.id && currentUser.role === "super_admin";
 
   const openCreateDialog = () => {
     setMemberForm(initialMemberForm);
@@ -251,7 +256,7 @@ export function MemberPage() {
                     <Select
                       value={user.role}
                       onValueChange={(value) => handleRoleChange(user, value as UserRole)}
-                      disabled={busyUserId === user.id}
+                      disabled={busyUserId === user.id || isProtectedOwnSuperAdmin(user)}
                     >
                       <SelectTrigger className="h-8 w-[132px]">
                         <SelectValue />

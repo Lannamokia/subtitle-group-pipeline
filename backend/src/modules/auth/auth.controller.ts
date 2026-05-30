@@ -300,7 +300,7 @@ export async function updateUserRole(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await authService.updateUserRole(String(req.params.id), req.body);
+    const result = await authService.updateUserRole(String(req.params.id), req.body, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);

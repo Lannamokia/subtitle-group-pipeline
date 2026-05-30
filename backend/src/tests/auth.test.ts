@@ -748,6 +748,21 @@ describe("Auth & Registration Tests", () => {
       expectError(protectedRes, 403, "FORBIDDEN");
     });
 
+    it("should prevent super admins from changing their own role", async () => {
+      const superAdmin = await createTestUser({ role: "super_admin" });
+
+      const res = await put(
+        app,
+        `/api/v1/members/${superAdmin.user.id}/role`,
+        { role: "group_admin" },
+        superAdmin.token
+      );
+
+      expectError(res, 403, "FORBIDDEN");
+      const unchanged = await prisma.user.findUnique({ where: { id: superAdmin.user.id } });
+      expect(unchanged!.role).toBe("super_admin");
+    });
+
     it("should prevent supervisors from creating privileged accounts", async () => {
       const supervisor = await createTestUser({ role: "supervisor" });
 
