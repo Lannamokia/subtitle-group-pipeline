@@ -463,7 +463,7 @@ function TemplateFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "编辑模板" : "新建模板"}</DialogTitle>
           <DialogDescription>配置项目模板的所有参数</DialogDescription>
@@ -534,36 +534,40 @@ function TemplateFormDialog({
                     {roleFields.map((field, index) => (
                       <div
                         key={field.id}
-                        className="flex items-center gap-3 p-3 border rounded-lg bg-gray-50/50"
+                        className="grid gap-3 rounded-lg border bg-gray-50/50 p-3 md:grid-cols-[auto_6rem_9rem_minmax(12rem,1fr)_14rem] md:items-end"
                       >
                         <FormField
                           control={form.control}
                           name={`roles.${index}.enabled`}
                           render={({ field }) => (
-                            <FormItem className="flex items-center space-x-2 space-y-0">
+                            <FormItem className="flex items-center space-x-2 space-y-0 md:pb-2">
                               <FormControl>
                                 <Switch checked={field.value} onCheckedChange={field.onChange} />
                               </FormControl>
                             </FormItem>
                           )}
                         />
-                        <span className="text-sm font-medium w-16 shrink-0">
+                        <span className="text-sm font-medium md:pb-2">
                           {getRoleLabel(field.role as TaskRole)}
                         </span>
                         <FormField
                           control={form.control}
                           name={`roles.${index}.slotCount`}
                           render={({ field }) => (
-                            <FormItem className="flex-1">
+                            <FormItem>
+                              <FormLabel>名额</FormLabel>
                               <FormControl>
-                                <Input
-                                  type="number"
-                                  min={1}
-                                  max={20}
-                                  className="w-20"
-                                  {...field}
-                                  onChange={(e) => field.onChange(Number(e.target.value))}
-                                />
+                                <div className="flex items-center rounded-md border bg-white shadow-xs">
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    max={20}
+                                    className="border-0 shadow-none focus-visible:ring-0"
+                                    {...field}
+                                    onChange={(e) => field.onChange(Number(e.target.value))}
+                                  />
+                                  <span className="shrink-0 px-3 text-sm text-gray-500">人</span>
+                                </div>
                               </FormControl>
                             </FormItem>
                           )}
@@ -572,7 +576,8 @@ function TemplateFormDialog({
                           control={form.control}
                           name={`roles.${index}.assignmentStrategy`}
                           render={({ field }) => (
-                            <FormItem className="flex-1">
+                            <FormItem>
+                              <FormLabel>分配方式</FormLabel>
                               <Select value={field.value} onValueChange={field.onChange}>
                                 <FormControl>
                                   <SelectTrigger>
@@ -592,23 +597,32 @@ function TemplateFormDialog({
                             control={form.control}
                             name={`roles.${index}.maxSegmentLength`}
                             render={({ field }) => (
-                              <FormItem className="w-24">
+                              <FormItem>
+                                <FormLabel>每人最长认领时长</FormLabel>
                                 <FormControl>
-                                  <Input
-                                    type="number"
-                                    placeholder="最大字数"
-                                    {...field}
-                                    value={field.value || ""}
-                                    onChange={(e) =>
-                                      field.onChange(
-                                        e.target.value ? Number(e.target.value) : undefined
-                                      )
-                                    }
-                                  />
+                                  <div className="flex items-center rounded-md border bg-white shadow-xs">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      placeholder="例如 300"
+                                      className="border-0 shadow-none focus-visible:ring-0"
+                                      {...field}
+                                      value={field.value || ""}
+                                      onChange={(e) =>
+                                        field.onChange(
+                                          e.target.value ? Number(e.target.value) : undefined
+                                        )
+                                      }
+                                    />
+                                    <span className="shrink-0 px-3 text-sm text-gray-500">秒</span>
+                                  </div>
                                 </FormControl>
                               </FormItem>
                             )}
                           />
+                        )}
+                        {field.role !== "translation" && (
+                          <div className="hidden md:block" aria-hidden="true" />
                         )}
                       </div>
                     ))}
