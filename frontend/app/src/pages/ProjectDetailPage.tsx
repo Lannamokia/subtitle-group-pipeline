@@ -614,13 +614,13 @@ function TasksTab({
 
       {/* Task Detail Sheet */}
       <Sheet open={!!selectedTask} onOpenChange={() => setSelectedTask(null)}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetContent className="w-[min(100vw,560px)] max-w-[100vw] overflow-y-auto px-4 sm:px-6">
           {selectedTask && (
             <>
-              <SheetHeader>
-                <SheetTitle>{selectedTask.name}</SheetTitle>
+              <SheetHeader className="px-0 pr-8">
+                <SheetTitle className="break-words text-xl">{selectedTask.name}</SheetTitle>
               </SheetHeader>
-              <div className="space-y-6 mt-6">
+              <div className="mt-6 min-w-0 space-y-6">
                 <div className="flex items-center gap-3">
                   <StatusBadge status={selectedTask.status} size="md" showIcon />
                   <span className={cn("text-caption px-2 py-0.5 rounded border", getRoleColor(selectedTask.role))}>
@@ -686,11 +686,11 @@ function TasksTab({
                 )}
 
                 {isSupervisor && (
-                  <div className="space-y-2">
+                  <div className="min-w-0 space-y-2">
                     <h4 className="text-sm font-medium text-gray-700">监制指派</h4>
-                    <div className="flex gap-2">
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
                       <Select value={assigneeId} onValueChange={setAssigneeId}>
-                        <SelectTrigger className="flex-1">
+                        <SelectTrigger className="min-w-0 flex-1">
                           <SelectValue placeholder="选择负责人" />
                         </SelectTrigger>
                         <SelectContent>
@@ -701,7 +701,12 @@ function TasksTab({
                           ))}
                         </SelectContent>
                       </Select>
-                      <Button size="sm" onClick={handleAssignTask} disabled={!assigneeId || updating}>
+                      <Button
+                        size="sm"
+                        className="w-full shrink-0 sm:w-auto"
+                        onClick={handleAssignTask}
+                        disabled={!assigneeId || updating}
+                      >
                         <UserCheck className="w-3.5 h-3.5 mr-1" />
                         指派
                       </Button>
