@@ -90,7 +90,9 @@ api.interceptors.response.use(
       window.location.href = '/login';
     }
     if (error.response?.status === 503 && errorCode === 'SETUP_REQUIRED') {
-      window.location.href = '/setup';
+      if (window.location.pathname !== '/setup') {
+        window.location.href = '/setup';
+      }
     }
     if (errorCode === 'DATABASE_CONNECTION_ERROR') {
       toast.error('数据库连接异常，请检查数据库配置', { id: 'database-connection-error' });
@@ -1158,6 +1160,7 @@ export const setupApi = {
 
   complete: (data: {
     database: { provider: "sqlite" | "mysql" | "mariadb" | "postgresql"; url: string };
+    security: { jwt_secret: string };
     admin: { username: string; password: string; nickname?: string; email?: string };
     storage: { name: string; backend_type: "local" | "s3" | "s3_compatible"; config: string; quota_bytes?: number | null };
   }) =>

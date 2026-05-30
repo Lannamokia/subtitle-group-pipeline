@@ -130,7 +130,8 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
   app.use(`${apiPrefix}/setup`, setupRoutes);
 
   app.use(`${apiPrefix}`, (req, res, next) => {
-    if (req.path.startsWith("/setup") || setupState.databaseReady) {
+    const isPublicBrandingRead = req.method === "GET" && req.path === "/system/branding";
+    if (req.path.startsWith("/setup") || setupState.databaseReady || isPublicBrandingRead) {
       next();
       return;
     }

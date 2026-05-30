@@ -20,8 +20,13 @@ export const initialAdminSchema = z.object({
   email: z.string().email().optional(),
 });
 
+export const securityConfigSchema = z.object({
+  jwt_secret: z.string().min(32, "JWT secret must be at least 32 characters").max(512),
+});
+
 export const completeSetupSchema = z.object({
   database: databaseConfigSchema,
+  security: securityConfigSchema,
   admin: initialAdminSchema,
   storage: setupStorageBackendSchema,
 });

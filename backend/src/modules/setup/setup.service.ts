@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import { promisify } from "util";
 import { prisma, configurePrisma, canConnectDatabase } from "../../config/database";
+import { env } from "../../config/env";
 import { AppError } from "../../utils/response";
 import { hashPassword } from "../../utils/password";
 import * as storageService from "../storage/storage.service";
@@ -299,8 +300,10 @@ export async function completeSetup(input: CompleteSetupInput) {
       quotaBytes: input.storage.quota_bytes,
     });
     await executeSql(input.database.url, selectedProvider, sql);
-    updateEnvFile({ DATABASE_URL: input.database.url });
+    updateEnvFile({ DATABASE_URL: input.database.url, JWT_SECRET: input.security.jwt_secret });
     process.env.DATABASE_URL = input.database.url;
+    process.env.JWT_SECRET = input.security.jwt_secret;
+    env.JWT_SECRET = input.security.jwt_secret;
 
     return {
       initialized: true,
@@ -311,8 +314,10 @@ export async function completeSetup(input: CompleteSetupInput) {
     };
   }
 
-  updateEnvFile({ DATABASE_URL: input.database.url });
+  updateEnvFile({ DATABASE_URL: input.database.url, JWT_SECRET: input.security.jwt_secret });
   process.env.DATABASE_URL = input.database.url;
+  process.env.JWT_SECRET = input.security.jwt_secret;
+  env.JWT_SECRET = input.security.jwt_secret;
   await configurePrisma(input.database.url);
 
   const status = await getSetupStatus();

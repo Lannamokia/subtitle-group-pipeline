@@ -13,10 +13,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CheckCircle2, Database, HardDrive, Loader2, UserPlus } from "lucide-react";
+import { CheckCircle2, Database, HardDrive, KeyRound, Loader2, RefreshCw, UserPlus } from "lucide-react";
 
 type DatabaseProvider = "sqlite" | "mysql" | "mariadb" | "postgresql";
 type StorageType = "local" | "s3" | "s3_compatible";
+
+function generateJwtSecret() {
+  const bytes = new Uint8Array(48);
+  window.crypto.getRandomValues(bytes);
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
 
 export function SetupPage() {
   const navigate = useNavigate();
@@ -25,6 +32,7 @@ export function SetupPage() {
   const [completeMessage, setCompleteMessage] = useState<string | null>(null);
   const [provider, setProvider] = useState<DatabaseProvider>("sqlite");
   const [databaseUrl, setDatabaseUrl] = useState("file:./dev.db");
+  const [jwtSecret, setJwtSecret] = useState(() => generateJwtSecret());
   const [admin, setAdmin] = useState({ username: "admin", password: "", nickname: "", email: "" });
   const [storageType, setStorageType] = useState<StorageType>("local");
   const [storage, setStorage] = useState({
@@ -69,6 +77,10 @@ export function SetupPage() {
       toast.error("请填写数据库连接");
       return;
     }
+    if (jwtSecret.trim().length < 32) {
+      toast.error("JWT 密钥至少 32 位");
+      return;
+    }
     if (!admin.username.trim() || !admin.password) {
       toast.error("请填写超级管理员账号和密码");
       return;
@@ -90,6 +102,7 @@ export function SetupPage() {
     try {
       const result = await setupApi.complete({
         database: { provider, url: databaseUrl },
+        security: { jwt_secret: jwtSecret.trim() },
         admin: {
           username: admin.username,
           password: admin.password,
@@ -127,13 +140,13 @@ export function SetupPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-8">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="mx-auto max-w-6xl space-y-6">
         <div>
           <h1 className="text-display text-gray-800">系统初始化</h1>
           <p className="mt-1 text-sm text-gray-500">配置数据库、超级管理员和默认存储后端后开始使用。</p>
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-3">
+        <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
           <SetupStep icon={Database} title="数据库">
             <Label>数据库类型</Label>
             <Select value={provider} onValueChange={(value) => {
@@ -161,6 +174,29 @@ export function SetupPage() {
             <Input value={databaseUrl} onChange={(event) => setDatabaseUrl(event.target.value)} />
             <p className="text-xs leading-5 text-gray-500">
               初始化会按这里选择的类型同步数据库结构，并写入连接参数。MySQL/MariaDB/PostgreSQL 初始化完成后需要重启服务。
+            </p>
+          </SetupStep>
+
+          <SetupStep icon={KeyRound} title="安全密钥">
+            <Label htmlFor="jwt-secret">JWT 密钥</Label>
+            <Input
+              id="jwt-secret"
+              type="password"
+              autoComplete="off"
+              value={jwtSecret}
+              onChange={(event) => setJwtSecret(event.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => setJwtSecret(generateJwtSecret())}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              随机生成 JWT
+            </Button>
+            <p className="text-xs leading-5 text-gray-500">
+              用于签发和校验登录令牌，初始化会写入后端环境配置。请妥善保存，至少 32 位。
             </p>
           </SetupStep>
 

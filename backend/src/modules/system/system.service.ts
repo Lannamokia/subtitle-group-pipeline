@@ -134,6 +134,14 @@ function getDatabaseType(databaseUrl = env.DATABASE_URL): string {
   return "unknown";
 }
 
+function defaultBrandingSettings(): BrandingSettings {
+  return {
+    app_name: DEFAULT_APP_NAME,
+    logo_url: null,
+    logo_updated_at: null,
+  };
+}
+
 async function getDatabaseVersion(databaseType: string): Promise<string | null> {
   if (databaseType === "sqlite") {
     const rows = await prisma.$queryRaw<Array<{ version: string }>>`SELECT sqlite_version() AS version`;
@@ -193,7 +201,11 @@ function toBrandingSettings(record: BrandingRecord): BrandingSettings {
 }
 
 export async function getBrandingSettings(): Promise<BrandingSettings> {
-  return toBrandingSettings(await getOrCreateBrandingRecord());
+  try {
+    return toBrandingSettings(await getOrCreateBrandingRecord());
+  } catch {
+    return defaultBrandingSettings();
+  }
 }
 
 export async function updateBrandingSettings(data: UpdateBrandingInput): Promise<BrandingSettings> {
