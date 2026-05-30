@@ -732,16 +732,21 @@ function TasksTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
           {selectedUnit && (
-            <Button variant="outline" size="sm" onClick={() => onSelectUnit(null)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-center sm:w-auto sm:shrink-0"
+              onClick={() => onSelectUnit(null)}
+            >
               <ArrowLeft className="w-4 h-4 mr-1.5" />
               返回集列表
             </Button>
           )}
-          <div>
-            <h2 className="text-h2 text-gray-800">
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold leading-7 text-gray-800 break-words sm:text-h2">
               {selectedUnit ? getUnitTitle(selectedUnit) : "未分集任务"}
             </h2>
             <p className="mt-1 text-sm text-gray-500">
@@ -749,17 +754,17 @@ function TasksTab({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative max-w-xs">
+        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] lg:w-auto lg:min-w-[360px]">
+          <div className="relative min-w-0 lg:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
               placeholder="搜索任务..."
-              className="pl-9"
+              className="w-full pl-9"
               value={taskFilter}
               onChange={(e) => setTaskFilter(e.target.value)}
             />
           </div>
-          <Button size="sm" onClick={openCreateTaskDialog}>
+          <Button size="sm" className="w-full sm:w-auto" onClick={openCreateTaskDialog}>
             <Plus className="w-4 h-4 mr-1.5" />
             新建任务
           </Button>
