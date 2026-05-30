@@ -6,6 +6,7 @@ import type {
   TaskRole,
   TaskStatus,
   FileType,
+  TimelineEvent,
   TimelineEventType,
   UserRole,
 } from "@/types";
@@ -123,6 +124,89 @@ export function formatDate(date: string | Date, pattern = "yyyy-MM-dd HH:mm"): s
 
 export function formatFullDate(date: string | Date): string {
   return format(new Date(date), "yyyy年M月d日 EEEE", { locale: zhCN });
+}
+
+export function formatTimelineDescription(event: Pick<TimelineEvent, "type" | "description">): string {
+  const description = event.description || TIMELINE_EVENT_MAP[event.type]?.label || "系统动态";
+  const quoted = description.match(/"([^"]+)"/)?.[1];
+
+  switch (event.type) {
+    case "file_uploaded":
+    case "file_upload":
+      if (/^File ".+" was uploaded$/.test(description) && quoted) return `文件「${quoted}」已上传`;
+      if (/^File ".+" received a new version$/.test(description) && quoted) return `文件「${quoted}」已上传新版本`;
+      return description;
+    case "project_created":
+      if (/^Project ".+" was created$/.test(description) && quoted) return `项目「${quoted}」已创建`;
+      if (/^Project ".+" was created from template ".+"$/.test(description)) {
+        const matches = [...description.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+        if (matches.length >= 2) return `项目「${matches[0]}」已从模板「${matches[1]}」创建`;
+      }
+      return description;
+    case "project_archived":
+      if (/^Project ".+" was archived$/.test(description) && quoted) return `项目「${quoted}」已归档`;
+      return description;
+    case "project_restored":
+      if (/^Project ".+" was restored from archive$/.test(description) && quoted) return `项目「${quoted}」已从归档恢复`;
+      if (/^Project ".+" was restored from recycle bin$/.test(description) && quoted) return `项目「${quoted}」已从回收站恢复`;
+      return description;
+    case "project_deleted":
+      if (/^Project ".+" was moved to recycle bin$/.test(description) && quoted) return `项目「${quoted}」已移入回收站`;
+      return description;
+    case "task_created":
+      if (/^Task ".+" was created$/.test(description) && quoted) return `任务「${quoted}」已创建`;
+      return description;
+    case "task_claimed":
+      if (/^Task ".+" was claimed$/.test(description) && quoted) return `任务「${quoted}」已领取`;
+      return description;
+    case "task_assigned":
+      if (/^Task ".+" was assigned$/.test(description) && quoted) return `任务「${quoted}」已指派`;
+      return description;
+    case "task_started":
+      if (/^Task ".+" is now in progress$/.test(description) && quoted) return `任务「${quoted}」已开始处理`;
+      return description;
+    case "task_submitted":
+      if (/^Task ".+" was submitted/.test(description) && quoted) return `任务「${quoted}」已提交审核`;
+      return description;
+    case "task_approved":
+      if (/^Task ".+" was approved$/.test(description) && quoted) return `任务「${quoted}」已通过审核`;
+      return description;
+    case "task_rejected":
+      if (/^Task ".+" was rejected with review comments$/.test(description) && quoted) return `任务「${quoted}」已被驳回并附有审核意见`;
+      return description;
+    case "task_returned":
+      if (/^Task ".+" was returned to the pool$/.test(description) && quoted) return `任务「${quoted}」已退回任务池`;
+      return description;
+    case "task_reset":
+      if (/^Task ".+" was reset to in_progress/.test(description) && quoted) return `任务「${quoted}」已重置为进行中`;
+      if (/^Task ".+" was reset because an upstream task was modified$/.test(description) && quoted) return `任务「${quoted}」因上游任务变更被重置`;
+      return description;
+    case "task_cancelled":
+      if (/^Task ".+" was cancelled/.test(description) && quoted) return `任务「${quoted}」已取消`;
+      return description;
+    case "task_frozen":
+      if (/^Task ".+" was frozen because an upstream task was cancelled$/.test(description) && quoted) return `任务「${quoted}」因上游任务取消被冻结`;
+      return description;
+    case "member_removed":
+      return description.replace(" was removed from the project", " 已从项目中移除");
+    case "join_request_created":
+      return description.replace(/^A new join request was submitted for role (.+)$/, "新的加入申请已提交，申请角色：$1");
+    case "join_request_approved":
+      return description.replace(/^Join request for role (.+) was approved$/, "角色「$1」的加入申请已通过");
+    case "join_request_rejected":
+      return description.replace(/^Join request for role (.+) was rejected$/, "角色「$1」的加入申请已拒绝");
+    case "wiki_updated":
+      if (/^Wiki ".+" was updated/.test(description) && quoted) return `Wiki「${quoted}」已更新`;
+      return description;
+    case "wiki_approved":
+      if (/^Wiki ".+" changes were approved$/.test(description) && quoted) return `Wiki「${quoted}」的变更已通过`;
+      return description;
+    case "wiki_rejected":
+      if (/^Wiki ".+" changes were rejected/.test(description) && quoted) return `Wiki「${quoted}」的变更已驳回`;
+      return description;
+    default:
+      return description;
+  }
 }
 
 // ========== Color Helpers ==========

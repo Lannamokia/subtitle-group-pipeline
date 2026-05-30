@@ -548,8 +548,8 @@ export async function uploadFile(
   await timelineService.createTimelineEvent({
     project_id: data.project_id,
     event_type: TimelineEventType.file_uploaded,
-    title: "File uploaded",
-    description: `File "${file.name}" was uploaded`,
+    title: "文件已上传",
+    description: `文件「${file.name}」已上传`,
     actor_id: uploaderId,
     metadata: {
       file_id: file.id,
@@ -685,8 +685,8 @@ export async function replaceFile(
   await timelineService.createTimelineEvent({
     project_id: file.project_id,
     event_type: TimelineEventType.file_uploaded,
-    title: "File replaced",
-    description: `File "${updatedFile.name}" received a new version`,
+    title: "文件已上传新版本",
+    description: `文件「${updatedFile.name}」已上传新版本`,
     actor_id: uploaderId,
     metadata: {
       file_id: fileId,
@@ -1477,8 +1477,8 @@ export async function createLinkAsset(
   await timelineService.createTimelineEvent({
     project_id: projectId,
     event_type: TimelineEventType.file_uploaded,
-    title: "Link asset created",
-    description: `Link asset "${link.description || link.url}" was added`,
+    title: "链接资产已添加",
+    description: `链接资产「${link.description || link.url}」已添加`,
     actor_id: creatorId,
     metadata: {
       link_id: link.id,

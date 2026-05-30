@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { cn, formatRelativeTime, TIMELINE_EVENT_MAP } from "@/lib/utils";
+import { cn, formatRelativeTime, formatTimelineDescription, TIMELINE_EVENT_MAP } from "@/lib/utils";
 import { timelineApi } from "@/lib/api";
 import type { TimelineEvent as TimelineEventType, TimelineEventType as EventType } from "@/types";
 import {
@@ -77,7 +77,7 @@ export function TimelineEventItem({ event, compact = false }: TimelineEventProps
       {/* Content */}
       <div className={cn("flex-1 min-w-0 pb-3", compact && "pb-2")}>
         <p className={cn("text-gray-700", compact ? "text-xs" : "text-sm")}>
-          {event.description}
+          {formatTimelineDescription(event)}
         </p>
         <div className="flex items-center gap-2 mt-1">
           {event.user && (

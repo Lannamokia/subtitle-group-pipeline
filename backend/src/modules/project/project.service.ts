@@ -129,8 +129,8 @@ export async function createProject(
   await timelineService.createTimelineEvent({
     project_id: project.id,
     event_type: TimelineEventType.project_created,
-    title: "Project created",
-    description: `Project "${project.name}" was created`,
+    title: "项目已创建",
+    description: `项目「${project.name}」已创建`,
     actor_id: ownerId,
   });
 
@@ -305,8 +305,8 @@ export async function createProjectFromTemplate(
   await timelineService.createTimelineEvent({
     project_id: project.id,
     event_type: TimelineEventType.project_created,
-    title: "Project created from template",
-    description: `Project "${project.name}" was created from template "${template.name}"`,
+    title: "项目已从模板创建",
+    description: `项目「${project.name}」已从模板「${template.name}」创建`,
     actor_id: ownerId,
     metadata: { template_id: template.id },
   });
@@ -584,8 +584,8 @@ export async function archiveProject(
   await timelineService.createTimelineEvent({
     project_id: projectId,
     event_type: TimelineEventType.project_archived,
-    title: "Project archived",
-    description: `Project "${project.name}" was archived`,
+    title: "项目已归档",
+    description: `项目「${project.name}」已归档`,
     actor_id: actorId,
   });
 
@@ -645,8 +645,8 @@ export async function unarchiveProject(
   await timelineService.createTimelineEvent({
     project_id: projectId,
     event_type: TimelineEventType.project_unarchived,
-    title: "Project unarchived",
-    description: `Project "${project.name}" was restored from archive`,
+    title: "项目已取消归档",
+    description: `项目「${project.name}」已从归档恢复`,
     actor_id: actorId,
   });
 
@@ -708,8 +708,8 @@ export async function softDeleteProject(
   await timelineService.createTimelineEvent({
     project_id: projectId,
     event_type: TimelineEventType.project_deleted,
-    title: "Project deleted",
-    description: `Project "${project.name}" was moved to recycle bin`,
+    title: "项目已移入回收站",
+    description: `项目「${project.name}」已移入回收站`,
     actor_id: actorId,
   });
 
@@ -766,8 +766,8 @@ export async function restoreProject(
   await timelineService.createTimelineEvent({
     project_id: projectId,
     event_type: TimelineEventType.project_restored,
-    title: "Project restored",
-    description: `Project "${project.name}" was restored from recycle bin`,
+    title: "项目已从回收站恢复",
+    description: `项目「${project.name}」已从回收站恢复`,
     actor_id: actorId,
   });
 
