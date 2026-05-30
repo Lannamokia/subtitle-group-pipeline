@@ -2403,7 +2403,7 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
             <div>
               <h3 className="text-sm font-medium text-gray-800">分集配置</h3>
               <p className="mt-1 text-xs text-gray-500">
-                开项后仍可增加分集；新增分集会按项目模板自动生成任务。已有任务或认领的分集不会被直接删除。
+                开项后仍可增加分集；任务由监制在对应分集中手动创建。删除分集前会检查文件和任务内容。
               </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

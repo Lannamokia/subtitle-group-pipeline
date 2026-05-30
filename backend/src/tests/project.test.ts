@@ -86,7 +86,7 @@ describe("Project & Workflow Tests", () => {
       expectError(res, 400, "VALIDATION_ERROR");
     });
 
-    it("should increase project units and create template tasks for new episodes", async () => {
+    it("should increase project units without creating default tasks", async () => {
       const { token } = await createTestUser();
       const template = await createTestTemplate({
         roles: [
@@ -129,16 +129,13 @@ describe("Project & Workflow Tests", () => {
       });
       expect(units.map((unit) => unit.unit_number)).toEqual([1, 2, 3]);
 
-      const thirdUnitTasks = await prisma.task.findMany({
-        where: { project_id: createRes.body.data.id, unit_id: units[2].id },
-        orderBy: { created_at: "asc" },
+      const tasks = await prisma.task.findMany({
+        where: { project_id: createRes.body.data.id },
       });
-      expect(thirdUnitTasks).toHaveLength(3);
-      expect(thirdUnitTasks.filter((task) => task.role === "translation")).toHaveLength(2);
-      expect(thirdUnitTasks.filter((task) => task.status === "claimable")).toHaveLength(2);
+      expect(tasks).toHaveLength(0);
     });
 
-    it("should reduce project units by deleting empty template tasks", async () => {
+    it("should reduce project units without requiring default tasks", async () => {
       const { token } = await createTestUser();
       const template = await createTestTemplate();
       const backend = await createTestStorageBackend();
@@ -178,7 +175,7 @@ describe("Project & Workflow Tests", () => {
         where: { project_id: createRes.body.data.id },
       });
       expect(units).toHaveLength(1);
-      expect(tasks.every((task) => task.unit_id === units[0].id)).toBe(true);
+      expect(tasks).toHaveLength(0);
     });
 
     it("should reduce project units by deleting selected episodes instead of only the tail", async () => {
@@ -247,8 +244,12 @@ describe("Project & Workflow Tests", () => {
       const removedUnit = await prisma.projectUnit.findFirstOrThrow({
         where: { project_id: createRes.body.data.id, unit_number: 2 },
       });
-      const removedTask = await prisma.task.findFirstOrThrow({
-        where: { project_id: createRes.body.data.id, unit_id: removedUnit.id, role: "translation" },
+      const removedTask = await createTestTask({
+        project_id: createRes.body.data.id,
+        unit_id: removedUnit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: user.id,
       });
       await prisma.translationClaim.create({
         data: {
@@ -298,8 +299,12 @@ describe("Project & Workflow Tests", () => {
       const removedUnit = await prisma.projectUnit.findFirstOrThrow({
         where: { project_id: createRes.body.data.id, unit_number: 1 },
       });
-      const removedTask = await prisma.task.findFirstOrThrow({
-        where: { project_id: createRes.body.data.id, unit_id: removedUnit.id, role: "translation" },
+      const removedTask = await createTestTask({
+        project_id: createRes.body.data.id,
+        unit_id: removedUnit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: user.id,
       });
       const { file } = await createTestFile({
         project_id: createRes.body.data.id,
@@ -460,8 +465,8 @@ describe("Project & Workflow Tests", () => {
       expect(JSON.parse(policy!.extension_whitelist!)).toEqual([".ass"]);
     });
 
-    it("should create tasks for each unit based on template roles", async () => {
-      const { user, token } = await createTestUser();
+    it("should snapshot template roles without creating default tasks", async () => {
+      const { token } = await createTestUser();
       const template = await createTestTemplate({
         roles: [
           { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
@@ -491,26 +496,16 @@ describe("Project & Workflow Tests", () => {
       const tasks = await prisma.task.findMany({
         where: { project_id: res.body.data.id },
       });
+      const project = await prisma.project.findUnique({
+        where: { id: res.body.data.id },
+      });
 
-      // 3 units * 3 enabled roles (source=1, translation=2, encoding=1) = 12 tasks
-      expect(tasks.length).toBe(12);
-
-      // Check translation tasks are claimable
-      const translationTasks = tasks.filter((t) => t.role === "translation");
-      expect(translationTasks.length).toBe(6); // 3 units * 2 slots
-      expect(translationTasks.every((t) => t.status === "claimable")).toBe(true);
-
-      // Check source tasks are pending_publish
-      const sourceTasks = tasks.filter((t) => t.role === "source");
-      expect(sourceTasks.every((t) => t.status === "pending_publish")).toBe(true);
-
-      // No release tasks since disabled
-      const releaseTasks = tasks.filter((t) => t.role === "release");
-      expect(releaseTasks.length).toBe(0);
+      expect(tasks).toHaveLength(0);
+      expect(JSON.parse(project!.workflow_config!)).toEqual(JSON.parse(template.roles));
     });
 
-    it("should create serial dependencies between tasks", async () => {
-      const { user, token } = await createTestUser();
+    it("should not create task dependencies before supervisors create tasks", async () => {
+      const { token } = await createTestUser();
       const template = await createTestTemplate({
         roles: [
           { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
@@ -542,8 +537,7 @@ describe("Project & Workflow Tests", () => {
         },
       });
 
-      // 1 unit * 3 roles = 3 tasks, with 2 dependencies (serial chain)
-      expect(dependencies.length).toBe(2);
+      expect(dependencies).toHaveLength(0);
     });
   });
 

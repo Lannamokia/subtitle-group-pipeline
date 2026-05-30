@@ -1,6 +1,6 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
-import { TaskRole, TaskStatus, ProjectStatus, TimelineEventType } from "@prisma/client";
+import { TaskStatus, TimelineEventType } from "@prisma/client";
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
@@ -17,16 +17,6 @@ import type {
   ProjectQueryInput,
   UpdateJoinRequestInput,
 } from "./project.schema";
-
-// Serial pipeline order for task creation
-const ROLE_PIPELINE: TaskRole[] = [
-  "source",
-  "timing",
-  "translation",
-  "post_production",
-  "encoding",
-  "release",
-];
 
 const UNIT_DELETE_ACTIVE_TASK_STATUSES: TaskStatus[] = [
   "assigned",
@@ -150,71 +140,6 @@ function stringifyPolicyList(policy: Record<string, unknown>, ...keys: string[])
   return null;
 }
 
-function parseTemplateRoles(project: { workflow_config: string | null; template?: { roles: string } | null }) {
-  const rawRoles = project.workflow_config ?? project.template?.roles ?? "[]";
-  try {
-    return JSON.parse(rawRoles) as Array<{
-      role: TaskRole;
-      enabled: boolean;
-      slotCount: number;
-      assignmentStrategy: "manual" | "open_claim";
-    }>;
-  } catch {
-    return [];
-  }
-}
-
-async function createTemplateTasksForUnit(
-  projectId: string,
-  unit: { id: string; season_number: number; unit_number: number; title: string | null },
-  ownerId: string,
-  roles: Array<{
-    role: TaskRole;
-    enabled: boolean;
-    slotCount: number;
-    assignmentStrategy: "manual" | "open_claim";
-  }>
-) {
-  const enabledRoles = roles.filter((role) => role.enabled).map((role) => role.role);
-  let previousTaskId: string | null = null;
-
-  for (const role of ROLE_PIPELINE) {
-    if (!enabledRoles.includes(role)) continue;
-
-    const roleConfig = roles.find((config) => config.role === role);
-    const slotCount = roleConfig?.slotCount || 1;
-    const assignmentStrategy = roleConfig?.assignmentStrategy || "manual";
-    const initialStatus: TaskStatus =
-      assignmentStrategy === "open_claim" ? "claimable" : "pending_publish";
-
-    for (let slot = 0; slot < slotCount; slot++) {
-      const task = await prisma.task.create({
-        data: {
-          project_id: projectId,
-          unit_id: unit.id,
-          title: `${role.replace("_", " ")} - ${unit.title || `S${unit.season_number}E${unit.unit_number}`}${slotCount > 1 ? ` (${slot + 1})` : ""}`,
-          description: `Task for ${role} on ${unit.title || `S${unit.season_number}E${unit.unit_number}`}`,
-          role,
-          status: initialStatus,
-          creator_id: ownerId,
-        },
-      });
-
-      if (previousTaskId) {
-        await prisma.taskDependency.create({
-          data: {
-            task_id: task.id,
-            depends_on_id: previousTaskId,
-            dependency_type: "finish_to_start",
-          },
-        });
-      }
-
-      previousTaskId = task.id;
-    }
-  }
-}
-
 export async function createProject(
   ownerId: string,
   data: CreateProjectInput
@@ -293,21 +218,6 @@ export async function createProjectFromTemplate(
     throw new AppError("Storage backend is not active", "BAD_REQUEST", 400);
   }
 
-  // Parse template roles
-  let templateRoles: Array<{
-    role: TaskRole;
-    enabled: boolean;
-    slotCount: number;
-    assignmentStrategy: "manual" | "open_claim";
-    maxSegmentLength?: number;
-    requiredTagIds?: string[];
-  }> = [];
-  try {
-    templateRoles = JSON.parse(template.roles);
-  } catch {
-    templateRoles = [];
-  }
-
   // Create project (inherit delivery checklist from template)
   const project = await prisma.project.create({
     data: {
@@ -360,12 +270,10 @@ export async function createProjectFromTemplate(
     },
   });
 
-  // Create project units for each season
-  const units: Array<{ id: string; season_number: number; unit_number: number; title: string | null }> = [];
   for (let season = 1; season <= data.season_count; season++) {
     for (let unitNum = 1; unitNum <= data.units_per_season; unitNum++) {
       const unitTitle = season === 1 ? `Episode ${unitNum}` : `Season ${season} Episode ${unitNum}`;
-      const unit = await prisma.projectUnit.create({
+      await prisma.projectUnit.create({
         data: {
           project_id: project.id,
           season_number: season,
@@ -374,13 +282,7 @@ export async function createProjectFromTemplate(
           episode_length: data.episode_length,
         },
       });
-      units.push(unit);
     }
-  }
-
-  // Create task graph for each unit based on template roles
-  for (const unit of units) {
-    await createTemplateTasksForUnit(project.id, unit, ownerId, templateRoles);
   }
 
   await timelineService.createTimelineEvent({
@@ -1144,7 +1046,6 @@ export async function updateProjectUnits(
 ) {
   const project = await prisma.project.findUnique({
     where: { id: projectId, deleted_at: null },
-    include: { template: { select: { roles: true } } },
   });
 
   if (!project) {
@@ -1316,7 +1217,6 @@ export async function updateProjectUnits(
     );
   }
 
-  const roles = parseTemplateRoles(project);
   const createdUnits: Array<{ id: string; season_number: number; unit_number: number; title: string | null }> = [];
   const remainingUnitNumbers = new Set(
     existingUnits
@@ -1418,10 +1318,6 @@ export async function updateProjectUnits(
       createdUnits.push(unit);
     }
   });
-
-  for (const unit of createdUnits) {
-    await createTemplateTasksForUnit(projectId, unit, project.owner_id, roles);
-  }
 
   if (data.episode_length !== undefined) {
     await prisma.projectUnit.updateMany({
