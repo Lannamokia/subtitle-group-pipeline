@@ -12,6 +12,21 @@ import type {
 // Adapter instance cache
 const adapterCache = new Map<string, LocalAdapter | S3Adapter>();
 
+type StorageBackendRecord = Awaited<ReturnType<typeof prisma.storageBackend.findFirst>>;
+
+function toNumber(value: bigint | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  return typeof value === "bigint" ? Number(value) : value;
+}
+
+export function serializeStorageBackend<T extends NonNullable<StorageBackendRecord>>(backend: T) {
+  return {
+    ...backend,
+    quota_bytes: toNumber(backend.quota_bytes),
+    used_bytes: toNumber(backend.used_bytes) ?? 0,
+  };
+}
+
 export function getAdapterForBackend(backendId: string): LocalAdapter | S3Adapter {
   const cached = adapterCache.get(backendId);
   if (cached) {
@@ -174,7 +189,7 @@ export async function getStorageBackends(query: StorageQueryInput) {
   ]);
 
   return {
-    backends,
+    backends: backends.map(serializeStorageBackend),
     meta: {
       page,
       pageSize,
@@ -204,11 +219,13 @@ export async function createStorageBackend(data: CreateStorageBackendInput) {
       backend_type: data.backend_type,
       config: data.config,
       is_default: data.is_default,
-      quota_bytes: data.quota_bytes,
+      quota_bytes: data.quota_bytes === null || data.quota_bytes === undefined
+        ? data.quota_bytes
+        : BigInt(data.quota_bytes),
     },
   });
 
-  return backend;
+  return serializeStorageBackend(backend);
 }
 
 export async function updateStorageBackend(
@@ -245,7 +262,9 @@ export async function updateStorageBackend(
       backend_type: data.backend_type,
       config: data.config,
       is_default: data.is_default,
-      quota_bytes: data.quota_bytes,
+      quota_bytes: data.quota_bytes === null || data.quota_bytes === undefined
+        ? data.quota_bytes
+        : BigInt(data.quota_bytes),
       is_active: data.is_active,
     },
   });
@@ -253,7 +272,7 @@ export async function updateStorageBackend(
   // Clear adapter cache since config may have changed
   clearAdapterCache(backendId);
 
-  return updated;
+  return serializeStorageBackend(updated);
 }
 
 export async function deleteStorageBackend(backendId: string) {
@@ -296,7 +315,7 @@ export async function getBackendById(backendId: string) {
     throw new AppError("Storage backend not found", "NOT_FOUND", 404);
   }
 
-  return backend;
+  return serializeStorageBackend(backend);
 }
 
 export async function getDefaultBackend() {
@@ -337,18 +356,20 @@ export async function updateUsage(
     throw new AppError("Storage backend not found", "NOT_FOUND", 404);
   }
 
-  const newUsed = Math.max(0, backend.used_bytes + sizeDelta);
+  const currentUsed = typeof backend.used_bytes === "bigint" ? backend.used_bytes : BigInt(backend.used_bytes);
+  const newUsed = currentUsed + BigInt(sizeDelta);
+  const safeUsed = newUsed > 0n ? newUsed : 0n;
   const newFileCount = Math.max(0, backend.file_count + fileCountDelta);
 
   await prisma.storageBackend.update({
     where: { id: backendId },
     data: {
-      used_bytes: newUsed,
+      used_bytes: safeUsed,
       file_count: newFileCount,
     },
   });
 
-  return { used_bytes: newUsed, file_count: newFileCount };
+  return { used_bytes: Number(safeUsed), file_count: newFileCount };
 }
 
 export async function checkQuota(
@@ -363,7 +384,7 @@ export async function checkQuota(
     return true; // No quota = unlimited
   }
 
-  return (backend.used_bytes + additionalBytes) <= backend.quota_bytes;
+  return backend.used_bytes + BigInt(additionalBytes) <= backend.quota_bytes;
 }
 
 // ==================== AVATAR UPLOAD ====================
@@ -483,8 +504,8 @@ export async function getStorageStats() {
     },
   });
 
-  const totalQuota = backends.reduce((sum, b) => sum + (b.quota_bytes || 0), 0);
-  const totalUsed = backends.reduce((sum, b) => sum + b.used_bytes, 0);
+  const totalQuota = backends.reduce((sum, b) => sum + Number(b.quota_bytes || 0n), 0);
+  const totalUsed = backends.reduce((sum, b) => sum + Number(b.used_bytes), 0);
   const backendCount = backends.length;
 
   return {

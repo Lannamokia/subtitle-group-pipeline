@@ -247,7 +247,7 @@ describe("User Profile & Storage Tests", () => {
       const updated = await prisma.storageBackend.findUnique({
         where: { id: backend.id },
       });
-      expect(updated!.used_bytes).toBe(1024);
+      expect(updated!.used_bytes).toBe(1024n);
       expect(updated!.file_count).toBe(1);
 
       await storageService.updateUsage(backend.id, -512, -1);
@@ -255,7 +255,7 @@ describe("User Profile & Storage Tests", () => {
       const decreased = await prisma.storageBackend.findUnique({
         where: { id: backend.id },
       });
-      expect(decreased!.used_bytes).toBe(512);
+      expect(decreased!.used_bytes).toBe(512n);
       expect(decreased!.file_count).toBe(0);
     });
 
@@ -270,7 +270,7 @@ describe("User Profile & Storage Tests", () => {
       const updated = await prisma.storageBackend.findUnique({
         where: { id: backend.id },
       });
-      expect(updated!.used_bytes).toBe(0);
+      expect(updated!.used_bytes).toBe(0n);
       expect(updated!.file_count).toBe(0);
     });
 
@@ -491,9 +491,9 @@ describe("User Profile & Storage Tests", () => {
       const b1 = await prisma.storageBackend.findUnique({ where: { id: backend1.id } });
       const b2 = await prisma.storageBackend.findUnique({ where: { id: backend2.id } });
 
-      expect(b1!.used_bytes).toBe(1000);
+      expect(b1!.used_bytes).toBe(1000n);
       expect(b1!.file_count).toBe(5);
-      expect(b2!.used_bytes).toBe(2000);
+      expect(b2!.used_bytes).toBe(2000n);
       expect(b2!.file_count).toBe(10);
     });
   });

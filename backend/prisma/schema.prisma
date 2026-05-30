@@ -942,8 +942,8 @@ model StorageBackend {
   config            String      // JSON: { endpoint, region, bucket, credentials, etc. }
   is_default        Boolean     @default(false)
   is_active         Boolean     @default(true)
-  quota_bytes       Int?        // null = unlimited
-  used_bytes        Int         @default(0)
+  quota_bytes       BigInt?     // null = unlimited
+  used_bytes        BigInt      @default(0)
   file_count        Int         @default(0)
   last_health_check DateTime?
   health_status     String?     // healthy, degraded, unavailable
