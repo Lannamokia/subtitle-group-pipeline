@@ -116,6 +116,7 @@ const WIKI_PAGE_TITLES: Record<WikiPageKey, string> = {
 
 const DEFAULT_WIKI_PAGE_IDS = Object.keys(WIKI_PAGE_TITLES) as WikiPageKey[];
 const UNASSIGNED_SELECT_VALUE = "__unassigned__";
+const UNASSIGNED_UNIT_SELECT_VALUE = "__project__";
 
 const KANBAN_COLUMNS: { id: string; title: string; statuses: TaskStatus[] }[] = [
   { id: "todo", title: "待处理", statuses: ["pending_publish", "claimable", "assigned"] },
@@ -364,16 +365,24 @@ function EpisodeListView({
   units,
   tasks,
   onSelectUnit,
+  onCreateTask,
 }: {
   units: ProjectUnit[];
   tasks: Task[];
   onSelectUnit: (unitId: string) => void;
+  onCreateTask: () => void;
 }) {
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-h2 text-gray-800">分集列表</h2>
-        <p className="mt-1 text-sm text-gray-500">先选择分集，再进入该集的任务看板。</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-h2 text-gray-800">分集列表</h2>
+          <p className="mt-1 text-sm text-gray-500">先选择分集，再进入该集的任务看板。</p>
+        </div>
+        <Button size="sm" onClick={onCreateTask}>
+          <Plus className="w-4 h-4 mr-1.5" />
+          新建任务
+        </Button>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {units.map((unit) => {
@@ -437,6 +446,7 @@ function TasksTab({
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskUnitId, setNewTaskUnitId] = useState(UNASSIGNED_UNIT_SELECT_VALUE);
   const [newTaskRole, setNewTaskRole] = useState<TaskRole>("translation");
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState("");
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
@@ -509,12 +519,16 @@ function TasksTab({
       toast.error("任务标题不能为空");
       return;
     }
+    if (units.length > 0 && newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE) {
+      toast.error("请选择任务归属分集");
+      return;
+    }
 
     setCreating(true);
     try {
       await taskApi.createTask({
         project_id: project.id,
-        unit_id: selectedUnitId,
+        unit_id: newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId,
         title: newTaskTitle.trim(),
         role: newTaskRole,
         assignee_id: newTaskAssigneeId || null,
@@ -524,6 +538,7 @@ function TasksTab({
       toast.success("任务已创建");
       setCreateOpen(false);
       setNewTaskTitle("");
+      setNewTaskUnitId(selectedUnitId ?? units[0]?.id ?? UNASSIGNED_UNIT_SELECT_VALUE);
       setNewTaskRole("translation");
       setNewTaskAssigneeId("");
       setNewTaskDueDate("");
@@ -536,13 +551,122 @@ function TasksTab({
     }
   };
 
+  const openCreateTaskDialog = () => {
+    setNewTaskUnitId(selectedUnitId ?? units[0]?.id ?? UNASSIGNED_UNIT_SELECT_VALUE);
+    setCreateOpen(true);
+  };
+
+  const createTaskDialog = (
+    <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>新建任务</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">任务标题</label>
+            <Input
+              value={newTaskTitle}
+              onChange={(event) => setNewTaskTitle(event.target.value)}
+              placeholder="输入任务标题"
+            />
+          </div>
+          {units.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">归属分集</label>
+              <Select value={newTaskUnitId} onValueChange={setNewTaskUnitId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择任务归属分集" />
+                </SelectTrigger>
+                <SelectContent>
+                  {units.map((unit) => (
+                    <SelectItem key={unit.id} value={unit.id}>
+                      {getUnitTitle(unit)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">任务角色</label>
+              <Select value={newTaskRole} onValueChange={(value) => setNewTaskRole(value as TaskRole)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["source", "timing", "translation", "post_production", "encoding", "release", "supervisor"].map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {getRoleLabel(role as TaskRole)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">负责人</label>
+              <Select
+                value={newTaskAssigneeId || UNASSIGNED_SELECT_VALUE}
+                onValueChange={(value) =>
+                  setNewTaskAssigneeId(value === UNASSIGNED_SELECT_VALUE ? "" : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="暂不分配" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNASSIGNED_SELECT_VALUE}>暂不分配</SelectItem>
+                  {project.members.map((member) => (
+                    <SelectItem key={member.user.id} value={member.user.id}>
+                      {member.user.nickname || member.user.username} · {getRoleLabel(member.role)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">截止日期</label>
+            <Input
+              type="datetime-local"
+              value={newTaskDueDate}
+              onChange={(event) => setNewTaskDueDate(event.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">描述</label>
+            <Textarea
+              value={newTaskDescription}
+              onChange={(event) => setNewTaskDescription(event.target.value)}
+              placeholder="任务说明（可选）"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+            取消
+          </Button>
+          <Button onClick={handleCreateTask} disabled={creating}>
+            {creating && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+            创建任务
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   if (!selectedUnitId && units.length > 0) {
     return (
-      <EpisodeListView
-        units={units}
-        tasks={tasks}
-        onSelectUnit={onSelectUnit}
-      />
+      <>
+        <EpisodeListView
+          units={units}
+          tasks={tasks}
+          onSelectUnit={onSelectUnit}
+          onCreateTask={openCreateTaskDialog}
+        />
+        {createTaskDialog}
+      </>
     );
   }
 
@@ -575,7 +699,7 @@ function TasksTab({
               onChange={(e) => setTaskFilter(e.target.value)}
             />
           </div>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button size="sm" onClick={openCreateTaskDialog}>
             <Plus className="w-4 h-4 mr-1.5" />
             新建任务
           </Button>
@@ -810,86 +934,7 @@ function TasksTab({
         </SheetContent>
       </Sheet>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>新建任务</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">任务标题</label>
-              <Input
-                value={newTaskTitle}
-                onChange={(event) => setNewTaskTitle(event.target.value)}
-                placeholder="输入任务标题"
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">任务角色</label>
-                <Select value={newTaskRole} onValueChange={(value) => setNewTaskRole(value as TaskRole)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["source", "timing", "translation", "post_production", "encoding", "release", "supervisor"].map((role) => (
-                      <SelectItem key={role} value={role}>
-                        {getRoleLabel(role as TaskRole)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">负责人</label>
-                <Select
-                  value={newTaskAssigneeId || UNASSIGNED_SELECT_VALUE}
-                  onValueChange={(value) =>
-                    setNewTaskAssigneeId(value === UNASSIGNED_SELECT_VALUE ? "" : value)
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="暂不分配" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={UNASSIGNED_SELECT_VALUE}>暂不分配</SelectItem>
-                    {project.members.map((member) => (
-                      <SelectItem key={member.user.id} value={member.user.id}>
-                        {member.user.nickname || member.user.username} · {getRoleLabel(member.role)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">截止日期</label>
-              <Input
-                type="datetime-local"
-                value={newTaskDueDate}
-                onChange={(event) => setNewTaskDueDate(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">描述</label>
-              <Textarea
-                value={newTaskDescription}
-                onChange={(event) => setNewTaskDescription(event.target.value)}
-                placeholder="任务说明（可选）"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleCreateTask} disabled={creating}>
-              {creating && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
-              创建任务
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {createTaskDialog}
     </div>
   );
 }

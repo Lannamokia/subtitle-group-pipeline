@@ -1102,11 +1102,37 @@ export async function updateProjectUnits(
 
   const existingByNumber = new Map(existingUnits.map((unit) => [unit.unit_number, unit]));
   const unitsToDelete = existingUnits.filter((unit) => unit.unit_number > data.units_per_season);
-  const blockingUnit = unitsToDelete.find((unit) => unit._count.tasks > 0 || unit._count.claims > 0);
+  const unitIdsToDelete = unitsToDelete.map((unit) => unit.id);
+  const tasksToDelete = unitIdsToDelete.length > 0
+    ? await prisma.task.findMany({
+        where: { unit_id: { in: unitIdsToDelete } },
+        include: {
+          _count: {
+            select: {
+              claims: true,
+              submissions: true,
+              reviews: true,
+              comments: true,
+              notifications: true,
+            },
+          },
+        },
+      })
+    : [];
+  const blockingTask = tasksToDelete.find((task) =>
+    Boolean(task.assignee_id) ||
+    !["pending_publish", "claimable"].includes(task.status) ||
+    Boolean(task.started_at || task.submitted_at || task.completed_at || task.cancelled_at || task.frozen_at) ||
+    task._count.claims > 0 ||
+    task._count.submissions > 0 ||
+    task._count.reviews > 0 ||
+    task._count.comments > 0 ||
+    task._count.notifications > 0
+  );
 
-  if (blockingUnit) {
+  if (blockingTask || unitsToDelete.some((unit) => unit._count.claims > 0)) {
     throw new AppError(
-      "Cannot reduce episode count because removed episodes already contain tasks or claims",
+      "Cannot reduce episode count because removed episodes already contain active work",
       "BAD_REQUEST",
       400
     );
@@ -1117,6 +1143,20 @@ export async function updateProjectUnits(
 
   await prisma.$transaction(async (tx) => {
     if (unitsToDelete.length > 0) {
+      const taskIdsToDelete = tasksToDelete.map((task) => task.id);
+      if (taskIdsToDelete.length > 0) {
+        await tx.taskDependency.deleteMany({
+          where: {
+            OR: [
+              { task_id: { in: taskIdsToDelete } },
+              { depends_on_id: { in: taskIdsToDelete } },
+            ],
+          },
+        });
+        await tx.task.deleteMany({
+          where: { id: { in: taskIdsToDelete } },
+        });
+      }
       await tx.projectUnit.deleteMany({
         where: { id: { in: unitsToDelete.map((unit) => unit.id) } },
       });

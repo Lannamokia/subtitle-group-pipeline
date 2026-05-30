@@ -138,7 +138,7 @@ describe("Project & Workflow Tests", () => {
       expect(thirdUnitTasks.filter((task) => task.status === "claimable")).toHaveLength(2);
     });
 
-    it("should reject reducing episode count when removed episodes contain tasks", async () => {
+    it("should reduce project units by deleting empty template tasks", async () => {
       const { token } = await createTestUser();
       const template = await createTestTemplate();
       const backend = await createTestStorageBackend();
@@ -157,6 +157,66 @@ describe("Project & Workflow Tests", () => {
         token
       );
       expectSuccess(createRes, 201);
+
+      const resizeRes = await put(
+        app,
+        `/api/v1/projects/${createRes.body.data.id}/units/count`,
+        {
+          season_number: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+
+      expectSuccess(resizeRes, 200);
+      expect(resizeRes.body.data).toHaveLength(1);
+
+      const units = await prisma.projectUnit.findMany({
+        where: { project_id: createRes.body.data.id },
+      });
+      const tasks = await prisma.task.findMany({
+        where: { project_id: createRes.body.data.id },
+      });
+      expect(units).toHaveLength(1);
+      expect(tasks.every((task) => task.unit_id === units[0].id)).toBe(true);
+    });
+
+    it("should reject reducing episode count when removed episodes contain active work", async () => {
+      const { user, token } = await createTestUser();
+      const template = await createTestTemplate();
+      const backend = await createTestStorageBackend();
+
+      const createRes = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Protected Active Episodes",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          qq_group_id: "123456789",
+          season_count: 1,
+          units_per_season: 2,
+        },
+        token
+      );
+      expectSuccess(createRes, 201);
+
+      const removedUnit = await prisma.projectUnit.findFirstOrThrow({
+        where: { project_id: createRes.body.data.id, unit_number: 2 },
+      });
+      const removedTask = await prisma.task.findFirstOrThrow({
+        where: { project_id: createRes.body.data.id, unit_id: removedUnit.id, role: "translation" },
+      });
+      await prisma.translationClaim.create({
+        data: {
+          task_id: removedTask.id,
+          unit_id: removedUnit.id,
+          user_id: user.id,
+          segment_start: 0,
+          segment_end: 120,
+          status: "pending",
+        },
+      });
 
       const resizeRes = await put(
         app,
