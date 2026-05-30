@@ -78,6 +78,12 @@ export const createUnitSchema = z.object({
   description: z.string().max(2000).optional().nullable(),
 });
 
+export const updateProjectUnitsSchema = z.object({
+  season_number: z.number().int().min(1).default(1),
+  units_per_season: z.number().int().min(1).max(999),
+  episode_length: z.number().int().min(1).optional().nullable(),
+});
+
 export const joinRequestSchema = z.object({
   role: z.nativeEnum(TaskRole),
   message: z.string().max(1000).optional().nullable(),
@@ -101,5 +107,6 @@ export type ProjectQueryInput = z.infer<typeof projectQuerySchema>;
 export type AddMemberInput = z.infer<typeof addMemberSchema>;
 export type UpdateMemberInput = z.infer<typeof updateMemberSchema>;
 export type CreateUnitInput = z.infer<typeof createUnitSchema>;
+export type UpdateProjectUnitsInput = z.infer<typeof updateProjectUnitsSchema>;
 export type JoinRequestInput = z.infer<typeof joinRequestSchema>;
 export type UpdateJoinRequestInput = z.infer<typeof updateJoinRequestSchema>;

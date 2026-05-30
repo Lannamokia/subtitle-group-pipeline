@@ -86,6 +86,91 @@ describe("Project & Workflow Tests", () => {
       expectError(res, 400, "VALIDATION_ERROR");
     });
 
+    it("should increase project units and create template tasks for new episodes", async () => {
+      const { token } = await createTestUser();
+      const template = await createTestTemplate({
+        roles: [
+          { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+          { role: "translation", enabled: true, slotCount: 2, assignmentStrategy: "open_claim" },
+        ],
+      });
+      const backend = await createTestStorageBackend();
+
+      const createRes = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Resizable Project",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          qq_group_id: "123456789",
+          season_count: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+      expectSuccess(createRes, 201);
+
+      const resizeRes = await put(
+        app,
+        `/api/v1/projects/${createRes.body.data.id}/units/count`,
+        {
+          season_number: 1,
+          units_per_season: 3,
+        },
+        token
+      );
+      expectSuccess(resizeRes, 200);
+      expect(resizeRes.body.data).toHaveLength(3);
+
+      const units = await prisma.projectUnit.findMany({
+        where: { project_id: createRes.body.data.id },
+        orderBy: { unit_number: "asc" },
+      });
+      expect(units.map((unit) => unit.unit_number)).toEqual([1, 2, 3]);
+
+      const thirdUnitTasks = await prisma.task.findMany({
+        where: { project_id: createRes.body.data.id, unit_id: units[2].id },
+        orderBy: { created_at: "asc" },
+      });
+      expect(thirdUnitTasks).toHaveLength(3);
+      expect(thirdUnitTasks.filter((task) => task.role === "translation")).toHaveLength(2);
+      expect(thirdUnitTasks.filter((task) => task.status === "claimable")).toHaveLength(2);
+    });
+
+    it("should reject reducing episode count when removed episodes contain tasks", async () => {
+      const { token } = await createTestUser();
+      const template = await createTestTemplate();
+      const backend = await createTestStorageBackend();
+
+      const createRes = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Protected Episodes",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          qq_group_id: "123456789",
+          season_count: 1,
+          units_per_season: 2,
+        },
+        token
+      );
+      expectSuccess(createRes, 201);
+
+      const resizeRes = await put(
+        app,
+        `/api/v1/projects/${createRes.body.data.id}/units/count`,
+        {
+          season_number: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+
+      expectError(resizeRes, 400, "BAD_REQUEST");
+    });
+
     it("should inherit product config from template", async () => {
       const { user, token } = await createTestUser();
       const productConfig = {

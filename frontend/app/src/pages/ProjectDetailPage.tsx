@@ -56,6 +56,7 @@ import { TaskCommentPanel } from "@/components/TaskCommentPanel";
 import { toast } from "sonner";
 import type {
   Project,
+  ProjectUnit,
   Task,
   TaskStatus,
   FileEntity,
@@ -97,6 +98,7 @@ import {
   Table,
   Trash2,
   FileText,
+  ListOrdered,
 } from "lucide-react";
 
 type ProjectTab = "tasks" | "files" | "wiki" | "members" | "settings" | "activity" | "dedup" | "announcements";
@@ -137,6 +139,7 @@ export function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<ProjectTab>("tasks");
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [files, setFiles] = useState<FileEntity[]>([]);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [wiki, setWiki] = useState<WikiDocument | null>(null);
@@ -155,7 +158,12 @@ export function ProjectDetailPage() {
         wikiApi.getWiki(projectId).catch(() => null),
       ]);
       setProject(projectRes);
-      setTasks(tasksRes);
+      const mergedTasks = projectRes.tasks?.length ? projectRes.tasks : tasksRes;
+      setTasks(mergedTasks);
+      setSelectedUnitId((current) => {
+        if (!current) return null;
+        return projectRes.units?.some((unit) => unit.id === current) ? current : null;
+      });
       setFiles(filesRes.items);
       setEvents((eventsRes.data.data.events ?? []).map((event) => normalizeTimelineEvent(event as Record<string, unknown>)));
       setWiki(wikiRes);
@@ -276,7 +284,13 @@ export function ProjectDetailPage() {
         </TabsList>
 
         <TabsContent value="tasks" className="mt-6">
-          <TasksTab project={project} tasks={tasks} onUpdate={fetchProject} />
+          <TasksTab
+            project={project}
+            tasks={tasks}
+            selectedUnitId={selectedUnitId}
+            onSelectUnit={setSelectedUnitId}
+            onUpdate={fetchProject}
+          />
         </TabsContent>
 
         <TabsContent value="files" className="mt-6">
@@ -342,7 +356,82 @@ function ProjectTabTrigger({
 
 /* ---------- Tasks Tab ---------- */
 
-function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[]; onUpdate: () => void }) {
+function getUnitTitle(unit: ProjectUnit) {
+  return unit.title || `第 ${unit.season} 季 第 ${unit.episode} 集`;
+}
+
+function EpisodeListView({
+  units,
+  tasks,
+  onSelectUnit,
+}: {
+  units: ProjectUnit[];
+  tasks: Task[];
+  onSelectUnit: (unitId: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-h2 text-gray-800">分集列表</h2>
+        <p className="mt-1 text-sm text-gray-500">先选择分集，再进入该集的任务看板。</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {units.map((unit) => {
+          const unitTasks = tasks.filter((task) => task.unitId === unit.id);
+          const completed = unitTasks.filter((task) => ["completed", "review_approved"].includes(task.status)).length;
+          const progress = unitTasks.length > 0 ? Math.round((completed / unitTasks.length) * 100) : unit.progress;
+          const activeCount = unitTasks.filter((task) => ["assigned", "in_progress", "submitted"].includes(task.status)).length;
+
+          return (
+            <button
+              key={unit.id}
+              type="button"
+              onClick={() => onSelectUnit(unit.id)}
+              className="rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:border-primary-200 hover:bg-primary-50/40"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">{getUnitTitle(unit)}</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    第 {unit.season} 季 · 第 {unit.episode} 集
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs">
+                  {unitTasks.length || unit.taskCount || 0} 个任务
+                </Badge>
+              </div>
+              <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>完成进度</span>
+                  <span>{progress}%</span>
+                </div>
+                <Progress value={progress} className="h-2" />
+              </div>
+              <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+                <span>{completed} 已完成</span>
+                <span>{activeCount} 进行中</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TasksTab({
+  project,
+  tasks,
+  selectedUnitId,
+  onSelectUnit,
+  onUpdate,
+}: {
+  project: Project;
+  tasks: Task[];
+  selectedUnitId: string | null;
+  onSelectUnit: (unitId: string | null) => void;
+  onUpdate: () => void;
+}) {
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -357,8 +446,13 @@ function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[
   const [assigneeId, setAssigneeId] = useState("");
   const [reviewComment, setReviewComment] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
+  const units = project.units ?? [];
+  const selectedUnit = units.find((unit) => unit.id === selectedUnitId) ?? null;
+  const scopedTasks = selectedUnitId
+    ? tasks.filter((task) => task.unitId === selectedUnitId)
+    : tasks.filter((task) => !task.unitId);
 
-  const filteredTasks = tasks.filter((t) =>
+  const filteredTasks = scopedTasks.filter((t) =>
     taskFilter ? t.name.toLowerCase().includes(taskFilter.toLowerCase()) : true
   );
 
@@ -420,6 +514,7 @@ function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[
     try {
       await taskApi.createTask({
         project_id: project.id,
+        unit_id: selectedUnitId,
         title: newTaskTitle.trim(),
         role: newTaskRole,
         assignee_id: newTaskAssigneeId || null,
@@ -441,22 +536,50 @@ function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[
     }
   };
 
+  if (!selectedUnitId && units.length > 0) {
+    return (
+      <EpisodeListView
+        units={units}
+        tasks={tasks}
+        onSelectUnit={onSelectUnit}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="relative max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            placeholder="搜索任务..."
-            className="pl-9"
-            value={taskFilter}
-            onChange={(e) => setTaskFilter(e.target.value)}
-          />
+        <div className="flex items-center gap-3">
+          {selectedUnit && (
+            <Button variant="outline" size="sm" onClick={() => onSelectUnit(null)}>
+              <ArrowLeft className="w-4 h-4 mr-1.5" />
+              返回集列表
+            </Button>
+          )}
+          <div>
+            <h2 className="text-h2 text-gray-800">
+              {selectedUnit ? getUnitTitle(selectedUnit) : "未分集任务"}
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              {selectedUnit ? "管理当前分集下的制作任务" : "管理没有绑定到分集的项目任务"}
+            </p>
+          </div>
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="w-4 h-4 mr-1.5" />
-          新建任务
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="relative max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              placeholder="搜索任务..."
+              className="pl-9"
+              value={taskFilter}
+              onChange={(e) => setTaskFilter(e.target.value)}
+            />
+          </div>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="w-4 h-4 mr-1.5" />
+            新建任务
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 md:gap-4">
@@ -1969,10 +2092,13 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const [name, setName] = useState(project.name);
   const [qqGroupId, setQqGroupId] = useState(project.qqGroupId ?? "");
+  const [episodeCount, setEpisodeCount] = useState(project.episodes || project.units?.length || 1);
+  const [episodeLength, setEpisodeLength] = useState<number | "">(project.units?.[0]?.episodeLength ?? "");
   const [deliveryChecklist, setDeliveryChecklist] = useState(project.deliveryChecklist ?? []);
   const [downloadLinkTtlSeconds, setDownloadLinkTtlSeconds] = useState(project.downloadLinkTtlSeconds ?? 300);
   const [wikiApprovalRequired, setWikiApprovalRequired] = useState(project.wikiApprovalRequired ?? false);
   const [saving, setSaving] = useState(false);
+  const [savingUnits, setSavingUnits] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
   const handleSave = async () => {
@@ -2007,6 +2133,23 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
     }
   };
 
+  const handleUpdateUnits = async () => {
+    setSavingUnits(true);
+    try {
+      await projectApi.updateUnitCount(project.id, {
+        season: project.season || 1,
+        episodes: episodeCount,
+        episodeLength: episodeLength === "" ? null : Number(episodeLength),
+      });
+      toast.success("分集数量已更新");
+      onUpdate();
+    } catch (error) {
+      toast.error("更新分集失败: " + getErrorMessage(error));
+    } finally {
+      setSavingUnits(false);
+    }
+  };
+
   return (
     <div className="max-w-full md:max-w-2xl space-y-6 px-0">
       <Card>
@@ -2030,6 +2173,46 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
               disabled={!isSupervisor}
             />
             <p className="text-xs text-gray-500">需要 QQ at 提醒的项目通知会发送到这个项目群。</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-gray-800">分集配置</h3>
+              <p className="mt-1 text-xs text-gray-500">
+                开项后仍可增加分集；新增分集会按项目模板自动生成任务。已有任务或认领的分集不会被直接删除。
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">当前季集数</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={episodeCount}
+                  onChange={(event) => setEpisodeCount(Number(event.target.value))}
+                  disabled={!isSupervisor}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">每集时长（秒，可选）</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={episodeLength}
+                  onChange={(event) =>
+                    setEpisodeLength(event.target.value === "" ? "" : Number(event.target.value))
+                  }
+                  disabled={!isSupervisor}
+                />
+              </div>
+            </div>
+            {isSupervisor && (
+              <Button variant="outline" onClick={handleUpdateUnits} disabled={savingUnits}>
+                {savingUnits && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+                <ListOrdered className="w-4 h-4 mr-1.5" />
+                更新分集
+              </Button>
+            )}
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">交付清单</label>

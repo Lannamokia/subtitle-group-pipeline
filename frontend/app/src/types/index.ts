@@ -75,6 +75,8 @@ export interface Project {
   supervisor: User;
   qqGroupId?: string;
   members: ProjectMember[];
+  units?: ProjectUnit[];
+  tasks?: Task[];
   progress: number;
   archivedAt?: string;
   deletedAt?: string;
@@ -96,9 +98,14 @@ export interface ProjectUnit {
   projectId: string;
   season: number;
   episode: number;
-  episodeLength: number;
-  status: ProjectStatus;
+  title?: string | null;
+  episodeLength?: number | null;
+  description?: string | null;
+  taskCount?: number;
+  status?: ProjectStatus;
   progress: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // ========== Task Types ==========

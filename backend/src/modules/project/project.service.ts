@@ -12,6 +12,7 @@ import type {
   AddMemberInput,
   UpdateMemberInput,
   CreateUnitInput,
+  UpdateProjectUnitsInput,
   JoinRequestInput,
   ProjectQueryInput,
   UpdateJoinRequestInput,
@@ -87,6 +88,71 @@ function stringifyPolicyList(policy: Record<string, unknown>, ...keys: string[])
     }
   }
   return null;
+}
+
+function parseTemplateRoles(project: { workflow_config: string | null; template?: { roles: string } | null }) {
+  const rawRoles = project.workflow_config ?? project.template?.roles ?? "[]";
+  try {
+    return JSON.parse(rawRoles) as Array<{
+      role: TaskRole;
+      enabled: boolean;
+      slotCount: number;
+      assignmentStrategy: "manual" | "open_claim";
+    }>;
+  } catch {
+    return [];
+  }
+}
+
+async function createTemplateTasksForUnit(
+  projectId: string,
+  unit: { id: string; season_number: number; unit_number: number; title: string | null },
+  ownerId: string,
+  roles: Array<{
+    role: TaskRole;
+    enabled: boolean;
+    slotCount: number;
+    assignmentStrategy: "manual" | "open_claim";
+  }>
+) {
+  const enabledRoles = roles.filter((role) => role.enabled).map((role) => role.role);
+  let previousTaskId: string | null = null;
+
+  for (const role of ROLE_PIPELINE) {
+    if (!enabledRoles.includes(role)) continue;
+
+    const roleConfig = roles.find((config) => config.role === role);
+    const slotCount = roleConfig?.slotCount || 1;
+    const assignmentStrategy = roleConfig?.assignmentStrategy || "manual";
+    const initialStatus: TaskStatus =
+      assignmentStrategy === "open_claim" ? "claimable" : "pending_publish";
+
+    for (let slot = 0; slot < slotCount; slot++) {
+      const task = await prisma.task.create({
+        data: {
+          project_id: projectId,
+          unit_id: unit.id,
+          title: `${role.replace("_", " ")} - ${unit.title || `S${unit.season_number}E${unit.unit_number}`}${slotCount > 1 ? ` (${slot + 1})` : ""}`,
+          description: `Task for ${role} on ${unit.title || `S${unit.season_number}E${unit.unit_number}`}`,
+          role,
+          status: initialStatus,
+          creator_id: ownerId,
+        },
+      });
+
+      if (previousTaskId) {
+        await prisma.taskDependency.create({
+          data: {
+            task_id: task.id,
+            depends_on_id: previousTaskId,
+            dependency_type: "finish_to_start",
+          },
+        });
+      }
+
+      previousTaskId = task.id;
+    }
+  }
 }
 
 export async function createProject(
@@ -253,53 +319,8 @@ export async function createProjectFromTemplate(
   }
 
   // Create task graph for each unit based on template roles
-  const enabledRoles = templateRoles
-    .filter((r) => r.enabled)
-    .map((r) => r.role);
-
   for (const unit of units) {
-    let previousTaskId: string | null = null;
-
-    for (const role of ROLE_PIPELINE) {
-      if (!enabledRoles.includes(role)) continue;
-
-      const roleConfig = templateRoles.find((r) => r.role === role);
-      const slotCount = roleConfig?.slotCount || 1;
-      const assignmentStrategy = roleConfig?.assignmentStrategy || "manual";
-
-      // For translation with open_claim, create claimable tasks
-      // For others with open_claim, also create claimable tasks
-      // Empty slots default to "pending" status (pending_publish)
-      const initialStatus: TaskStatus =
-        assignmentStrategy === "open_claim" ? "claimable" : "pending_publish";
-
-      for (let slot = 0; slot < slotCount; slot++) {
-        const task = await prisma.task.create({
-          data: {
-            project_id: project.id,
-            unit_id: unit.id,
-            title: `${role.replace("_", " ")} - ${unit.title || `S${unit.season_number}E${unit.unit_number}`}${slotCount > 1 ? ` (${slot + 1})` : ""}`,
-            description: `Task for ${role} on ${unit.title || `S${unit.season_number}E${unit.unit_number}`}`,
-            role,
-            status: initialStatus,
-            creator_id: ownerId,
-          },
-        });
-
-        // Create serial dependency: each task depends on the previous one
-        if (previousTaskId) {
-          await prisma.taskDependency.create({
-            data: {
-              task_id: task.id,
-              depends_on_id: previousTaskId,
-              dependency_type: "finish_to_start",
-            },
-          });
-        }
-
-        previousTaskId = task.id;
-      }
-    }
+    await createTemplateTasksForUnit(project.id, unit, ownerId, templateRoles);
   }
 
   await timelineService.createTimelineEvent({
@@ -1053,6 +1074,110 @@ export async function createUnit(
   });
 
   return unit;
+}
+
+export async function updateProjectUnits(
+  projectId: string,
+  data: UpdateProjectUnitsInput,
+  actorId?: string
+) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId, deleted_at: null },
+    include: { template: { select: { roles: true } } },
+  });
+
+  if (!project) {
+    throw new AppError("Project not found", "NOT_FOUND", 404);
+  }
+
+  if (project.is_archived) {
+    throw new AppError("Cannot change units in archived project", "BAD_REQUEST", 400);
+  }
+
+  const existingUnits = await prisma.projectUnit.findMany({
+    where: { project_id: projectId, season_number: data.season_number },
+    include: { _count: { select: { tasks: true, claims: true } } },
+    orderBy: { unit_number: "asc" },
+  });
+
+  const existingByNumber = new Map(existingUnits.map((unit) => [unit.unit_number, unit]));
+  const unitsToDelete = existingUnits.filter((unit) => unit.unit_number > data.units_per_season);
+  const blockingUnit = unitsToDelete.find((unit) => unit._count.tasks > 0 || unit._count.claims > 0);
+
+  if (blockingUnit) {
+    throw new AppError(
+      "Cannot reduce episode count because removed episodes already contain tasks or claims",
+      "BAD_REQUEST",
+      400
+    );
+  }
+
+  const roles = parseTemplateRoles(project);
+  const createdUnits: Array<{ id: string; season_number: number; unit_number: number; title: string | null }> = [];
+
+  await prisma.$transaction(async (tx) => {
+    if (unitsToDelete.length > 0) {
+      await tx.projectUnit.deleteMany({
+        where: { id: { in: unitsToDelete.map((unit) => unit.id) } },
+      });
+    }
+
+    for (let unitNumber = 1; unitNumber <= data.units_per_season; unitNumber++) {
+      if (existingByNumber.has(unitNumber)) continue;
+
+      const unitTitle =
+        data.season_number === 1
+          ? `Episode ${unitNumber}`
+          : `Season ${data.season_number} Episode ${unitNumber}`;
+      const unit = await tx.projectUnit.create({
+        data: {
+          project_id: projectId,
+          season_number: data.season_number,
+          unit_number: unitNumber,
+          title: unitTitle,
+          episode_length: data.episode_length,
+        },
+      });
+      createdUnits.push(unit);
+    }
+  });
+
+  for (const unit of createdUnits) {
+    await createTemplateTasksForUnit(projectId, unit, project.owner_id, roles);
+  }
+
+  if (data.episode_length !== undefined && data.episode_length !== null) {
+    await prisma.projectUnit.updateMany({
+      where: { project_id: projectId, season_number: data.season_number },
+      data: { episode_length: data.episode_length },
+    });
+  }
+
+  const units = await prisma.projectUnit.findMany({
+    where: { project_id: projectId, season_number: data.season_number },
+    orderBy: { unit_number: "asc" },
+    include: { _count: { select: { tasks: true } } },
+  });
+
+  await timelineService.createTimelineEvent({
+    project_id: projectId,
+    event_type: TimelineEventType.custom,
+    title: "分集数量已调整",
+    description: `第 ${data.season_number} 季分集数量调整为 ${data.units_per_season} 集`,
+    actor_id: actorId,
+    metadata: { season_number: data.season_number, units_per_season: data.units_per_season },
+  });
+
+  await auditService.log({
+    user_id: actorId,
+    action: "project.update_units",
+    resource_type: "project",
+    resource_id: projectId,
+    old_value: { units: existingUnits.map((unit) => unit.unit_number) },
+    new_value: { units: units.map((unit) => unit.unit_number) },
+  });
+
+  return units;
 }
 
 export async function createJoinRequest(

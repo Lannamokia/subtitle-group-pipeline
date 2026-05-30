@@ -10,6 +10,7 @@ import {
   addMemberSchema,
   updateMemberSchema,
   createUnitSchema,
+  updateProjectUnitsSchema,
   joinRequestSchema,
   updateJoinRequestSchema,
   createProjectAnnouncementSchema,
@@ -54,6 +55,13 @@ router.delete("/:id/members/:userId", authenticate, validateParams(z.object({ id
 
 // Units
 router.post("/:id/units", authenticate, validateParams(idParamSchema), validateBody(createUnitSchema), controller.createUnit);
+router.put(
+  "/:id/units/count",
+  authenticate,
+  validateParams(idParamSchema),
+  validateBody(updateProjectUnitsSchema),
+  controller.updateProjectUnits
+);
 
 // Join requests
 router.get("/:id/join-requests", authenticate, validateParams(idParamSchema), controller.getJoinRequests);

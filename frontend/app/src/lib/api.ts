@@ -15,6 +15,7 @@ import type {
   StorageBackend,
   StorageBackendInput,
   Project,
+  ProjectUnit,
   Task,
   TaskRole,
   TaskComment,
@@ -215,6 +216,28 @@ export function normalizeTask(raw: AnyRecord): Task {
     createdAt: raw.createdAt ?? raw.created_at ?? "",
     updatedAt: raw.updatedAt ?? raw.updated_at ?? "",
     fileCount: raw.fileCount ?? raw._count?.files,
+  };
+}
+
+export function normalizeProjectUnit(raw: AnyRecord, tasks: Task[] = []): ProjectUnit {
+  const id = String(raw.id);
+  const unitTasks = tasks.filter((task) => task.unitId === id);
+  const completed = unitTasks.filter((task) => ["completed", "review_approved"].includes(task.status)).length;
+  const taskCount = unitTasks.length || raw.taskCount || raw._count?.tasks || 0;
+
+  return {
+    id,
+    projectId: raw.projectId ?? raw.project_id,
+    season: raw.season ?? raw.season_number ?? 1,
+    episode: raw.episode ?? raw.unit_number,
+    title: raw.title ?? null,
+    episodeLength: raw.episodeLength ?? raw.episode_length ?? null,
+    description: raw.description ?? null,
+    taskCount,
+    status: raw.status,
+    progress: raw.progress ?? (taskCount > 0 ? Math.round((completed / taskCount) * 100) : 0),
+    createdAt: raw.createdAt ?? raw.created_at,
+    updatedAt: raw.updatedAt ?? raw.updated_at,
   };
 }
 
@@ -619,6 +642,9 @@ function normalizeRoleTagApplication(raw: AnyRecord): RoleTagApplication {
 
 export function normalizeProject(raw: AnyRecord): Project {
   const tasks = Array.isArray(raw.tasks) ? raw.tasks.map(normalizeTask) : [];
+  const units = Array.isArray(raw.units)
+    ? raw.units.map((unit) => normalizeProjectUnit(unit as AnyRecord, tasks))
+    : [];
   const completed = tasks.filter((task) => ["completed", "review_approved"].includes(task.status)).length;
   const taskCount = tasks.length || raw._count?.tasks || 0;
 
@@ -640,6 +666,8 @@ export function normalizeProject(raw: AnyRecord): Project {
           joinedAt: member.joinedAt ?? member.joined_at ?? "",
         }))
       : [],
+    units,
+    tasks,
     progress: raw.progress ?? (taskCount > 0 ? Math.round((completed / taskCount) * 100) : 0),
     archivedAt: raw.archivedAt ?? raw.archived_at,
     deletedAt: raw.deletedAt ?? raw.deleted_at,
@@ -953,6 +981,15 @@ export const projectApi = {
 
   permanentlyDeleteProject: (id: string) =>
     api.delete<ApiResponse<void>>(`/projects/${id}/permanent`).then(extractData),
+
+  updateUnitCount: (id: string, data: { season: number; episodes: number; episodeLength?: number | null }) =>
+    api.put<ApiResponse<unknown[]>>(`/projects/${id}/units/count`, {
+      season_number: data.season,
+      units_per_season: data.episodes,
+      episode_length: data.episodeLength ?? null,
+    }).then((response) =>
+      unwrapItems<unknown>(response.data.data).map((unit) => normalizeProjectUnit(unit as AnyRecord))
+    ),
 
   addMember: (projectId: string, data: { userId: string; role: TaskRole; isLead?: boolean }) =>
     api.post<ApiResponse<unknown>>(`/projects/${projectId}/members`, {

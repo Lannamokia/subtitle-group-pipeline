@@ -244,6 +244,19 @@ export async function createUnit(
   }
 }
 
+export async function updateProjectUnits(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.updateProjectUnits(getParam(req, "id"), req.body, req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function joinRequest(
   req: AuthenticatedRequest,
   res: Response,
