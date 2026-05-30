@@ -175,6 +175,11 @@ export function SetupPage() {
             <p className="text-xs leading-5 text-gray-500">
               初始化会按这里选择的类型同步数据库结构，并写入连接参数。MySQL/MariaDB/PostgreSQL 初始化完成后需要重启服务。
             </p>
+            {provider === "postgresql" ? (
+              <p className="text-xs leading-5 text-amber-700">
+                PostgreSQL 账号需要拥有目标 schema 的建表权限；如不使用 public，可在连接串末尾添加 ?schema=subtitle_group。
+              </p>
+            ) : null}
           </SetupStep>
 
           <SetupStep icon={KeyRound} title="安全密钥">

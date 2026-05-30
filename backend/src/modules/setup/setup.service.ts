@@ -188,10 +188,35 @@ async function runPrismaCommand(args: string[], env: NodeJS.ProcessEnv) {
       windowsHide: true,
     });
   } catch (error) {
-    const commandError = error as Error & { stderr?: string; stdout?: string };
-    const details = (commandError.stderr || commandError.stdout || commandError.message).trim();
+    const details = formatPrismaCommandError(error);
     throw new AppError(details || "Database setup failed", "DATABASE_SETUP_FAILED", 400);
   }
+}
+
+function formatPrismaCommandError(error: unknown): string {
+  const commandError = error as Error & { stderr?: string; stdout?: string };
+  const raw = (commandError.stderr || commandError.stdout || commandError.message || "").trim();
+
+  if (/permission denied for schema public/i.test(raw)) {
+    return [
+      "PostgreSQL 当前用户没有在 public schema 中建表的权限。",
+      "请使用拥有建表权限的数据库用户，或执行 GRANT USAGE, CREATE ON SCHEMA public TO <用户名>；",
+      "也可以预先创建专用 schema 并在连接串添加 ?schema=<schema_name>。",
+    ].join("");
+  }
+
+  return raw
+    .split(/\r?\n/)
+    .filter((line) => {
+      const text = line.trim();
+      if (!text) return true;
+      if (text.includes("configuration property `package.json#prisma` is deprecated")) return false;
+      if (text.includes("https://pris.ly/prisma-config")) return false;
+      if (text === "Environment variables loaded from .env") return false;
+      return true;
+    })
+    .join("\n")
+    .trim();
 }
 
 function sqlString(value: string | null | undefined): string {
