@@ -117,6 +117,16 @@ function numberFromRecord(record: Record<string, unknown>, ...keys: string[]): n
   return undefined;
 }
 
+function stringArrayFromRecord(record: Record<string, unknown>, ...keys: string[]): string[] {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+    }
+  }
+  return [];
+}
+
 async function canSupervisorOverride(projectId: string, actorId?: string): Promise<boolean> {
   if (!actorId) {
     return false;
@@ -209,6 +219,75 @@ async function hasRequiredRoleTag(userId: string, role: TaskRole): Promise<boole
   });
 
   return Boolean(approved);
+}
+
+async function getTaskRoleRequiredTagIds(projectId: string, role: TaskRole): Promise<string[]> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      workflow_config: true,
+      template: { select: { roles: true } },
+    },
+  });
+
+  const roleEntries = [
+    ...parseJsonArray(project?.workflow_config),
+    ...parseJsonArray(project?.template?.roles),
+  ];
+
+  for (const entry of roleEntries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (record.role === role) {
+      return stringArrayFromRecord(record, "requiredTagIds", "required_tag_ids");
+    }
+  }
+
+  const configObject = parseJsonObject(project?.workflow_config);
+  const roleConfig = configObject[role];
+  if (roleConfig && typeof roleConfig === "object" && !Array.isArray(roleConfig)) {
+    return stringArrayFromRecord(roleConfig as Record<string, unknown>, "requiredTagIds", "required_tag_ids");
+  }
+
+  return [];
+}
+
+async function hasAnyRequiredRoleTag(userId: string, tagIds: string[]): Promise<boolean> {
+  if (tagIds.length === 0) {
+    return true;
+  }
+
+  const approved = await prisma.tagApplication.findFirst({
+    where: {
+      user_id: userId,
+      tag_id: { in: tagIds },
+      approved: true,
+    },
+    select: { id: true },
+  });
+
+  return Boolean(approved);
+}
+
+async function assertTaskClaimRoleTagAccess(
+  userId: string,
+  projectId: string,
+  role: TaskRole,
+  message: string
+): Promise<void> {
+  const requiredTagIds = await getTaskRoleRequiredTagIds(projectId, role);
+  if (requiredTagIds.length > 0) {
+    if (!(await hasAnyRequiredRoleTag(userId, requiredTagIds))) {
+      throw new AppError(message, "FORBIDDEN", 403);
+    }
+    return;
+  }
+
+  if (!(await hasRequiredRoleTag(userId, role))) {
+    throw new AppError(message, "FORBIDDEN", 403);
+  }
 }
 
 async function getWorkflowReviewerIds(projectId: string): Promise<string[]> {
@@ -829,11 +908,12 @@ export async function claimTask(
     );
   }
 
-  if (membership?.role !== "supervisor" && !(await hasRequiredRoleTag(userId, task.role))) {
-    throw new AppError(
-      `You need a granted ${task.role} role tag to claim this task`,
-      "FORBIDDEN",
-      403
+  if (membership?.role !== "supervisor") {
+    await assertTaskClaimRoleTagAccess(
+      userId,
+      task.project_id,
+      task.role,
+      `You need a granted ${task.role} role tag to claim this task`
     );
   }
 
@@ -1653,11 +1733,12 @@ export async function claimTranslationSegment(
     );
   }
 
-  if (!(await hasRequiredRoleTag(userId, "translation"))) {
-    throw new AppError(
-      "You need a granted translation role tag before claiming translation work",
-      "FORBIDDEN",
-      403
+  if (membership.role !== "supervisor") {
+    await assertTaskClaimRoleTagAccess(
+      userId,
+      task.project_id,
+      "translation",
+      "You need a granted translation role tag before claiming translation work"
     );
   }
 

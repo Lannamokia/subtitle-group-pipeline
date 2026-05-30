@@ -51,10 +51,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import type { ProductOutputConfig, ProjectTemplate, TaskRole } from "@/types";
+import { roleTagApi } from "@/lib/api";
+import type { ProductOutputConfig, ProjectTemplate, RoleTagDefinition, TaskRole } from "@/types";
 import {
   Plus,
   Search,
@@ -103,6 +105,7 @@ const roleConfigSchema = z.object({
   slotCount: z.number().min(1).max(20),
   assignmentStrategy: z.enum(["manual", "open_claim"]),
   maxSegmentLength: z.number().min(0).optional(),
+  requiredTagIds: z.array(z.string()).optional(),
 });
 
 const deliveryItemSchema = z.object({
@@ -238,6 +241,7 @@ const defaultFormValues: TemplateFormValues = {
     slotCount: role === "translation" ? 3 : 1,
     assignmentStrategy: role === "translation" ? "open_claim" : "manual",
     maxSegmentLength: role === "translation" ? 300 : undefined,
+    requiredTagIds: [],
   })),
   uploadPolicy: { allowedTypes: {} },
   notificationPolicy: {
@@ -505,6 +509,7 @@ function TemplateFormDialog({
 }) {
   const isEdit = !!template;
   const [submitting, setSubmitting] = useState(false);
+  const [roleTags, setRoleTags] = useState<RoleTagDefinition[]>([]);
 
   const form = useForm<TemplateFormValues>({
     resolver: zodResolver(templateFormSchema),
@@ -532,6 +537,15 @@ function TemplateFormDialog({
     control: form.control,
     name: "deliveryChecklist",
   });
+
+  const watchedRoles = form.watch("roles");
+
+  useEffect(() => {
+    if (!open) return;
+    roleTagApi.getAllTags()
+      .then(setRoleTags)
+      .catch(() => setRoleTags([]));
+  }, [open]);
 
   const onSubmit = async (values: TemplateFormValues) => {
     setSubmitting(true);
@@ -624,97 +638,142 @@ function TemplateFormDialog({
                   <AccordionTrigger>角色配置</AccordionTrigger>
                   <AccordionContent className="space-y-3 px-1">
                     {roleFields.map((field, index) => (
-                      <div
-                        key={field.id}
-                        className="grid gap-3 rounded-lg border bg-gray-50/50 p-3 md:grid-cols-[auto_6rem_9rem_minmax(12rem,1fr)_14rem] md:items-end"
-                      >
-                        <FormField
-                          control={form.control}
-                          name={`roles.${index}.enabled`}
-                          render={({ field }) => (
-                            <FormItem className="flex items-center space-x-2 space-y-0 md:pb-2">
-                              <FormControl>
-                                <Switch checked={field.value} onCheckedChange={field.onChange} />
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-                        <span className="text-sm font-medium md:pb-2">
-                          {getRoleLabel(field.role as TaskRole)}
-                        </span>
-                        <FormField
-                          control={form.control}
-                          name={`roles.${index}.slotCount`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>名额</FormLabel>
-                              <FormControl>
-                                <div className="flex items-center rounded-md border bg-white shadow-xs">
-                                  <Input
-                                    type="number"
-                                    min={1}
-                                    max={20}
-                                    className="border-0 shadow-none focus-visible:ring-0"
-                                    {...field}
-                                    onChange={(e) => field.onChange(Number(e.target.value))}
-                                  />
-                                  <span className="shrink-0 px-3 text-sm text-gray-500">人</span>
-                                </div>
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name={`roles.${index}.assignmentStrategy`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>分配方式</FormLabel>
-                              <Select value={field.value} onValueChange={field.onChange}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  <SelectItem value="manual">手动分配</SelectItem>
-                                  <SelectItem value="open_claim">开放认领</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </FormItem>
-                          )}
-                        />
-                        {field.role === "translation" && (
+                      <div key={field.id} className="space-y-3 rounded-lg border bg-gray-50/50 p-3">
+                        <div className="grid gap-3 md:grid-cols-[auto_6rem_9rem_minmax(12rem,1fr)_14rem] md:items-end">
                           <FormField
                             control={form.control}
-                            name={`roles.${index}.maxSegmentLength`}
+                            name={`roles.${index}.enabled`}
+                            render={({ field }) => (
+                              <FormItem className="flex items-center space-x-2 space-y-0 md:pb-2">
+                                <FormControl>
+                                  <Switch checked={field.value} onCheckedChange={field.onChange} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                          <span className="text-sm font-medium md:pb-2">
+                            {getRoleLabel(field.role as TaskRole)}
+                          </span>
+                          <FormField
+                            control={form.control}
+                            name={`roles.${index}.slotCount`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>每人最长认领时长</FormLabel>
+                                <FormLabel>名额</FormLabel>
                                 <FormControl>
                                   <div className="flex items-center rounded-md border bg-white shadow-xs">
                                     <Input
                                       type="number"
-                                      min={0}
-                                      placeholder="例如 300"
+                                      min={1}
+                                      max={20}
                                       className="border-0 shadow-none focus-visible:ring-0"
                                       {...field}
-                                      value={field.value || ""}
-                                      onChange={(e) =>
-                                        field.onChange(
-                                          e.target.value ? Number(e.target.value) : undefined
-                                        )
-                                      }
+                                      onChange={(e) => field.onChange(Number(e.target.value))}
                                     />
-                                    <span className="shrink-0 px-3 text-sm text-gray-500">秒</span>
+                                    <span className="shrink-0 px-3 text-sm text-gray-500">人</span>
                                   </div>
                                 </FormControl>
                               </FormItem>
                             )}
                           />
-                        )}
-                        {field.role !== "translation" && (
-                          <div className="hidden md:block" aria-hidden="true" />
+                          <FormField
+                            control={form.control}
+                            name={`roles.${index}.assignmentStrategy`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>分配方式</FormLabel>
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="manual">手动分配</SelectItem>
+                                    <SelectItem value="open_claim">开放认领</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </FormItem>
+                            )}
+                          />
+                          {field.role === "translation" && (
+                            <FormField
+                              control={form.control}
+                              name={`roles.${index}.maxSegmentLength`}
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>每人最长认领时长</FormLabel>
+                                  <FormControl>
+                                    <div className="flex items-center rounded-md border bg-white shadow-xs">
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        placeholder="例如 300"
+                                        className="border-0 shadow-none focus-visible:ring-0"
+                                        {...field}
+                                        value={field.value || ""}
+                                        onChange={(e) =>
+                                          field.onChange(
+                                            e.target.value ? Number(e.target.value) : undefined
+                                          )
+                                        }
+                                      />
+                                      <span className="shrink-0 px-3 text-sm text-gray-500">秒</span>
+                                    </div>
+                                  </FormControl>
+                                </FormItem>
+                              )}
+                            />
+                          )}
+                          {field.role !== "translation" && (
+                            <div className="hidden md:block" aria-hidden="true" />
+                          )}
+                        </div>
+                        {watchedRoles[index]?.assignmentStrategy === "open_claim" && (
+                          <FormField
+                            control={form.control}
+                            name={`roles.${index}.requiredTagIds`}
+                            render={({ field }) => {
+                              const role = watchedRoles[index]?.role as TaskRole;
+                              const roleScopedTags = roleTags.filter((tag) => tag.roleType === role);
+                              const selectedIds = field.value ?? [];
+
+                              return (
+                                <FormItem>
+                                  <FormLabel>认领资格标签</FormLabel>
+                                  {roleScopedTags.length > 0 ? (
+                                    <div className="flex flex-wrap gap-2 rounded-md border bg-white p-2">
+                                      {roleScopedTags.map((tag) => (
+                                        <label
+                                          key={tag.id}
+                                          className="flex items-center gap-2 rounded-md border px-2 py-1 text-xs text-gray-600"
+                                        >
+                                          <Checkbox
+                                            checked={selectedIds.includes(tag.id)}
+                                            onCheckedChange={(checked) => {
+                                              field.onChange(
+                                                checked
+                                                  ? [...selectedIds, tag.id]
+                                                  : selectedIds.filter((id) => id !== tag.id)
+                                              );
+                                            }}
+                                          />
+                                          {tag.name}
+                                        </label>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="rounded-md border bg-white px-3 py-2 text-xs text-gray-500">
+                                      当前岗位暂无可选资格标签
+                                    </p>
+                                  )}
+                                  <p className="text-xs text-gray-500">
+                                    不选择时沿用岗位默认资格；选择后仅拥有任一所选标签的成员可认领。
+                                  </p>
+                                </FormItem>
+                              );
+                            }}
+                          />
                         )}
                       </div>
                     ))}
@@ -1061,6 +1120,9 @@ function TemplateDetailDialog({
                         {role.assignmentStrategy === "manual" ? "手动分配" : "开放认领"}
                       </span>
                       {role.maxSegmentLength && <span>最长{role.maxSegmentLength}秒/人</span>}
+                      {role.requiredTagIds && role.requiredTagIds.length > 0 && (
+                        <span>{role.requiredTagIds.length} 个资格标签</span>
+                      )}
                     </div>
                   )}
                 </div>

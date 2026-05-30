@@ -17,7 +17,7 @@ describe("Project & Workflow Tests", () => {
   let app: Application;
 
   beforeAll(() => {
-    app = createApp();
+    app = createApp({ databaseReady: true });
   });
 
   beforeEach(async () => {
@@ -911,6 +911,70 @@ describe("Project & Workflow Tests", () => {
       );
 
       expectSuccess(claimRes, 200);
+    });
+
+    it("should restrict open claim tasks to configured role tags", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: worker, token: workerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const allowedTag = await prisma.roleTag.create({
+        data: { name: "Senior Timing", role_type: "timing" },
+      });
+      const otherTag = await prisma.roleTag.create({
+        data: { name: "Junior Timing", role_type: "timing" },
+      });
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            {
+              role: "timing",
+              enabled: true,
+              slotCount: 1,
+              assignmentStrategy: "open_claim",
+              requiredTagIds: [allowedTag.id],
+            },
+          ]),
+        },
+      });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: worker.id, role: "timing" },
+      });
+      await prisma.tagApplication.create({
+        data: {
+          user_id: worker.id,
+          tag_id: otherTag.id,
+          approved: true,
+          approved_by: owner.id,
+          approved_at: new Date(),
+        },
+      });
+
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      const rejected = await post(app, `/api/v1/tasks/${task.id}/claim`, {}, workerToken);
+      expectError(rejected, 403, "FORBIDDEN");
+
+      await prisma.tagApplication.create({
+        data: {
+          user_id: worker.id,
+          tag_id: allowedTag.id,
+          approved: true,
+          approved_by: owner.id,
+          approved_at: new Date(),
+        },
+      });
+
+      const accepted = await post(app, `/api/v1/tasks/${task.id}/claim`, {}, workerToken);
+      expectSuccess(accepted, 200);
     });
   });
 

@@ -15,6 +15,7 @@ export const templateRoleSchema = z.object({
   slotCount: z.number().int().min(1).default(1),
   assignmentStrategy: z.enum(["manual", "open_claim"]).default("manual"),
   maxSegmentLength: z.number().int().min(1).optional(), // for translation role
+  requiredTagIds: z.array(z.string().uuid()).optional(),
 });
 
 export const createTemplateSchema = z.object({

@@ -143,6 +143,7 @@ export interface TestTemplateData {
     assignmentStrategy: "manual" | "open_claim";
     maxSegmentLength?: number;
     maxSegmentsPerUser?: number;
+    requiredTagIds?: string[];
   }>;
   upload_policy?: Record<string, unknown>;
   notification_policy?: Record<string, unknown>;

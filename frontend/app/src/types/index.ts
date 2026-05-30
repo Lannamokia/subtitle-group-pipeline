@@ -274,6 +274,7 @@ export interface TemplateRoleConfig {
   slotCount: number;
   assignmentStrategy: 'manual' | 'open_claim';
   maxSegmentLength?: number;
+  requiredTagIds?: string[];
 }
 
 export interface UploadPolicy {

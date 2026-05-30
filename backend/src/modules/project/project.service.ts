@@ -173,6 +173,7 @@ export async function createProjectFromTemplate(
     slotCount: number;
     assignmentStrategy: "manual" | "open_claim";
     maxSegmentLength?: number;
+    requiredTagIds?: string[];
   }> = [];
   try {
     templateRoles = JSON.parse(template.roles);
