@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { normalizeAvatarUrl } from "@/lib/api";
 import type { User } from "@/types";
 
 interface UserAvatarProps {
@@ -17,6 +18,11 @@ const sizeMap = {
 
 export function UserAvatar({ user, size = "md", showName = false, className }: UserAvatarProps) {
   const initials = user?.username?.charAt(0).toUpperCase() || "?";
+  const rawAvatar =
+    user?.avatar ??
+    (user as (User & { avatarUrl?: string; avatar_url?: string }) | null | undefined)?.avatarUrl ??
+    (user as (User & { avatarUrl?: string; avatar_url?: string }) | null | undefined)?.avatar_url;
+  const avatarUrl = normalizeAvatarUrl(rawAvatar, user?.id);
 
   return (
     <div className={cn("flex items-center gap-2", className)}>
@@ -26,10 +32,10 @@ export function UserAvatar({ user, size = "md", showName = false, className }: U
           sizeMap[size]
         )}
       >
-        {user?.avatar ? (
+        {avatarUrl ? (
           <img
-            src={user.avatar}
-            alt={user.username}
+            src={avatarUrl}
+            alt={user?.username || "用户头像"}
             className="w-full h-full rounded-full object-cover"
           />
         ) : (

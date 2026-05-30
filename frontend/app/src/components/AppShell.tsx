@@ -5,9 +5,9 @@ import { useAuthStore } from "@/stores/authStore";
 import { getBrandLogoUrl, useBrandingStore } from "@/stores/brandingStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useNotificationStore } from "@/stores/notificationStore";
+import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -216,11 +216,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     sidebarCollapsed && "justify-center px-0"
                   )}
                 >
-                  <Avatar className="w-7 h-7 shrink-0">
-                    <AvatarFallback className="bg-primary-100 text-primary-700 text-xs font-medium">
-                      {user?.username?.charAt(0).toUpperCase() || "?"}
-                    </AvatarFallback>
-                  </Avatar>
+                  <UserAvatar user={user} size="sm" />
                   {!sidebarCollapsed && (
                     <div className="ml-2 text-left overflow-hidden">
                       <p className="text-sm text-gray-700 truncate">{user?.username}</p>
@@ -333,11 +329,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                  <Avatar className="w-7 h-7">
-                    <AvatarFallback className="bg-primary-100 text-primary-700 text-xs">
-                      {user?.username?.charAt(0).toUpperCase() || "?"}
-                    </AvatarFallback>
-                  </Avatar>
+                  <UserAvatar user={user} size="sm" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">

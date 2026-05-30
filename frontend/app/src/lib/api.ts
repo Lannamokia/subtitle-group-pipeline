@@ -886,7 +886,10 @@ export function getErrorMessage(error: unknown): string {
 
 export const authApi = {
   login: (credentials: LoginCredentials) =>
-    api.post<ApiResponse<LoginResponse>>('/auth/login', credentials).then(extractData),
+    api.post<ApiResponse<LoginResponse>>('/auth/login', credentials).then((response) => {
+      const data = extractData(response);
+      return data.user ? { ...data, user: normalizeUser(data.user as AnyRecord) } : data;
+    }),
 
   register: (data: RegisterData) =>
     api.post<ApiResponse<RegisterResponse>>('/auth/register', {
@@ -894,7 +897,10 @@ export const authApi = {
       password: data.password,
       qq_number: data.qq,
       tags: data.tags,
-    }).then(extractData),
+    }).then((response) => {
+      const result = extractData(response);
+      return result.user ? { ...result, user: normalizeUser(result.user as AnyRecord) } : result;
+    }),
 
   logout: () =>
     api.post<ApiResponse<void>>('/auth/logout').then(extractData),
