@@ -7,6 +7,7 @@ import {
   HeadBucketCommand,
   ListObjectsV2Command,
   type GetObjectCommandOutput,
+  type HeadObjectCommandOutput,
   type ListObjectsV2CommandOutput,
   type PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
@@ -158,6 +159,16 @@ export class S3Adapter {
     } catch {
       return false;
     }
+  }
+
+  async getSize(key: string): Promise<number> {
+    const command = new HeadObjectCommand({
+      Bucket: this.config.bucket,
+      Key: key,
+    });
+
+    const result = await this.send<HeadObjectCommandOutput>(command);
+    return result.ContentLength || 0;
   }
 
   async validateConnection(): Promise<void> {

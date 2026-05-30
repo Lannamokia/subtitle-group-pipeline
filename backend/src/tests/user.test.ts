@@ -11,9 +11,16 @@ import { post, get, put, del, expectSuccess, expectError } from "./helpers";
 import * as storageService from "../modules/storage/storage.service";
 import { S3Adapter } from "../modules/storage/adapters/s3.adapter";
 import type { Application } from "express";
+import fs from "fs";
+import path from "path";
+import { env } from "../config/env";
 
 describe("User Profile & Storage Tests", () => {
   let app: Application;
+
+  function resolveUploadedAvatarPath(avatarUrl: string): string {
+    return path.resolve(env.UPLOAD_DIR, avatarUrl.replace(/^\/uploads\//, ""));
+  }
 
   beforeAll(() => {
     app = createApp({ databaseReady: true });
@@ -96,6 +103,58 @@ describe("User Profile & Storage Tests", () => {
 
       expectSuccess(res, 200);
       expect(res.body.data.avatar_url).toBe("/uploads/projects/avatars/user-avatar.png");
+    });
+
+    it("should delete previous stored avatar when replacing avatar", async () => {
+      const backend = await createTestStorageBackend({
+        backend_type: "local",
+        is_default: true,
+        config: { basePath: "./uploads" },
+      });
+      const { user, token } = await createTestUser();
+      const oldBuffer = Buffer.from("old-avatar");
+      const newBuffer = Buffer.from("new-avatar");
+
+      const oldAvatar = await storageService.uploadAvatar(
+        user.id,
+        oldBuffer,
+        "image/png",
+        "old.png"
+      );
+      const oldAvatarPath = resolveUploadedAvatarPath(oldAvatar.avatarUrl);
+
+      expect(fs.existsSync(oldAvatarPath)).toBe(true);
+
+      expectSuccess(
+        await put(app, "/api/v1/auth/profile", { avatar_url: oldAvatar.avatarUrl }, token),
+        200
+      );
+
+      const newAvatar = await storageService.uploadAvatar(
+        user.id,
+        newBuffer,
+        "image/png",
+        "new.png"
+      );
+      const newAvatarPath = resolveUploadedAvatarPath(newAvatar.avatarUrl);
+
+      expect(fs.existsSync(newAvatarPath)).toBe(true);
+
+      const res = await put(
+        app,
+        "/api/v1/auth/profile",
+        { avatar_url: newAvatar.avatarUrl },
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.avatar_url).toBe(newAvatar.avatarUrl);
+      expect(fs.existsSync(oldAvatarPath)).toBe(false);
+      expect(fs.existsSync(newAvatarPath)).toBe(true);
+
+      const updatedBackend = await prisma.storageBackend.findUnique({ where: { id: backend.id } });
+      expect(updatedBackend!.file_count).toBe(1);
+      expect(Number(updatedBackend!.used_bytes)).toBe(newBuffer.length);
     });
 
     it("should keep session-critical profile fields in update response", async () => {

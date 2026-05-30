@@ -4,6 +4,7 @@ import { signToken, signRefreshToken, verifyToken } from "../../utils/jwt";
 import { AppError } from "../../utils/response";
 import { sendEmail } from "../notification/adapters/email.adapter";
 import { sendPrivateMessage } from "../notification/adapters/qq.adapter";
+import { deleteAvatarByUrl } from "../storage/storage.service";
 import type {
   RegisterInput,
   LoginInput,
@@ -588,6 +589,12 @@ export async function getCurrentUser(userId: string) {
 
 export async function updateProfile(userId: string, data: UpdateProfileInput) {
   const updateData: Record<string, unknown> = {};
+  const previousUser = data.avatar_url !== undefined
+    ? await prisma.user.findUnique({
+        where: { id: userId },
+        select: { avatar_url: true },
+      })
+    : null;
 
   if (data.nickname !== undefined) {
     updateData.nickname = data.nickname;
@@ -619,6 +626,18 @@ export async function updateProfile(userId: string, data: UpdateProfileInput) {
       updated_at: true,
     },
   });
+
+  if (
+    data.avatar_url !== undefined &&
+    previousUser?.avatar_url &&
+    previousUser.avatar_url !== data.avatar_url
+  ) {
+    try {
+      await deleteAvatarByUrl(previousUser.avatar_url);
+    } catch (error) {
+      console.warn(`[Auth] Failed to delete old avatar for user ${userId}:`, error);
+    }
+  }
 
   return user;
 }

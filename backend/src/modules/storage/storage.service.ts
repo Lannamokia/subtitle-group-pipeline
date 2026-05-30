@@ -569,6 +569,25 @@ function resolveLocalAvatarFile(avatarUrl: string): string {
   return resolvedPath;
 }
 
+function parseLocalAvatarUrl(avatarUrl: string): string | null {
+  if (!avatarUrl.startsWith("/uploads/projects/avatars/")) {
+    return null;
+  }
+
+  return avatarUrl.replace(/^\/uploads\//, "").replace(/\\/g, "/");
+}
+
+function resolveLocalStoragePath(storagePath: string): string {
+  const uploadRoot = path.resolve(env.UPLOAD_DIR);
+  const resolvedPath = path.resolve(uploadRoot, storagePath);
+
+  if (!resolvedPath.startsWith(uploadRoot + path.sep) && resolvedPath !== uploadRoot) {
+    throw new AppError("Invalid storage path", "FORBIDDEN", 403);
+  }
+
+  return resolvedPath;
+}
+
 function parseS3AvatarUrl(avatarUrl: string): { bucket: string; key: string } | null {
   const match = avatarUrl.match(/^s3:\/\/([^/]+)\/(.+)$/);
   if (!match) {
@@ -595,6 +614,19 @@ async function findS3BackendForBucket(bucket: string) {
     } catch {
       return false;
     }
+  });
+}
+
+async function findLocalAvatarBackend() {
+  return prisma.storageBackend.findFirst({
+    where: {
+      is_active: true,
+      backend_type: "local",
+    },
+    orderBy: [
+      { is_default: "desc" },
+      { created_at: "desc" },
+    ],
   });
 }
 
@@ -688,6 +720,65 @@ export async function uploadAvatar(
   }
 
   return { avatarUrl, size };
+}
+
+export async function deleteAvatarByUrl(avatarUrl: string | null | undefined): Promise<boolean> {
+  if (!avatarUrl) {
+    return false;
+  }
+
+  if (avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://")) {
+    return false;
+  }
+
+  const localPath = parseLocalAvatarUrl(avatarUrl);
+  if (localPath) {
+    const backend = await findLocalAvatarBackend();
+    const resolvedPath = resolveLocalStoragePath(localPath);
+    const exists = fs.existsSync(resolvedPath);
+    const sizeBytes = exists ? fs.statSync(resolvedPath).size : 0;
+
+    if (backend) {
+      const adapter = await initAdapterForBackend(backend.id);
+      await adapter.delete(localPath);
+      if (exists) {
+        await updateUsage(backend.id, -sizeBytes, -1);
+      }
+    } else if (fs.existsSync(resolvedPath)) {
+      fs.unlinkSync(resolvedPath);
+    }
+
+    return exists;
+  }
+
+  const s3Avatar = parseS3AvatarUrl(avatarUrl);
+  if (s3Avatar) {
+    const backend = await findS3BackendForBucket(s3Avatar.bucket);
+    if (!backend) {
+      throw new AppError("Avatar storage backend not found", "NOT_FOUND", 404);
+    }
+
+    const adapter = await initAdapterForBackend(backend.id);
+    if (!(adapter instanceof S3Adapter)) {
+      throw new AppError("Avatar storage backend type mismatch", "CONFIG_ERROR", 500);
+    }
+
+    let exists = true;
+    let sizeBytes = 0;
+    try {
+      sizeBytes = await adapter.getSize(s3Avatar.key);
+    } catch {
+      exists = false;
+      sizeBytes = 0;
+    }
+    await adapter.delete(s3Avatar.key);
+    if (exists) {
+      await updateUsage(backend.id, -sizeBytes, -1);
+    }
+    return exists;
+  }
+
+  return false;
 }
 
 export async function resolveAvatarImage(userId: string): Promise<AvatarImageSource> {
