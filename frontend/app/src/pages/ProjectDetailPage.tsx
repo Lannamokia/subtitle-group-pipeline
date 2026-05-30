@@ -1016,22 +1016,32 @@ function TasksTab({
                 {workflowSummaries.map((summary, index) => {
                   const isHighlighted = index === highlightedStepIndex;
                   const isDone = summary.isComplete;
+                  const previousStep = workflowSummaries[index - 1];
+                  const connectorFill = previousStep?.isComplete
+                    ? summary.isComplete
+                      ? "w-full"
+                      : summary.activeCount > 0
+                        ? "w-1/2"
+                        : "w-0"
+                    : "w-0";
                   return (
                     <div key={summary.step.role} className="relative flex justify-center">
                       {index > 0 && (
-                        <div
-                          className={cn(
-                            "absolute right-1/2 top-1/2 h-0.5 w-full -translate-y-1/2",
-                            workflowSummaries[index - 1]?.isComplete ? "bg-primary-500" : "bg-gray-300"
-                          )}
-                        />
+                        <div className="absolute right-1/2 top-1/2 h-1 w-full -translate-y-1/2 rounded-full bg-gray-200">
+                          <div
+                            className={cn(
+                              "h-full rounded-full bg-primary-500 transition-all duration-500 ease-out",
+                              connectorFill
+                            )}
+                          />
+                        </div>
                       )}
                       <button
                         type="button"
                         className={cn(
-                          "relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 bg-white text-base font-medium transition-colors",
-                          isDone && "border-primary-500 bg-primary-500 text-white",
-                          isHighlighted && !isDone && "border-primary-500 text-primary-600",
+                          "relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 bg-white text-base font-semibold shadow-sm transition-colors md:h-14 md:w-14 md:text-lg",
+                          isDone && "border-primary-500 bg-primary-500 text-white shadow-primary-100",
+                          isHighlighted && !isDone && "border-primary-500 text-primary-600 ring-4 ring-primary-50",
                           !isDone && !isHighlighted && "border-gray-300 text-gray-400 hover:border-gray-400"
                         )}
                         onClick={() => {
