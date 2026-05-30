@@ -332,6 +332,13 @@ function ProjectTabTrigger({
 function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[]; onUpdate: () => void }) {
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskRole, setNewTaskRole] = useState<TaskRole>("translation");
+  const [newTaskAssigneeId, setNewTaskAssigneeId] = useState("");
+  const [newTaskDueDate, setNewTaskDueDate] = useState("");
+  const [newTaskDescription, setNewTaskDescription] = useState("");
   const [taskFilter, setTaskFilter] = useState("");
   const [updating, setUpdating] = useState(false);
   const [assigneeId, setAssigneeId] = useState("");
@@ -390,6 +397,37 @@ function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[
     }
   };
 
+  const handleCreateTask = async () => {
+    if (!newTaskTitle.trim()) {
+      toast.error("任务标题不能为空");
+      return;
+    }
+
+    setCreating(true);
+    try {
+      await taskApi.createTask({
+        project_id: project.id,
+        title: newTaskTitle.trim(),
+        role: newTaskRole,
+        assignee_id: newTaskAssigneeId || null,
+        due_date: newTaskDueDate ? new Date(newTaskDueDate).toISOString() : null,
+        description: newTaskDescription.trim() || null,
+      } as Partial<Task> & Record<string, unknown>);
+      toast.success("任务已创建");
+      setCreateOpen(false);
+      setNewTaskTitle("");
+      setNewTaskRole("translation");
+      setNewTaskAssigneeId("");
+      setNewTaskDueDate("");
+      setNewTaskDescription("");
+      onUpdate();
+    } catch (error) {
+      toast.error("创建任务失败: " + getErrorMessage(error));
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -402,7 +440,7 @@ function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[
             onChange={(e) => setTaskFilter(e.target.value)}
           />
         </div>
-        <Button size="sm">
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
           <Plus className="w-4 h-4 mr-1.5" />
           新建任务
         </Button>
@@ -630,6 +668,82 @@ function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>新建任务</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">任务标题</label>
+              <Input
+                value={newTaskTitle}
+                onChange={(event) => setNewTaskTitle(event.target.value)}
+                placeholder="输入任务标题"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">任务角色</label>
+                <Select value={newTaskRole} onValueChange={(value) => setNewTaskRole(value as TaskRole)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["source", "timing", "translation", "post_production", "encoding", "release", "supervisor"].map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {getRoleLabel(role as TaskRole)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">负责人</label>
+                <Select value={newTaskAssigneeId} onValueChange={setNewTaskAssigneeId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="暂不分配" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">暂不分配</SelectItem>
+                    {project.members.map((member) => (
+                      <SelectItem key={member.user.id} value={member.user.id}>
+                        {member.user.nickname || member.user.username} · {getRoleLabel(member.role)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">截止日期</label>
+              <Input
+                type="datetime-local"
+                value={newTaskDueDate}
+                onChange={(event) => setNewTaskDueDate(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">描述</label>
+              <Textarea
+                value={newTaskDescription}
+                onChange={(event) => setNewTaskDescription(event.target.value)}
+                placeholder="任务说明（可选）"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleCreateTask} disabled={creating}>
+              {creating && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+              创建任务
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
