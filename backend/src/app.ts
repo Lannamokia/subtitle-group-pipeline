@@ -22,6 +22,8 @@ import announcementRoutes from "./modules/announcement/announcement.routes";
 import timelineRoutes from "./modules/timeline/timeline.routes";
 import qqRoutes from "./modules/qq/qq.routes";
 import systemRoutes from "./modules/system/system.routes";
+import setupRoutes from "./modules/setup/setup.routes";
+import { setupState } from "./modules/setup/setup.state";
 import { downloadByToken } from "./modules/file/file.controller";
 import * as fileController from "./modules/file/file.controller";
 import { createLinkSchema } from "./modules/file/file.schema";
@@ -33,8 +35,9 @@ import {
   resetUserPasswordSchema,
 } from "./modules/auth/auth.schema";
 
-export function createApp(): Application {
+export function createApp(options: { databaseReady?: boolean } = {}): Application {
   const app = express();
+  setupState.databaseReady = options.databaseReady ?? setupState.databaseReady;
 
   // Security middleware
   app.use(helmet());
@@ -99,6 +102,23 @@ export function createApp(): Application {
 
   // API routes
   const apiPrefix = env.API_PREFIX;
+  app.use(`${apiPrefix}/setup`, setupRoutes);
+
+  app.use(`${apiPrefix}`, (req, res, next) => {
+    if (req.path.startsWith("/setup") || setupState.databaseReady) {
+      next();
+      return;
+    }
+
+    res.status(503).json({
+      success: false,
+      error: {
+        code: "SETUP_REQUIRED",
+        message: "Server is not initialized. Complete setup first.",
+      },
+    });
+  });
+
   app.use(`${apiPrefix}/auth`, authRoutes);
   app.use(`${apiPrefix}/projects`, projectRoutes);
   app.use(`${apiPrefix}/templates`, templateRoutes);

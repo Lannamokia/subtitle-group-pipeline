@@ -71,6 +71,9 @@ api.interceptors.response.use(
       toast.error('登录已过期，请重新登录');
       window.location.href = '/login';
     }
+    if (error.response?.status === 503 && (error.response.data as AnyRecord)?.error?.code === 'SETUP_REQUIRED') {
+      window.location.href = '/setup';
+    }
     return Promise.reject(error);
   }
 );
@@ -778,6 +781,26 @@ export const systemApi = {
       normalizeSystemBranding(response.data.data as AnyRecord)
     );
   },
+};
+
+// ========== Setup API ==========
+
+export const setupApi = {
+  getStatus: () =>
+    api.get<ApiResponse<{
+      initialized: boolean;
+      databaseReady: boolean;
+      adminExists: boolean;
+      storageReady: boolean;
+      provider: string;
+    }>>('/setup/status').then(extractData),
+
+  complete: (data: {
+    database: { provider: "sqlite" | "mysql" | "mariadb" | "postgresql"; url: string };
+    admin: { username: string; password: string; nickname?: string; email?: string };
+    storage: { name: string; backend_type: "local" | "s3" | "s3_compatible"; config: string; quota_bytes?: number | null };
+  }) =>
+    api.post<ApiResponse<unknown>>('/setup/complete', data).then(extractData),
 };
 
 // ========== Project API ==========

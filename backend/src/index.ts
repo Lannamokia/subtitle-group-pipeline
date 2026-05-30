@@ -1,27 +1,35 @@
 import { createApp } from "./app";
 import { env } from "./config/env";
-import { prisma } from "./config/database";
+import { canConnectDatabase, prisma } from "./config/database";
 import { registerAllJobs, scheduler } from "./jobs";
+import { setupState } from "./modules/setup/setup.state";
 
 const PORT = env.PORT;
 
 async function startServer(): Promise<void> {
+  let databaseReady = false;
+
   try {
-    // Test database connection
-    await prisma.$connect();
-    console.log("Connected to database");
+    databaseReady = await canConnectDatabase();
+    console.log(databaseReady ? "Connected to database" : "Database unavailable; setup mode enabled");
+  } catch {
+    databaseReady = false;
+    console.log("Database unavailable; setup mode enabled");
+  }
+  setupState.databaseReady = databaseReady;
 
-    const app = createApp();
-
+  try {
+    const app = createApp({ databaseReady });
     const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Environment: ${env.NODE_ENV}`);
       console.log(`API prefix: ${env.API_PREFIX}`);
     });
 
-    // Register and start background jobs
-    registerAllJobs();
-    scheduler.start();
+    if (databaseReady) {
+      registerAllJobs();
+      scheduler.start();
+    }
 
     // Graceful shutdown
     const shutdown = async (signal: string): Promise<void> => {

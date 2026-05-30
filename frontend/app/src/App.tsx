@@ -4,6 +4,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useBrandingStore } from "@/stores/brandingStore";
 import { AppShell } from "@/components/AppShell";
 import { LoginPage } from "@/pages/LoginPage";
+import { SetupPage } from "@/pages/SetupPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ProjectListPage } from "@/pages/ProjectListPage";
 import { ProjectCreatePage } from "@/pages/ProjectCreatePage";
@@ -47,6 +48,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/setup" element={<SetupPage />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />
