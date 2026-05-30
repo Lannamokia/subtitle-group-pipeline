@@ -34,6 +34,7 @@ const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secon
   granted: { label: "已授予", variant: "default", icon: <Shield className="w-3 h-3" /> },
   pending: { label: "申请中", variant: "secondary", icon: <Clock className="w-3 h-3" /> },
   rejected: { label: "已驳回", variant: "destructive", icon: <XCircle className="w-3 h-3" /> },
+  not_applied: { label: "未申请", variant: "outline", icon: <UserCircle className="w-3 h-3" /> },
 };
 
 export function ProfilePage() {

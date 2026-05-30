@@ -697,7 +697,15 @@ export const roleTagApi = {
     api.delete<ApiResponse<void>>(`/auth/role-tags/${id}`).then(extractData),
 
   getMyTagStatuses: () =>
-    api.get<ApiResponse<UserRoleTagStatus[]>>('/auth/role-tags/my-status').then(extractData),
+    api.get<ApiResponse<unknown[]>>('/auth/role-tags/my-status').then((response) =>
+      response.data.data.map((item) => {
+        const raw = item as AnyRecord;
+        return {
+          tag: normalizeRoleTag(raw.tag as AnyRecord),
+          status: raw.status,
+        } as UserRoleTagStatus;
+      })
+    ),
 
   applyForTag: (tagId: string, reason: string) =>
     api.post<ApiResponse<RoleTagApplication>>('/auth/tag-applications', { tag_id: tagId, reason }).then(extractData),
