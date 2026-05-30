@@ -1735,6 +1735,89 @@ describe("Project & Workflow Tests", () => {
       const releaseLinks = await prisma.linkHistory.findMany({ where: { file_id: releaseFile.id } });
       expect(releaseLinks).toHaveLength(0);
     });
+
+    it("should cascade reset downstream tasks when an upstream task is manually reset", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "completed",
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "completed",
+        creator_id: owner.id,
+      });
+      const releaseTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "release",
+        status: "submitted",
+        creator_id: owner.id,
+      });
+
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+      await prisma.taskDependency.create({
+        data: {
+          task_id: releaseTask.id,
+          depends_on_id: downstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const resetRes = await post(
+        app,
+        `/api/v1/tasks/${upstream.id}/reset`,
+        { reason: "Upstream source changed" },
+        ownerToken
+      );
+
+      expectSuccess(resetRes, 200);
+
+      const resetUpstream = await prisma.task.findUnique({ where: { id: upstream.id } });
+      const resetDownstream = await prisma.task.findUnique({ where: { id: downstream.id } });
+      const resetRelease = await prisma.task.findUnique({ where: { id: releaseTask.id } });
+
+      expect(resetUpstream!.status).toBe("in_progress");
+      expect(resetDownstream!.status).toBe("in_progress");
+      expect(resetRelease!.status).toBe("pending_publish");
+    });
+
+    it("should prevent non-supervisors from manually resetting project tasks", async () => {
+      const { user: owner } = await createTestUser();
+      const { token: workerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "completed",
+        creator_id: owner.id,
+      });
+
+      const resetRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/reset`,
+        { reason: "Trying to reset" },
+        workerToken
+      );
+
+      expectError(resetRes, 403, "FORBIDDEN");
+    });
   });
 
   describe("Role-Specific Reset Behavior", () => {

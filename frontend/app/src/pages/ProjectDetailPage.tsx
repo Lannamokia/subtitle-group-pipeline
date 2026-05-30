@@ -461,9 +461,11 @@ function TasksTab({
     project.members.some((member) => member.user.id === currentUser?.id && member.role === "supervisor");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [deleteTaskTarget, setDeleteTaskTarget] = useState<Task | null>(null);
+  const [resetTaskTarget, setResetTaskTarget] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deletingTask, setDeletingTask] = useState(false);
+  const [resettingTask, setResettingTask] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskUnitId, setNewTaskUnitId] = useState(UNASSIGNED_UNIT_SELECT_VALUE);
   const [newTaskRole, setNewTaskRole] = useState<TaskRole>("translation");
@@ -475,6 +477,7 @@ function TasksTab({
   const [assigneeId, setAssigneeId] = useState("");
   const [reviewComment, setReviewComment] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
+  const [resetReason, setResetReason] = useState("");
   const units = project.units ?? [];
   const selectedUnit = units.find((unit) => unit.id === selectedUnitId) ?? null;
   const scopedTasks = selectedUnitId
@@ -491,6 +494,7 @@ function TasksTab({
       .map((depId) => taskById.get(depId))
       .filter((dep): dep is Task => Boolean(dep))
       .filter((dep) => !["review_approved", "completed"].includes(dep.status));
+  const resettableStatuses: TaskStatus[] = ["submitted", "review_rejected", "completed", "review_approved"];
 
   const handleTaskAction = async (task: Task, action: string) => {
     setUpdating(true);
@@ -548,6 +552,25 @@ function TasksTab({
       toast.error("删除任务失败: " + getErrorMessage(error));
     } finally {
       setDeletingTask(false);
+    }
+  };
+
+  const handleResetTask = async () => {
+    if (!resetTaskTarget) return;
+    setResettingTask(true);
+    try {
+      await taskApi.resetTask(resetTaskTarget.id, resetReason.trim() || undefined);
+      toast.success("任务已重置，受影响的下游任务已联动处理");
+      if (selectedTask?.id === resetTaskTarget.id) {
+        setSelectedTask(null);
+      }
+      setResetTaskTarget(null);
+      setResetReason("");
+      onUpdate();
+    } catch (error) {
+      toast.error("重置任务失败: " + getErrorMessage(error));
+    } finally {
+      setResettingTask(false);
     }
   };
 
@@ -959,6 +982,20 @@ function TasksTab({
                         重新认领
                       </Button>
                     )}
+                    {canManageTasks && resettableStatuses.includes(selectedTask.status) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setResetTaskTarget(selectedTask);
+                          setResetReason("");
+                        }}
+                        disabled={updating || resettingTask}
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                        重置为进行中
+                      </Button>
+                    )}
                     {canManageTasks && (
                       <Button
                         size="sm"
@@ -1003,6 +1040,48 @@ function TasksTab({
             >
               {deletingTask && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
               确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!resetTaskTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setResetTaskTarget(null);
+            setResetReason("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认重置任务状态</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-gray-600">
+                <p>
+                  任务会回到进行中状态。它后续已经提交或完成的任务会被联动重置；发布任务的旧发布产物会被丢弃。
+                </p>
+                <Textarea
+                  value={resetReason}
+                  onChange={(event) => setResetReason(event.target.value)}
+                  placeholder="重置原因（可选）"
+                  className="mt-2"
+                />
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resettingTask}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={resettingTask}
+              onClick={(event) => {
+                event.preventDefault();
+                handleResetTask();
+              }}
+            >
+              {resettingTask && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+              确认重置
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1757,6 +1757,10 @@ export async function resetTask(
     throw new AppError("Cannot reset task in archived/deleted project", "BAD_REQUEST", 400);
   }
 
+  if (!(await canManageProjectTasks(task.project_id, actorId))) {
+    throw new AppError("Only project supervisors can reset tasks", "FORBIDDEN", 403);
+  }
+
   if (
     task.status !== "submitted" &&
     task.status !== "review_rejected" &&

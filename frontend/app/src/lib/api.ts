@@ -1088,6 +1088,11 @@ export const taskApi = {
       normalizeTask(response.data.data as AnyRecord)
     ),
 
+  resetTask: (id: string, reason?: string) =>
+    api.post<ApiResponse<unknown>>(`/tasks/${id}/reset`, { reason: reason || undefined }).then((response) =>
+      normalizeTask(response.data.data as AnyRecord)
+    ),
+
   getComments: (taskId: string) =>
     api.get<ApiResponse<unknown[]>>(`/tasks/${taskId}/comments`).then((response) =>
       response.data.data.map((comment) => normalizeTaskComment(comment as AnyRecord))
