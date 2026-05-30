@@ -77,12 +77,16 @@ export const requestPasswordResetSchema = z.object({
 
 export const createRoleTagSchema = z.object({
   name: z.string().min(1, "Tag name is required").max(50),
+  roleType: z.enum(["source", "timing", "translation", "post_production", "encoding", "release", "supervisor"]).optional(),
+  role_type: z.enum(["source", "timing", "translation", "post_production", "encoding", "release", "supervisor"]).optional(),
   description: z.string().max(500).optional(),
   color: z.string().max(50).optional(),
 });
 
 export const updateRoleTagSchema = z.object({
   name: z.string().min(1).max(50).optional(),
+  roleType: z.enum(["source", "timing", "translation", "post_production", "encoding", "release", "supervisor"]).optional(),
+  role_type: z.enum(["source", "timing", "translation", "post_production", "encoding", "release", "supervisor"]).optional(),
   description: z.string().max(500).optional().nullable(),
   color: z.string().max(50).optional(),
 });

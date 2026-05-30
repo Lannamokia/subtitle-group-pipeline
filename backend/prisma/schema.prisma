@@ -297,6 +297,7 @@ model VerificationChallenge {
 model RoleTag {
   id          String   @id @default(uuid())
   name        String   @unique
+  role_type   TaskRole @default(translation)
   description String?
   color       String   @default("#3b82f6")
   created_at  DateTime @default(now())

@@ -643,6 +643,7 @@ export async function createRoleTag(data: CreateRoleTagInput) {
   return prisma.roleTag.create({
     data: {
       name: data.name,
+      role_type: data.role_type ?? data.roleType ?? "translation",
       description: data.description,
       color: data.color,
     },
@@ -654,6 +655,7 @@ export async function updateRoleTag(tagId: string, data: UpdateRoleTagInput) {
     where: { id: tagId },
     data: {
       name: data.name,
+      role_type: data.role_type ?? data.roleType,
       description: data.description,
       color: data.color,
     },

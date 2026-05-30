@@ -539,7 +539,7 @@ function normalizeRoleTag(raw: AnyRecord): RoleTagDefinition {
   return {
     id: raw.id,
     name: raw.name,
-    roleType: knownRoles.includes(raw.roleType ?? raw.name) ? (raw.roleType ?? raw.name) : "translation",
+    roleType: knownRoles.includes(raw.roleType ?? raw.role_type ?? raw.name) ? (raw.roleType ?? raw.role_type ?? raw.name) : "translation",
     description: raw.description,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
   };
@@ -666,10 +666,18 @@ export const roleTagApi = {
     ),
 
   createTag: (data: { name: string; roleType: string; description?: string }) =>
-    api.post<ApiResponse<RoleTagDefinition>>('/auth/role-tags', data).then(extractData),
+    api.post<ApiResponse<unknown>>('/auth/role-tags', {
+      name: data.name,
+      roleType: data.roleType,
+      description: data.description,
+    }).then((response) => normalizeRoleTag(response.data.data as AnyRecord)),
 
   updateTag: (id: string, data: { name?: string; roleType?: string; description?: string }) =>
-    api.put<ApiResponse<RoleTagDefinition>>(`/auth/role-tags/${id}`, data).then(extractData),
+    api.put<ApiResponse<unknown>>(`/auth/role-tags/${id}`, {
+      name: data.name,
+      roleType: data.roleType,
+      description: data.description,
+    }).then((response) => normalizeRoleTag(response.data.data as AnyRecord)),
 
   deleteTag: (id: string) =>
     api.delete<ApiResponse<void>>(`/auth/role-tags/${id}`).then(extractData),

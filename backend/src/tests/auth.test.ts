@@ -667,6 +667,29 @@ describe("Auth & Registration Tests", () => {
       expect(application!.approved_at).not.toBeNull();
     });
 
+    it("should persist role type when creating role tags", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      const createRes = await post(
+        app,
+        "/api/v1/auth/role-tags",
+        {
+          name: "Timing Specialist",
+          roleType: "timing",
+          description: "Can handle timing tasks",
+        },
+        admin.token
+      );
+
+      expectSuccess(createRes, 201);
+      expect(createRes.body.data.role_type).toBe("timing");
+
+      const listRes = await get(app, "/api/v1/auth/role-tags", admin.token);
+      expectSuccess(listRes, 200);
+      const created = listRes.body.data.find((tag: { name: string }) => tag.name === "Timing Specialist");
+      expect(created.role_type).toBe("timing");
+    });
+
     it("should let admins disable accounts and reset passwords", async () => {
       const admin = await createTestUser({ role: "super_admin" });
       const member = await createTestUser({
