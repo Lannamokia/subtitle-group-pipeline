@@ -1,6 +1,6 @@
 import { createApp } from "../app";
 import { prisma, createTestUser, cleanDatabase } from "./setup";
-import { post, get, put, expectSuccess, expectError } from "./helpers";
+import { post, get, put, del, expectSuccess, expectError } from "./helpers";
 import type { Application } from "express";
 
 function unique(prefix: string): string {
@@ -680,6 +680,26 @@ describe("Auth & Registration Tests", () => {
         password: "NewPass123!",
       });
       expectSuccess(loginRes, 200);
+    });
+
+    it("should allow admins to delete regular accounts but protect super admins", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+      const member = await createTestUser({ username: "delete_target" });
+      const superAdmin = await createTestUser({ role: "super_admin" });
+
+      const deleteRes = await del(app, `/api/v1/members/${member.user.id}`, admin.token);
+      expectSuccess(deleteRes, 200);
+      expect(deleteRes.body.data.deleted).toBe(true);
+
+      const deleted = await prisma.user.findUnique({ where: { id: member.user.id } });
+      expect(deleted).toBeNull();
+
+      const listRes = await get(app, "/api/v1/members", admin.token);
+      expectSuccess(listRes, 200);
+      expect(listRes.body.data.items.some((user: { id: string }) => user.id === member.user.id)).toBe(false);
+
+      const protectedRes = await del(app, `/api/v1/members/${superAdmin.user.id}`, admin.token);
+      expectError(protectedRes, 403, "FORBIDDEN");
     });
 
     it("should prevent supervisors from creating privileged accounts", async () => {

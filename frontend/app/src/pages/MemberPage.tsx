@@ -6,6 +6,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -23,7 +34,7 @@ import {
 import { UserAvatar } from "@/components/UserAvatar";
 import { getErrorMessage, memberApi, roleTagApi } from "@/lib/api";
 import type { RoleTagDefinition, User, UserRole, UserStatus } from "@/types";
-import { Loader2, Search, ShieldCheck, UserPlus, KeyRound } from "lucide-react";
+import { KeyRound, Loader2, Search, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 const roleLabels: Record<UserRole, string> = {
@@ -174,6 +185,19 @@ export function MemberPage() {
     }
   };
 
+  const handleDeleteMember = async (user: User) => {
+    setBusyUserId(user.id);
+    try {
+      await memberApi.deleteMember(user.id);
+      setUsers((prev) => prev.filter((item) => item.id !== user.id));
+      toast.success("账号已删除");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -205,10 +229,8 @@ export function MemberPage() {
           ) : (
             <div className="divide-y divide-gray-100">
               {filteredUsers.map((user) => (
-                <div
-                  key={user.id}
-                  className="flex flex-col gap-3 px-4 py-4 hover:bg-gray-50 sm:flex-row sm:items-center sm:justify-between sm:px-6"
-                >
+                <div key={user.id} className="px-4 py-4 hover:bg-gray-50 sm:px-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3">
                     <UserAvatar user={user} size="md" />
                     <div>
@@ -267,6 +289,40 @@ export function MemberPage() {
                     >
                       <KeyRound className="h-4 w-4 text-gray-500" />
                     </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0"
+                          disabled={busyUserId === user.id || user.role === "super_admin"}
+                          title={user.role === "super_admin" ? "超级管理员账号不能删除" : "删除账号"}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>删除账号</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            确定要删除账号「{user.username}」吗？此操作会直接从数据库删除账号，历史项目记录会转交给当前管理员保留。
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>取消</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-red-600 hover:bg-red-700"
+                            onClick={() => handleDeleteMember(user)}
+                          >
+                            确认删除
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                  {user.role === "super_admin" && (
+                    <p className="text-xs text-gray-400 sm:text-right">受保护账号，不能删除</p>
+                  )}
                   </div>
                 </div>
               ))}

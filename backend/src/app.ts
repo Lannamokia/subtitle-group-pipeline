@@ -136,6 +136,12 @@ export function createApp(): Application {
     validateBody(resetUserPasswordSchema),
     authController.resetUserPassword
   );
+  app.delete(
+    `${apiPrefix}/members/:id`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    authController.deleteMember
+  );
   app.get(
     `${apiPrefix}/links`,
     authenticate,

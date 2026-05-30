@@ -1125,4 +1125,7 @@ export const memberApi = {
 
   resetPassword: (id: string, password: string) =>
     api.put<ApiResponse<void>>(`/members/${id}/password`, { password }).then(extractData),
+
+  deleteMember: (id: string) =>
+    api.delete<ApiResponse<void>>(`/members/${id}`).then(extractData),
 };

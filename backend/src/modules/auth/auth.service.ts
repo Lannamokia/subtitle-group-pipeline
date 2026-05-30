@@ -917,3 +917,83 @@ export async function resetUserPassword(userId: string, data: ResetUserPasswordI
 
   return { success: true };
 }
+
+export async function deleteMember(userId: string, actorId?: string) {
+  const [user, actor] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    actorId ? prisma.user.findUnique({ where: { id: actorId } }) : null,
+  ]);
+
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  if (user.role === "super_admin") {
+    throw new AppError("Super administrator accounts cannot be deleted", "FORBIDDEN", 403);
+  }
+
+  if (actorId === userId) {
+    throw new AppError("You cannot delete your own account", "FORBIDDEN", 403);
+  }
+
+  if (!actor) {
+    throw new AppError("Actor not found", "NOT_FOUND", 404);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.project.updateMany({
+      where: { owner_id: userId },
+      data: { owner_id: actor.id },
+    });
+    await tx.task.updateMany({
+      where: { assignee_id: userId },
+      data: { assignee_id: null },
+    });
+    await tx.task.updateMany({
+      where: { creator_id: userId },
+      data: { creator_id: actor.id },
+    });
+    await tx.review.updateMany({
+      where: { reviewer_id: userId },
+      data: { reviewer_id: actor.id },
+    });
+    await tx.review.updateMany({
+      where: { requester_id: userId },
+      data: { requester_id: null },
+    });
+    await tx.fileEntity.updateMany({
+      where: { uploader_id: userId },
+      data: { uploader_id: actor.id },
+    });
+    await tx.announcement.updateMany({
+      where: { created_by: userId },
+      data: { created_by: actor.id },
+    });
+    await tx.wikiDocument.updateMany({
+      where: { created_by: userId },
+      data: { created_by: actor.id },
+    });
+    await tx.downloadLink.updateMany({
+      where: { created_by: userId },
+      data: { created_by: actor.id },
+    });
+    await tx.timelineEvent.updateMany({
+      where: { actor_id: userId },
+      data: { actor_id: null },
+    });
+    await tx.auditLog.updateMany({
+      where: { user_id: userId },
+      data: { user_id: null },
+    });
+    await tx.verificationChallenge.updateMany({
+      where: { used_by: userId },
+      data: { used_by: null },
+    });
+
+    await tx.user.delete({
+      where: { id: userId },
+    });
+  });
+
+  return { deleted: true, id: userId };
+}

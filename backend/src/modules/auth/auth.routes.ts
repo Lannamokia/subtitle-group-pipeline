@@ -146,5 +146,6 @@ router.post("/members", authenticate, requireRole("super_admin", "group_admin", 
 router.put("/members/:id/role", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserRoleSchema), controller.updateUserRole);
 router.put("/members/:id/status", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserStatusSchema), controller.updateUserStatus);
 router.put("/members/:id/password", authenticate, requireRole("super_admin", "group_admin"), validateBody(resetUserPasswordSchema), controller.resetUserPassword);
+router.delete("/members/:id", authenticate, requireRole("super_admin", "group_admin"), controller.deleteMember);
 
 export default router;

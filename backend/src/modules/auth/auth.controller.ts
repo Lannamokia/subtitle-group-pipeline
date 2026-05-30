@@ -332,3 +332,16 @@ export async function updateUserStatus(
     next(error);
   }
 }
+
+export async function deleteMember(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.deleteMember(String(req.params.id), req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
