@@ -3,7 +3,13 @@ import multer from "multer";
 import { authenticate, requireRole } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import * as controller from "./system.controller";
-import { qqBridgeSettingsSchema, smtpSettingsSchema, updateBrandingSchema } from "./system.schema";
+import {
+  qqBridgeSettingsSchema,
+  qqBridgeTestSchema,
+  smtpSettingsSchema,
+  smtpTestSchema,
+  updateBrandingSchema,
+} from "./system.schema";
 
 const router = Router();
 
@@ -49,6 +55,13 @@ router.put(
   validateBody(smtpSettingsSchema),
   controller.updateSmtpSettings
 );
+router.post(
+  "/smtp/test",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateBody(smtpTestSchema),
+  controller.testSmtpSettings
+);
 router.get(
   "/qq-bridge",
   authenticate,
@@ -61,6 +74,13 @@ router.put(
   requireRole("super_admin", "group_admin"),
   validateBody(qqBridgeSettingsSchema),
   controller.updateQqBridgeSettings
+);
+router.post(
+  "/qq-bridge/test",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateBody(qqBridgeTestSchema),
+  controller.testQqBridgeSettings
 );
 router.get(
   "/health",

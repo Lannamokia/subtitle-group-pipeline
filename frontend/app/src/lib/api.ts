@@ -1113,6 +1113,11 @@ export const systemApi = {
       normalizeSmtpSettings(response.data.data as AnyRecord)
     ),
 
+  testSmtpSettings: (data: { to: string }) =>
+    api.post<ApiResponse<{ success: boolean; message_id?: string }>>('/system/smtp/test', {
+      to: data.to,
+    }).then(extractData),
+
   getQqBridgeSettings: () =>
     api.get<ApiResponse<unknown>>('/system/qq-bridge').then((response) =>
       normalizeQqBridgeSettings(response.data.data as AnyRecord)
@@ -1126,6 +1131,12 @@ export const systemApi = {
     }).then((response) =>
       normalizeQqBridgeSettings(response.data.data as AnyRecord)
     ),
+
+  testQqBridgeSettings: (data: { groupId: string; atUserQQ: string }) =>
+    api.post<ApiResponse<{ success: boolean; message_id?: string }>>('/system/qq-bridge/test', {
+      group_id: data.groupId,
+      at_user_qq: data.atUserQQ,
+    }).then(extractData),
 
   getGlobalHealth: () =>
     api.get<ApiResponse<unknown>>('/system/health').then((response) =>

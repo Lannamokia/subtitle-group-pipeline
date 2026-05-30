@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Bell, Bot, KeyRound, Loader2, Mail, Save, ShieldCheck } from "lucide-react";
+import { Bell, Bot, KeyRound, Loader2, Mail, Save, Send, ShieldCheck } from "lucide-react";
 import { systemApi, getErrorMessage } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,10 @@ export function SmtpSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<SmtpSettings>(defaultSettings);
   const [qqBridge, setQqBridge] = useState<QqBridgeSettings>(defaultQqBridgeSettings);
+  const [testEmail, setTestEmail] = useState("");
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [qqTest, setQqTest] = useState({ groupId: "", atUserQQ: "" });
+  const [testingQq, setTestingQq] = useState(false);
 
   useEffect(() => {
     Promise.all([systemApi.getSmtpSettings(), systemApi.getQqBridgeSettings()])
@@ -77,6 +81,43 @@ export function SmtpSettingsPage() {
       toast.error("保存失败: " + getErrorMessage(error));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const sendTestEmail = async () => {
+    const to = testEmail.trim();
+    if (!to) {
+      toast.error("请输入测试邮件地址");
+      return;
+    }
+
+    setTestingEmail(true);
+    try {
+      await systemApi.testSmtpSettings({ to });
+      toast.success("测试邮件已发送");
+    } catch (error) {
+      toast.error("测试邮件发送失败: " + getErrorMessage(error));
+    } finally {
+      setTestingEmail(false);
+    }
+  };
+
+  const sendTestQqMessage = async () => {
+    const groupId = qqTest.groupId.trim();
+    const atUserQQ = qqTest.atUserQQ.trim();
+    if (!groupId || !atUserQQ) {
+      toast.error("请输入群号和要 AT 的 QQ 号");
+      return;
+    }
+
+    setTestingQq(true);
+    try {
+      await systemApi.testQqBridgeSettings({ groupId, atUserQQ });
+      toast.success("QQ 测试消息已发送");
+    } catch (error) {
+      toast.error("QQ 测试消息发送失败: " + getErrorMessage(error));
+    } finally {
+      setTestingQq(false);
     }
   };
 
@@ -218,6 +259,32 @@ export function SmtpSettingsPage() {
                 已保存 SMTP 密码。再次保存时保留星号会继续使用原密码，填写新内容则会覆盖。
               </div>
             )}
+
+            <div className="space-y-3 rounded-lg border bg-gray-50 p-4">
+              <div>
+                <Label htmlFor="smtp-test-email">发送测试邮件</Label>
+                <p className="mt-1 text-xs text-gray-500">使用已保存的 SMTP 配置发送一封测试邮件。</p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="smtp-test-email"
+                  type="email"
+                  value={testEmail}
+                  placeholder="test@example.com"
+                  onChange={(event) => setTestEmail(event.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="sm:w-32"
+                  onClick={sendTestEmail}
+                  disabled={testingEmail}
+                >
+                  {testingEmail ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
+                  测试
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -274,6 +341,34 @@ export function SmtpSettingsPage() {
                 已保存 QQ 桥接器密钥。再次保存时保留星号会继续使用原密钥，填写新内容则会覆盖。
               </div>
             )}
+
+            <div className="space-y-3 rounded-lg border bg-gray-50 p-4">
+              <div>
+                <Label>发送 QQ 测试消息</Label>
+                <p className="mt-1 text-xs text-gray-500">使用已保存的桥接器配置向指定群聊发送测试消息，并 AT 指定 QQ。</p>
+              </div>
+              <div className="grid gap-2">
+                <Input
+                  value={qqTest.groupId}
+                  placeholder="群号"
+                  onChange={(event) => setQqTest((prev) => ({ ...prev, groupId: event.target.value }))}
+                />
+                <Input
+                  value={qqTest.atUserQQ}
+                  placeholder="要 AT 的 QQ 号"
+                  onChange={(event) => setQqTest((prev) => ({ ...prev, atUserQQ: event.target.value }))}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={sendTestQqMessage}
+                  disabled={testingQq}
+                >
+                  {testingQq ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
+                  发送测试消息
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>

@@ -98,6 +98,18 @@ export async function updateSmtpSettings(
   }
 }
 
+export async function testSmtpSettings(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    successResponse(res, await systemService.testSmtpSettings(req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getQqBridgeSettings(
   _req: Request,
   res: Response,
@@ -117,6 +129,18 @@ export async function updateQqBridgeSettings(
 ): Promise<void> {
   try {
     successResponse(res, await systemService.updateQqBridgeSettings(req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function testQqBridgeSettings(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    successResponse(res, await systemService.testQqBridgeSettings(req.body));
   } catch (error) {
     next(error);
   }

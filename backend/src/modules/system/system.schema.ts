@@ -25,6 +25,20 @@ export const qqBridgeSettingsSchema = z.object({
   secret: z.string().max(1000).optional().nullable(),
 });
 
+export const smtpTestSchema = z.object({
+  to: z.string().trim().email("Invalid test email address").max(255),
+});
+
+export const qqBridgeTestSchema = z.object({
+  group_id: z.string().trim().min(1, "QQ group is required").max(50).optional(),
+  groupId: z.string().trim().min(1, "QQ group is required").max(50).optional(),
+  at_user_qq: z.string().trim().min(1, "Target QQ is required").max(50).optional(),
+  atUserQQ: z.string().trim().min(1, "Target QQ is required").max(50).optional(),
+}).refine((data) => Boolean(data.group_id ?? data.groupId), "QQ group is required")
+  .refine((data) => Boolean(data.at_user_qq ?? data.atUserQQ), "Target QQ is required");
+
 export type UpdateBrandingInput = z.infer<typeof updateBrandingSchema>;
 export type SmtpSettingsInput = z.infer<typeof smtpSettingsSchema>;
 export type QqBridgeSettingsInput = z.infer<typeof qqBridgeSettingsSchema>;
+export type SmtpTestInput = z.infer<typeof smtpTestSchema>;
+export type QqBridgeTestInput = z.infer<typeof qqBridgeTestSchema>;

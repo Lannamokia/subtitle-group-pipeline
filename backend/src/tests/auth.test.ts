@@ -1221,9 +1221,38 @@ describe("Auth & Registration Tests", () => {
 
       const smtpRes = await get(app, "/api/v1/system/smtp", member.token);
       const qqRes = await get(app, "/api/v1/system/qq-bridge", member.token);
+      const smtpTestRes = await post(app, "/api/v1/system/smtp/test", { to: "test@example.com" }, member.token);
+      const qqTestRes = await post(
+        app,
+        "/api/v1/system/qq-bridge/test",
+        { group_id: "10001", at_user_qq: "20002" },
+        member.token
+      );
 
       expectError(smtpRes, 403, "FORBIDDEN");
       expectError(qqRes, 403, "FORBIDDEN");
+      expectError(smtpTestRes, 403, "FORBIDDEN");
+      expectError(qqTestRes, 403, "FORBIDDEN");
+    });
+
+    it("should reject notification channel tests before channels are configured", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      const smtpRes = await post(
+        app,
+        "/api/v1/system/smtp/test",
+        { to: "test@example.com" },
+        admin.token
+      );
+      const qqRes = await post(
+        app,
+        "/api/v1/system/qq-bridge/test",
+        { group_id: "10001", at_user_qq: "20002" },
+        admin.token
+      );
+
+      expectError(smtpRes, 400, "VALIDATION_ERROR");
+      expectError(qqRes, 400, "VALIDATION_ERROR");
     });
   });
 

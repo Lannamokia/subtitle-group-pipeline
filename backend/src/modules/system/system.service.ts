@@ -3,7 +3,13 @@ import { env } from "../../config/env";
 import crypto from "crypto";
 import { AppError } from "../../utils/response";
 import * as storageService from "../storage/storage.service";
-import type { QqBridgeSettingsInput, SmtpSettingsInput, UpdateBrandingInput } from "./system.schema";
+import type {
+  QqBridgeSettingsInput,
+  QqBridgeTestInput,
+  SmtpSettingsInput,
+  SmtpTestInput,
+  UpdateBrandingInput,
+} from "./system.schema";
 
 const DEFAULT_APP_NAME = "SubtitleSync";
 const LOGO_MAX_SIZE = 2 * 1024 * 1024;
@@ -92,6 +98,11 @@ export interface QqBridgeHeartbeatInput {
   error?: string | null;
   adapter?: string | null;
   version?: string | null;
+}
+
+export interface ChannelTestResult {
+  success: boolean;
+  message_id?: string;
 }
 
 export interface GlobalHealthStatus {
@@ -382,6 +393,37 @@ export async function updateSmtpSettings(data: SmtpSettingsInput): Promise<SmtpS
   return getSmtpSettings();
 }
 
+export async function testSmtpSettings(data: SmtpTestInput): Promise<ChannelTestResult> {
+  const settings = await getSmtpSettingsRecord();
+  const hasEnvSmtp = Boolean(
+    process.env.SMTP_HOST &&
+    process.env.SMTP_USER &&
+    process.env.SMTP_PASS &&
+    process.env.SMTP_FROM
+  );
+
+  if (!settings?.enabled && !hasEnvSmtp) {
+    throw new AppError("SMTP service is not enabled or configured", "VALIDATION_ERROR", 400);
+  }
+
+  const { sendEmail } = await import("../notification/adapters/email.adapter");
+  const result = await sendEmail({
+    to: data.to,
+    subject: "通知渠道测试邮件",
+    body: `这是一封来自字幕组协作平台的测试邮件。\n发送时间：${new Date().toISOString()}`,
+    notificationType: "system",
+  });
+
+  if (!result.success) {
+    throw new AppError(result.error || "Failed to send test email", "DELIVERY_FAILED", 502);
+  }
+
+  return {
+    success: true,
+    message_id: result.messageId,
+  };
+}
+
 async function getQqBridgeSettingsRecord(): Promise<QqBridgeRuntimeSettings | null> {
   const records = await prisma.$queryRaw<QqBridgeRuntimeSettings[]>`
     SELECT id, enabled, endpoint, secret, last_heartbeat_at, last_heartbeat_status, last_heartbeat_error, last_bot_id, last_bot_nickname, last_heartbeat_payload, created_at, updated_at
@@ -460,6 +502,32 @@ export async function updateQqBridgeSettings(data: QqBridgeSettingsInput): Promi
   }
 
   return getQqBridgeSettings();
+}
+
+export async function testQqBridgeSettings(data: QqBridgeTestInput): Promise<ChannelTestResult> {
+  const groupId = (data.group_id ?? data.groupId ?? "").trim();
+  const atUserQQ = (data.at_user_qq ?? data.atUserQQ ?? "").trim();
+  const settings = await getQqBridgeRuntimeSettings();
+
+  if (!settings.enabled || !settings.endpoint) {
+    throw new AppError("QQ bridge is not enabled or configured", "VALIDATION_ERROR", 400);
+  }
+
+  const { sendGroupMessage } = await import("../notification/adapters/qq.adapter");
+  const result = await sendGroupMessage({
+    groupId,
+    atUsers: [atUserQQ],
+    content: `通知渠道测试消息\n发送时间：${new Date().toISOString()}`,
+  });
+
+  if (!result.success) {
+    throw new AppError(result.error || "Failed to send QQ test message", "DELIVERY_FAILED", 502);
+  }
+
+  return {
+    success: true,
+    message_id: result.messageId,
+  };
 }
 
 function normalizeDate(value: Date | string | null | undefined): Date | null {
