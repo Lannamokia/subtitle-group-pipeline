@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
@@ -78,6 +78,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [openNavTooltip, setOpenNavTooltip] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOpenNavTooltip(null);
+  }, [sidebarCollapsed]);
 
   const handleLogout = () => {
     logout();
@@ -134,10 +139,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Navigation */}
           <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto scrollbar-thin">
             {filteredNavItems.map((item) => (
-              <Tooltip key={item.path}>
+              <Tooltip
+                key={item.path}
+                open={sidebarCollapsed && openNavTooltip === item.path}
+                onOpenChange={(open) => setOpenNavTooltip(open ? item.path : null)}
+              >
                 <TooltipTrigger asChild>
                   <Link
                     to={item.path}
+                    onMouseEnter={() => setOpenNavTooltip(item.path)}
+                    onMouseLeave={() => setOpenNavTooltip(null)}
+                    onFocus={() => setOpenNavTooltip(item.path)}
+                    onBlur={() => setOpenNavTooltip(null)}
                     className={cn(
                       "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors relative",
                       isActive(item.path)
