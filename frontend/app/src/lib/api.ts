@@ -70,13 +70,17 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
+    const errorCode = (error.response?.data as AnyRecord | undefined)?.error?.code;
     if (error.response?.status === 401) {
       useAuthStore.getState().logout();
       toast.error('登录已过期，请重新登录');
       window.location.href = '/login';
     }
-    if (error.response?.status === 503 && (error.response.data as AnyRecord)?.error?.code === 'SETUP_REQUIRED') {
+    if (error.response?.status === 503 && errorCode === 'SETUP_REQUIRED') {
       window.location.href = '/setup';
+    }
+    if (errorCode === 'DATABASE_CONNECTION_ERROR') {
+      toast.error('数据库连接异常，请检查数据库配置', { id: 'database-connection-error' });
     }
     return Promise.reject(error);
   }

@@ -2,6 +2,19 @@ import { Request, Response, NextFunction } from "express";
 import { AppError, errorResponse } from "../utils/response";
 import { ZodError } from "zod";
 
+function isDatabaseConnectionError(err: Error): boolean {
+  const code = (err as unknown as { code?: string }).code;
+  const message = err.message || "";
+
+  if (err.name === "PrismaClientInitializationError") return true;
+  if (err.name === "PrismaClientRustPanicError") return true;
+  if (code && ["P1000", "P1001", "P1002", "P1003", "P1008", "P1010", "P1011", "P1017"].includes(code)) {
+    return true;
+  }
+
+  return /Can't reach database server|Database server was reached but timed out|Server has closed the connection|Connection terminated|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(message);
+}
+
 export function errorHandler(
   err: Error,
   _req: Request,
@@ -23,6 +36,16 @@ export function errorHandler(
   }
 
   if (err.name === "PrismaClientKnownRequestError") {
+    if (isDatabaseConnectionError(err)) {
+      errorResponse(
+        res,
+        "Database connection error",
+        "DATABASE_CONNECTION_ERROR",
+        503
+      );
+      return;
+    }
+
     // Unique constraint violation
     if ((err as unknown as { code: string }).code === "P2002") {
       errorResponse(
@@ -48,6 +71,16 @@ export function errorHandler(
       errorResponse(res, "Resource not found", "NOT_FOUND", 404);
       return;
     }
+  }
+
+  if (isDatabaseConnectionError(err)) {
+    errorResponse(
+      res,
+      "Database connection error",
+      "DATABASE_CONNECTION_ERROR",
+      503
+    );
+    return;
   }
 
   console.error("Unhandled error:", err);

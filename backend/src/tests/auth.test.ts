@@ -1,7 +1,10 @@
 import { createApp } from "../app";
 import { prisma, createTestUser, cleanDatabase } from "./setup";
 import { post, get, put, del, expectSuccess, expectError } from "./helpers";
+import express from "express";
+import request from "supertest";
 import type { Application } from "express";
+import { errorHandler } from "../middleware/errorHandler";
 
 function unique(prefix: string): string {
   const suffix = `${Date.now().toString(36)}${Math.random().toString(36).substring(2, 6)}`;
@@ -1073,6 +1076,22 @@ describe("Auth & Registration Tests", () => {
       const res = await get(app, "/api/v1/system/health", member.token);
 
       expectError(res, 403, "FORBIDDEN");
+    });
+  });
+
+  describe("Database Error Handling", () => {
+    it("should expose database connection failures with a dedicated error code", async () => {
+      const testApp = express();
+      testApp.get("/test-db-disconnect", (_req, _res, next) => {
+        const error = new Error("Can't reach database server at `localhost:5432`");
+        error.name = "PrismaClientInitializationError";
+        next(error);
+      });
+      testApp.use(errorHandler);
+
+      const res = await request(testApp).get("/test-db-disconnect");
+
+      expectError(res, 503, "DATABASE_CONNECTION_ERROR");
     });
   });
 });
