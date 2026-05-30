@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { api, fileApi, getErrorMessage, projectApi } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, getFileTypeLabel } from "@/lib/utils";
+import { getPolicyUploadProfile } from "@/lib/taskWorkflow";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { FileListItem } from "@/components/FileListItem";
 import { toast } from "sonner";
-import type { FileEntity, FileType, FileVersion, LinkAsset, Project } from "@/types";
+import type { FileEntity, FileType, FileVersion, LinkAsset, Project, TaskRole } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
 import {
   Search,
@@ -72,6 +73,11 @@ const PROJECT_STATUS_LABEL: Record<string, string> = {
   cancelled: "已取消",
   deleted: "已删除",
 };
+
+function formatShortList(items: string[], max = 8) {
+  if (items.length <= max) return items.join("、");
+  return `${items.slice(0, max).join("、")} 等 ${items.length} 种`;
+}
 
 export function FileListPage() {
   const currentUser = useAuthStore((state) => state.user);
@@ -174,6 +180,28 @@ export function FileListPage() {
   const selectedProject = selectedProjectId
     ? projects.find((project) => project.id === selectedProjectId)
     : null;
+  const currentProjectRole = selectedProject
+    ? isSupervisor
+      ? "supervisor" as TaskRole
+      : selectedProject.members.find((member) => member.user.id === currentUser?.id)?.role
+    : undefined;
+  const uploadProfile = useMemo(
+    () => getPolicyUploadProfile(selectedProject?.uploadPolicy, currentProjectRole),
+    [currentProjectRole, selectedProject?.uploadPolicy]
+  );
+  const uploadTypeOptions = useMemo(
+    () => FILE_TYPE_OPTIONS.filter(
+      (opt): opt is { value: FileType; label: string } =>
+        opt.value !== "all" && uploadProfile.fileTypes.includes(opt.value)
+    ),
+    [uploadProfile.fileTypes]
+  );
+  const replaceTarget = files.find((file) => file.id === replaceTargetId);
+  const uploadAccept = uploadMode === "replace" && replaceTarget
+    ? getPolicyUploadProfile(selectedProject?.uploadPolicy, currentProjectRole, [replaceTarget.type]).accept
+    : uploadProfile.constrained
+      ? uploadProfile.accept
+      : getPolicyUploadProfile(null, undefined, [uploadType]).accept;
 
   const canDeleteFile = useCallback(
     (file: FileEntity) =>
@@ -206,6 +234,12 @@ export function FileListPage() {
     setSelectedFile(null);
   };
 
+  useEffect(() => {
+    if (uploadTypeOptions.length > 0 && !uploadTypeOptions.some((option) => option.value === uploadType)) {
+      setUploadType(uploadTypeOptions[0].value);
+    }
+  }, [uploadType, uploadTypeOptions]);
+
   const handleUpload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     if (!selectedProjectId) {
@@ -214,6 +248,10 @@ export function FileListPage() {
     }
     if (uploadMode === "replace" && !replaceTargetId) {
       toast.error("请先选择要替换的文件实体");
+      return;
+    }
+    if (uploadMode === "new" && !uploadProfile.fileTypes.includes(uploadType)) {
+      toast.error("当前项目上传策略不允许该文件类别");
       return;
     }
     setUploading(true);
@@ -568,7 +606,7 @@ export function FileListPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {FILE_TYPE_OPTIONS.filter((opt) => opt.value !== "all").map((opt) => (
+                  {uploadTypeOptions.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
                       {opt.label}
                     </SelectItem>
@@ -576,6 +614,10 @@ export function FileListPage() {
                 </SelectContent>
               </Select>
             )}
+            <p className="text-xs leading-5 text-gray-500">
+              当前上传策略允许：{uploadProfile.fileTypes.map((type) => getFileTypeLabel(type)).join("、")}
+              {uploadProfile.formats.length > 0 ? `；格式：${formatShortList(uploadProfile.formats, 8)}` : ""}
+            </p>
             <Input
               value={uploadTags}
               onChange={(event) => setUploadTags(event.target.value)}
@@ -602,7 +644,12 @@ export function FileListPage() {
               <input
                 type="file"
                 className="hidden"
-                onChange={(e) => handleUpload(e.target.files)}
+                accept={uploadAccept}
+                disabled={uploading}
+                onChange={(e) => {
+                  handleUpload(e.target.files);
+                  e.currentTarget.value = "";
+                }}
               />
               <Button type="button" variant="outline" size="sm" asChild>
                 <span>选择文件</span>

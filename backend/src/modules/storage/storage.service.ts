@@ -1,7 +1,10 @@
 import { prisma } from "../../config/database";
+import { env } from "../../config/env";
 import { AppError } from "../../utils/response";
 import { LocalAdapter } from "./adapters/local.adapter";
 import { S3Adapter, type S3Config } from "./adapters/s3.adapter";
+import fs from "fs";
+import path from "path";
 import type {
   CreateStorageBackendInput,
   DataRetentionSettingsInput,
@@ -547,6 +550,54 @@ export interface AvatarUploadResult {
   size: number;
 }
 
+export type AvatarImageSource =
+  | { kind: "file"; path: string }
+  | { kind: "redirect"; url: string };
+
+function resolveLocalAvatarFile(avatarUrl: string): string {
+  const relativePath = avatarUrl.replace(/^\/uploads\//, "").replace(/\\/g, "/");
+  const uploadRoot = path.resolve(env.UPLOAD_DIR);
+  const resolvedPath = path.resolve(uploadRoot, relativePath);
+
+  if (!resolvedPath.startsWith(uploadRoot + path.sep) && resolvedPath !== uploadRoot) {
+    throw new AppError("Invalid avatar path", "FORBIDDEN", 403);
+  }
+  if (!fs.existsSync(resolvedPath)) {
+    throw new AppError("Avatar not found", "NOT_FOUND", 404);
+  }
+
+  return resolvedPath;
+}
+
+function parseS3AvatarUrl(avatarUrl: string): { bucket: string; key: string } | null {
+  const match = avatarUrl.match(/^s3:\/\/([^/]+)\/(.+)$/);
+  if (!match) {
+    return null;
+  }
+  return { bucket: match[1], key: match[2] };
+}
+
+async function findS3BackendForBucket(bucket: string) {
+  const backends = await prisma.storageBackend.findMany({
+    where: {
+      is_active: true,
+      backend_type: { in: ["s3", "s3_compatible"] },
+    },
+    orderBy: [
+      { is_default: "desc" },
+      { created_at: "desc" },
+    ],
+  });
+
+  return backends.find((backend) => {
+    try {
+      return getS3Config(backend.config).bucket === bucket;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export async function uploadAvatar(
   userId: string,
   buffer: Buffer,
@@ -621,7 +672,7 @@ export async function uploadAvatar(
     }
 
     const result = await adapter.upload("avatars", buffer, `${userId}.${safeExt}`, contentType);
-    storagePath = result.key;
+    storagePath = result.url;
     size = result.size;
   }
 
@@ -637,6 +688,42 @@ export async function uploadAvatar(
   }
 
   return { avatarUrl, size };
+}
+
+export async function resolveAvatarImage(userId: string): Promise<AvatarImageSource> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { avatar_url: true },
+  });
+
+  const avatarUrl = user?.avatar_url;
+  if (!avatarUrl) {
+    throw new AppError("Avatar not found", "NOT_FOUND", 404);
+  }
+
+  if (avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://")) {
+    return { kind: "redirect", url: avatarUrl };
+  }
+
+  if (avatarUrl.startsWith("/uploads/")) {
+    return { kind: "file", path: resolveLocalAvatarFile(avatarUrl) };
+  }
+
+  const s3Avatar = parseS3AvatarUrl(avatarUrl);
+  if (s3Avatar) {
+    const backend = await findS3BackendForBucket(s3Avatar.bucket);
+    if (!backend) {
+      throw new AppError("Avatar storage backend not found", "NOT_FOUND", 404);
+    }
+
+    const adapter = new S3Adapter(getS3Config(backend.config));
+    return {
+      kind: "redirect",
+      url: await adapter.getPresignedUrl(s3Avatar.key, 300),
+    };
+  }
+
+  throw new AppError("Unsupported avatar URL", "VALIDATION_ERROR", 400);
 }
 
 export async function getStorageStats() {

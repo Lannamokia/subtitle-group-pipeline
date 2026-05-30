@@ -244,6 +244,207 @@ describe("File Management Tests", () => {
 
       expectSuccess(acceptedWebm, 201);
     });
+
+    it("should fall back to the default role policy when a project policy is an empty shell", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: user.id,
+        assignee_id: user.id,
+        role: "translation",
+        status: "assigned",
+      });
+
+      await prisma.projectMember.create({
+        data: {
+          project_id: project.id,
+          user_id: user.id,
+          role: "translation",
+        },
+      });
+
+      await prisma.uploadPolicy.create({
+        data: {
+          project_id: project.id,
+          allowed_types: JSON.stringify({ allowedTypes: {} }),
+          max_size_bytes: 104857600,
+          require_approval: false,
+          extension_whitelist: null,
+        },
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "fallback.ass",
+          file_type: "subtitle",
+          mime_type: "application/x-ass",
+          size_bytes: 2048,
+          storage_path: "/uploads/fallback.ass",
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "translation",
+        },
+        token
+      );
+
+      expectSuccess(res, 201);
+    });
+
+    it("should expose the effective default policy when the saved project policy is empty", async () => {
+      const { user } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+
+      await prisma.uploadPolicy.create({
+        data: {
+          project_id: project.id,
+          allowed_types: JSON.stringify({ allowedTypes: {} }),
+          max_size_bytes: 104857600,
+          require_approval: false,
+        },
+      });
+
+      const res = await get(app, `/api/v1/files/upload-policy?project_id=${project.id}`);
+
+      expectSuccess(res, 200);
+      const policyConfig = JSON.parse(res.body.data.allowed_types);
+      expect(policyConfig.roles.translation.file_types).toContain("subtitle");
+      expect(policyConfig.roles.encoding.file_types).toContain("video");
+    });
+
+    it("should fall back to a usable global policy when project policy is missing", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+
+      await prisma.projectMember.create({
+        data: {
+          project_id: project.id,
+          user_id: user.id,
+          role: "translation",
+        },
+      });
+
+      await prisma.uploadPolicy.create({
+        data: {
+          project_id: null,
+          allowed_types: JSON.stringify({
+            file_types: ["subtitle"],
+            mime_types: ["application/x-ass"],
+            extensions: [".ass"],
+          }),
+          max_size_bytes: 104857600,
+          require_approval: false,
+          extension_whitelist: JSON.stringify([".ass"]),
+        },
+      });
+
+      const accepted = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "global.ass",
+          file_type: "subtitle",
+          mime_type: "application/x-ass",
+          size_bytes: 1024,
+          storage_path: "/uploads/global.ass",
+          role: "translation",
+        },
+        token
+      );
+      expectSuccess(accepted, 201);
+
+      const rejected = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "global.mp4",
+          file_type: "video",
+          mime_type: "video/mp4",
+          size_bytes: 1024,
+          storage_path: "/uploads/global.mp4",
+          role: "translation",
+        },
+        token
+      );
+      expectError(rejected, 400, "VALIDATION_ERROR");
+    });
+
+    it("should reject files whose declared file type does not match MIME or extension", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+
+      await prisma.projectMember.create({
+        data: {
+          project_id: project.id,
+          user_id: user.id,
+          role: "translation",
+        },
+      });
+
+      await prisma.uploadPolicy.create({
+        data: {
+          project_id: project.id,
+          allowed_types: JSON.stringify({
+            roles: {
+              translation: {
+                file_types: ["subtitle"],
+                mime_types: ["application/x-ass", "text/plain"],
+                extensions: [".ass", ".txt"],
+              },
+            },
+          }),
+          max_size_bytes: 104857600,
+          require_approval: false,
+          extension_whitelist: JSON.stringify([".ass", ".txt"]),
+        },
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "spoofed.mp4",
+          file_type: "subtitle",
+          mime_type: "video/mp4",
+          size_bytes: 2048,
+          storage_path: "/uploads/spoofed.mp4",
+          role: "translation",
+        },
+        token
+      );
+
+      expectError(res, 400, "VALIDATION_ERROR");
+      const created = await prisma.fileEntity.findFirst({
+        where: { project_id: project.id, name: "spoofed.mp4" },
+      });
+      expect(created).toBeNull();
+    });
+
+    it("should reject invalid extension whitelist JSON when updating upload policy", async () => {
+      const { token } = await createTestUser({ role: "group_admin" });
+
+      const res = await post(
+        app,
+        "/api/v1/files/upload-policy",
+        {
+          allowed_types: JSON.stringify(["*/*"]),
+          max_size_bytes: 1024,
+          require_approval: false,
+          extension_whitelist: "not-json",
+        },
+        token
+      );
+
+      expectError(res, 400, "VALIDATION_ERROR");
+    });
   });
 
   describe("File Entity Creation", () => {

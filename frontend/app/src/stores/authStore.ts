@@ -7,6 +7,7 @@ interface AuthState {
   isAuthenticated: boolean;
   verificationStatus: VerificationStatus | null;
   login: (user: User) => void;
+  updateUser: (user: Partial<User>) => void;
   logout: () => void;
   setVerificationStatus: (status: VerificationStatus | null) => void;
   hasRole: (roles: UserRole[]) => boolean;
@@ -26,6 +27,34 @@ export const useAuthStore = create<AuthState>()(
           user,
           isAuthenticated: true,
           verificationStatus: null,
+        }),
+
+      updateUser: (user) =>
+        set((state) => {
+          if (!state.user) {
+            const nextUser = user as User;
+            return {
+              user: nextUser,
+              isAuthenticated: Boolean(nextUser.token),
+              verificationStatus: state.verificationStatus,
+            };
+          }
+
+          const nextUser: User = {
+            ...state.user,
+            ...user,
+            token: user.token ?? state.user.token,
+            refreshToken: user.refreshToken ?? state.user.refreshToken,
+            role: user.role ?? state.user.role,
+            status: user.status ?? state.user.status,
+            createdAt: user.createdAt ?? state.user.createdAt,
+          };
+
+          return {
+            user: nextUser,
+            isAuthenticated: state.isAuthenticated,
+            verificationStatus: state.verificationStatus,
+          };
         }),
 
       logout: () =>

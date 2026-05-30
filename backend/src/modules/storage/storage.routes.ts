@@ -42,6 +42,7 @@ router.patch("/backends/:id", authenticate, requireRole("super_admin", "group_ad
 router.delete("/backends/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), controller.deleteBackend);
 
 // Avatar and stats routes must be registered before /:id.
+router.get("/avatar/:userId/image", controller.getAvatarImage);
 router.post("/avatar", authenticate, upload.any(), controller.uploadAvatar);
 router.get("/stats", authenticate, controller.getStorageStats);
 router.get("/retention", authenticate, requireRole("super_admin", "group_admin"), controller.getDataRetentionSettings);

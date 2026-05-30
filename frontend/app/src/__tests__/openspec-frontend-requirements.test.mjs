@@ -184,6 +184,9 @@ assertIncludes("profile editing", files.profile, [
   "storageApi.uploadAvatar",
   "AvatarImage",
   "nickname",
+  "updateUser",
+  "avatarUrl",
+  "AvatarCropDialog",
 ]);
 
 assertIncludes("member password validation UX", files.members + files.login + files.passwordRuleHint + files.passwordPolicy + files.api, [

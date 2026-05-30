@@ -120,6 +120,26 @@ export async function uploadAvatar(
   }
 }
 
+export async function getAvatarImage(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await storageService.resolveAvatarImage(getParam(req, "userId"));
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Cache-Control", "private, max-age=300");
+    if (result.kind === "redirect") {
+      res.redirect(result.url);
+      return;
+    }
+
+    res.sendFile(result.path);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getStorageStats(
   _req: Request,
   res: Response,

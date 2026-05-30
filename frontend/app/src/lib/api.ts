@@ -16,6 +16,7 @@ import type {
   StorageBackendInput,
   Project,
   ProjectUnit,
+  UploadPolicy,
   Task,
   TaskRole,
   TaskComment,
@@ -39,9 +40,18 @@ import type {
   PaginatedResponse,
 } from '@/types';
 
+const API_BASE_URL = 'http://localhost:3000/api/v1';
+const API_ORIGIN = (() => {
+  try {
+    return new URL(API_BASE_URL).origin;
+  } catch {
+    return '';
+  }
+})();
+
 // Create axios instance
 export const api: AxiosInstance = axios.create({
-  baseURL: 'http://localhost:3000/api/v1',
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -172,12 +182,13 @@ export function unwrapPaginated<T>(
 }
 
 export function normalizeUser(raw: AnyRecord): User {
+  const rawAvatar = raw.avatar ?? raw.avatar_url;
   return {
     id: raw.id,
     username: raw.username,
     nickname: raw.nickname,
     qq: raw.qq ?? raw.qq_number,
-    avatar: raw.avatar ?? raw.avatar_url,
+    avatar: normalizeAvatarUrl(typeof rawAvatar === "string" ? rawAvatar : undefined, raw.id),
     role: raw.role,
     status: raw.status,
     roleTags: Array.isArray(raw.roleTags)
@@ -189,6 +200,26 @@ export function normalizeUser(raw: AnyRecord): User {
     refreshToken: raw.refreshToken,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
   };
+}
+
+export function toBackendAssetUrl(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  if (/^(https?:|data:|blob:)/.test(value)) return value;
+  if (!API_ORIGIN) return value;
+  if (value.startsWith("/")) return `${API_ORIGIN}${value}`;
+  return value;
+}
+
+export function normalizeAvatarUrl(value?: string | null, userId?: string): string | undefined {
+  if (!value) return undefined;
+  if (/^(https?:|data:|blob:)/.test(value)) return value;
+  if (value.startsWith("/uploads/") || value.startsWith("/api/")) {
+    return toBackendAssetUrl(value);
+  }
+  if (userId && (value.startsWith("s3://") || value.startsWith("projects/avatars/"))) {
+    return `${API_BASE_URL}/storage/avatar/${encodeURIComponent(userId)}/image?v=${encodeURIComponent(value)}`;
+  }
+  return value;
 }
 
 export function normalizeStorageBackend(raw: AnyRecord): StorageBackend {
@@ -718,6 +749,13 @@ export function normalizeProject(raw: AnyRecord): Project {
   const completed = tasks.filter((task) => ["completed", "review_approved"].includes(task.status)).length;
   const taskCount = tasks.length || raw._count?.tasks || 0;
   const productConfigSource = raw.productConfig ?? raw.product_config ?? raw.template?.product_config;
+  const uploadPolicySource =
+    raw.uploadPolicy ??
+    raw.upload_policy_config ??
+    raw.upload_policy ??
+    raw.template?.uploadPolicy ??
+    raw.template?.upload_policy;
+  const uploadPolicy = parseJsonRecord(uploadPolicySource) as UploadPolicy;
 
   return {
     id: raw.id,
@@ -752,6 +790,7 @@ export function normalizeProject(raw: AnyRecord): Project {
         })()
       : raw.deliveryChecklist ?? raw.delivery_checklist ?? [],
     productConfig: productConfigSource ? normalizeProductConfig(productConfigSource) : undefined,
+    uploadPolicy: Object.keys(uploadPolicy).length > 0 ? uploadPolicy : undefined,
     releaseTaskType: raw.releaseTaskType ?? raw.release_task_type ?? raw.template?.release_task_type,
     downloadLinkTtlSeconds: raw.downloadLinkTtlSeconds ?? raw.download_link_ttl_seconds,
     wikiApprovalRequired: raw.wikiApprovalRequired ?? raw.wiki_approval_required,
@@ -822,6 +861,9 @@ export function getErrorMessage(error: unknown): string {
     }
 
     return message;
+  }
+  if (error instanceof Error) {
+    return error.message;
   }
   return '未知错误';
 }
@@ -967,9 +1009,23 @@ export const storageApi = {
   uploadAvatar: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post<ApiResponse<{ url: string }>>('/storage/avatar', formData, {
+    return api.post<ApiResponse<unknown>>('/storage/avatar', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-    }).then(extractData);
+    }).then((response) => {
+      const raw = response.data.data as AnyRecord;
+      const storageUrl = String(raw.avatarUrl ?? raw.avatar_url ?? raw.url ?? "");
+      if (!storageUrl) {
+        throw new Error("头像上传响应缺少 URL");
+      }
+      const userId = useAuthStore.getState().user?.id;
+      const url = normalizeAvatarUrl(storageUrl, userId) ?? storageUrl;
+      return {
+        url,
+        avatarUrl: url,
+        storageUrl,
+        size: Number(raw.size ?? 0),
+      };
+    });
   },
 
   getStats: () =>

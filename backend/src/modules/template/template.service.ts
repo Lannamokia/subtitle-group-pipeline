@@ -1,6 +1,7 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
 import * as auditService from "../audit/audit.service";
+import { normalizeUploadPolicyJson } from "../../utils/uploadPolicy";
 import type {
   CreateTemplateInput,
   UpdateTemplateInput,
@@ -83,7 +84,7 @@ function serializeTemplate(template: {
     type: template.project_type,
     description: template.description || undefined,
     roles: safeParseJson(template.roles, []),
-    uploadPolicy: safeParseJson(template.upload_policy, { allowedTypes: {} }),
+    uploadPolicy: normalizeUploadPolicyJson(template.upload_policy).policy,
     notificationPolicy: safeParseJson(template.notification_policy, { events: {} }),
     assPolicy: safeParseJson(template.ass_policy, { mergeRule: "default", dedupThreshold: 0.1 }),
     productConfig: normalizeProductConfig(safeParseJson(template.product_config, {})),
@@ -108,6 +109,7 @@ export async function createTemplate(
   if (!Array.isArray(roles)) {
     throw new AppError("Roles must be an array", "VALIDATION_ERROR", 400);
   }
+  const uploadPolicy = normalizeUploadPolicyJson(data.upload_policy, { rejectInvalid: true });
 
   // If setting as default, unset other defaults for this project type
   if (data.is_default) {
@@ -123,7 +125,7 @@ export async function createTemplate(
       description: data.description,
       project_type: data.project_type,
       roles: data.roles,
-      upload_policy: data.upload_policy,
+      upload_policy: uploadPolicy.json,
       notification_policy: data.notification_policy,
       ass_policy: data.ass_policy,
       product_config: data.product_config,
@@ -223,6 +225,9 @@ export async function updateTemplate(
       throw new AppError("Roles must be an array", "VALIDATION_ERROR", 400);
     }
   }
+  const uploadPolicy = data.upload_policy === undefined
+    ? undefined
+    : normalizeUploadPolicyJson(data.upload_policy, { rejectInvalid: true });
 
   // If setting as default, unset other defaults for this project type
   if (data.is_default && data.project_type) {
@@ -242,7 +247,7 @@ export async function updateTemplate(
       description: data.description,
       project_type: data.project_type,
       roles: data.roles,
-      upload_policy: data.upload_policy,
+      upload_policy: uploadPolicy?.json,
       notification_policy: data.notification_policy,
       ass_policy: data.ass_policy,
       product_config: data.product_config,

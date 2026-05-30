@@ -16,7 +16,7 @@ export const PACKAGE_EXTENSIONS = [
   ".psd", ".aep", ".prproj", ".veg", ".blend", ".kra", ".clip", ".aup3",
 ];
 
-export const RELEASE_EXTENSIONS = [".torrent", ".nfo", ".md", ".json", ".csv"];
+export const RELEASE_EXTENSIONS = [".torrent", ".nfo", ".md", ".txt", ".json", ".csv"];
 
 export const VIDEO_MIME_TYPES = ["video/*", "application/x-matroska", "application/mp4", "application/ogg"];
 

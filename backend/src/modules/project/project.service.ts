@@ -5,6 +5,7 @@ import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
 import { permanentlyDeleteProjectById } from "../../jobs/recyclebin.cleanup";
+import { normalizeUploadPolicyJson } from "../../utils/uploadPolicy";
 import type {
   CreateProjectInput,
   CreateProjectFromTemplateInput,
@@ -217,6 +218,7 @@ export async function createProjectFromTemplate(
   if (!backend.is_active) {
     throw new AppError("Storage backend is not active", "BAD_REQUEST", 400);
   }
+  const uploadPolicy = normalizeUploadPolicyJson(template.upload_policy);
 
   // Create project (inherit delivery checklist from template)
   const project = await prisma.project.create({
@@ -229,7 +231,7 @@ export async function createProjectFromTemplate(
       storage_backend_id: data.storage_backend_id,
       qq_group_id: data.qq_group_id,
       workflow_config: template.roles,
-      upload_policy_config: template.upload_policy,
+      upload_policy_config: uploadPolicy.json,
       notification_policy: template.notification_policy,
       ass_policy: template.ass_policy,
       product_config: template.product_config,
@@ -259,14 +261,13 @@ export async function createProjectFromTemplate(
     },
   });
 
-  const uploadPolicy = parseJsonObject(template.upload_policy);
   await prisma.uploadPolicy.create({
     data: {
       project_id: project.id,
-      allowed_types: template.upload_policy,
-      max_size_bytes: numberFromPolicy(uploadPolicy, "max_size_bytes", "maxSize") ?? 104857600,
-      require_approval: booleanFromPolicy(uploadPolicy, "require_approval", "requireApproval") ?? false,
-      extension_whitelist: stringifyPolicyList(uploadPolicy, "extension_whitelist", "extensionWhitelist", "extensions"),
+      allowed_types: uploadPolicy.json,
+      max_size_bytes: numberFromPolicy(uploadPolicy.policy, "max_size_bytes", "maxSize") ?? 104857600,
+      require_approval: booleanFromPolicy(uploadPolicy.policy, "require_approval", "requireApproval") ?? false,
+      extension_whitelist: stringifyPolicyList(uploadPolicy.policy, "extension_whitelist", "extensionWhitelist", "extensions"),
     },
   });
 

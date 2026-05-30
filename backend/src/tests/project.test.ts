@@ -465,6 +465,40 @@ describe("Project & Workflow Tests", () => {
       expect(JSON.parse(policy!.extension_whitelist!)).toEqual([".ass"]);
     });
 
+    it("should normalize empty template upload policy snapshots to default role rules", async () => {
+      const { token } = await createTestUser();
+      const backend = await createTestStorageBackend();
+      const template = await createTestTemplate({
+        upload_policy: { allowedTypes: {} },
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Default Upload Policy Project",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          qq_group_id: "123456789",
+          season_count: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+
+      expectSuccess(res, 201);
+
+      const project = await prisma.project.findUnique({ where: { id: res.body.data.id } });
+      const snapshot = JSON.parse(project!.upload_policy_config!);
+      expect(snapshot.roles.translation.file_types).toContain("subtitle");
+      expect(snapshot.roles.encoding.file_types).toContain("video");
+
+      const policy = await prisma.uploadPolicy.findFirst({ where: { project_id: project!.id } });
+      const policyConfig = JSON.parse(policy!.allowed_types);
+      expect(policyConfig.roles.translation.file_types).toContain("subtitle");
+      expect(JSON.parse(policy!.extension_whitelist!)).toContain(".ass");
+    });
+
     it("should snapshot template roles without creating default tasks", async () => {
       const { token } = await createTestUser();
       const template = await createTestTemplate({

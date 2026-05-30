@@ -2,6 +2,7 @@ import express, { Application } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import path from "path";
 import { env } from "./config/env";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { authenticate, requireRole } from "./middleware/auth";
@@ -64,6 +65,15 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
+
+  app.use(
+    "/uploads/projects/avatars",
+    express.static(path.resolve(env.UPLOAD_DIR, "projects", "avatars"), {
+      setHeaders: (res) => {
+        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      },
+    })
+  );
 
   // Root redirect to frontend
   app.get("/", (_req, res) => {

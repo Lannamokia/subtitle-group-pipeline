@@ -85,6 +85,7 @@ export interface Project {
   releaseTaskType?: string | null;
   downloadLinkTtlSeconds?: number;
   wikiApprovalRequired?: boolean | null;
+  uploadPolicy?: UploadPolicy;
   createdAt: string;
   updatedAt: string;
 }

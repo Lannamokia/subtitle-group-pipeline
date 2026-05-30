@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router";
 import {
   announcementApi,
@@ -18,8 +18,8 @@ import {
   wikiApi,
 } from "@/lib/api";
 import {
-  getDefaultTaskFileType,
-  getTaskDeliveryRule,
+  getPolicyAwareTaskDeliveryRule,
+  getPolicyUploadProfile,
   TASK_PIPELINE_ROLES,
   TASK_WORKFLOW_STEPS,
 } from "@/lib/taskWorkflow";
@@ -310,7 +310,7 @@ export function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="files" className="mt-6">
-          <FilesTab files={files} projectId={projectId!} onUpdate={fetchProject} />
+          <FilesTab files={files} project={project} onUpdate={fetchProject} />
         </TabsContent>
 
         <TabsContent value="wiki" className="mt-6">
@@ -586,7 +586,10 @@ function TasksTab({
       .filter((dep): dep is Task => Boolean(dep))
       .filter((dep) => !["review_approved", "completed"].includes(dep.status));
   const resettableStatuses: TaskStatus[] = ["submitted", "review_rejected", "completed", "review_approved"];
-  const selectedTaskDeliveryRule = selectedTask ? getTaskDeliveryRule(selectedTask.role) : null;
+  const selectedTaskDeliveryRule = useMemo(
+    () => selectedTask ? getPolicyAwareTaskDeliveryRule(selectedTask.role, project.uploadPolicy) : null,
+    [project.uploadPolicy, selectedTask?.id, selectedTask?.role]
+  );
   const workflowSummaries = TASK_WORKFLOW_STEPS.map((step) => {
     const roleTasks = filteredTasks
       .filter((task) => task.role === step.role)
@@ -605,12 +608,16 @@ function TasksTab({
   })();
 
   useEffect(() => {
-    if (!selectedTask) return;
-    setTaskUploadType(getDefaultTaskFileType(selectedTask.role));
+    if (!selectedTask || !selectedTaskDeliveryRule) return;
+    setTaskUploadType((current) =>
+      selectedTaskDeliveryRule.fileTypes.includes(current)
+        ? current
+        : selectedTaskDeliveryRule.fileTypes[0] ?? "other"
+    );
     setTaskUploadTags("");
     setTaskUploadSummary("");
     setTaskDragOver(false);
-  }, [selectedTask?.id, selectedTask?.role]);
+  }, [selectedTask?.id, selectedTaskDeliveryRule]);
 
   const handleTaskAction = async (task: Task, action: string) => {
     setUpdating(true);
@@ -1331,7 +1338,10 @@ function TasksTab({
                           className="hidden"
                           accept={selectedTaskDeliveryRule.accept}
                           disabled={taskUploading}
-                          onChange={(event) => handleTaskUpload(event.target.files)}
+                          onChange={(event) => {
+                            handleTaskUpload(event.target.files);
+                            event.currentTarget.value = "";
+                          }}
                         />
                         <Button type="button" variant="outline" size="sm" asChild disabled={taskUploading}>
                           <span>
@@ -1524,7 +1534,9 @@ function TasksTab({
 
 /* ---------- Files Tab ---------- */
 
-function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; projectId: string; onUpdate: () => void }) {
+function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: Project; onUpdate: () => void }) {
+  const currentUser = useAuthStore((state) => state.user);
+  const isSupervisor = useAuthStore((state) => state.isSupervisor());
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<FileType | "all">("all");
@@ -1539,6 +1551,26 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const currentProjectRole = isSupervisor
+    ? "supervisor" as TaskRole
+    : project.members.find((member) => member.user.id === currentUser?.id)?.role;
+  const uploadProfile = useMemo(
+    () => getPolicyUploadProfile(project.uploadPolicy, currentProjectRole),
+    [currentProjectRole, project.uploadPolicy]
+  );
+  const uploadTypeOptions = useMemo(
+    () => FILE_TYPE_OPTIONS.filter(
+      (opt): opt is { value: FileType; label: string } =>
+        opt.value !== "all" && uploadProfile.fileTypes.includes(opt.value)
+    ),
+    [uploadProfile.fileTypes]
+  );
+  const replaceTarget = files.find((file) => file.id === replaceTargetId);
+  const uploadAccept = uploadMode === "replace" && replaceTarget
+    ? getPolicyUploadProfile(project.uploadPolicy, currentProjectRole, [replaceTarget.type]).accept
+    : uploadProfile.constrained
+      ? uploadProfile.accept
+      : getPolicyUploadProfile(null, undefined, [uploadType]).accept;
 
   const filteredFiles = files.filter((f) => {
     if (search && !f.name.toLowerCase().includes(search.toLowerCase())) return false;
@@ -1546,6 +1578,12 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
     if (typeFilter !== "all" && f.type !== typeFilter) return false;
     return true;
   });
+
+  useEffect(() => {
+    if (uploadTypeOptions.length > 0 && !uploadTypeOptions.some((option) => option.value === uploadType)) {
+      setUploadType(uploadTypeOptions[0].value);
+    }
+  }, [uploadType, uploadTypeOptions]);
 
   useEffect(() => {
     if (!selectedFile) {
@@ -1565,6 +1603,10 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
       toast.error("请先选择要替换的文件实体");
       return;
     }
+    if (uploadMode === "new" && !uploadProfile.fileTypes.includes(uploadType)) {
+      toast.error("当前项目上传策略不允许该文件类别");
+      return;
+    }
     setUploading(true);
     try {
       const tags = uploadTags.split(",").map((tag) => tag.trim()).filter(Boolean);
@@ -1572,7 +1614,7 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
         await fileApi.replaceFile(replaceTargetId, fileList[0], { changeSummary, tags });
       } else {
         await fileApi.uploadFile(fileList[0], {
-          projectId,
+          projectId: project.id,
           type: uploadType,
           tags,
           changeSummary,
@@ -1707,7 +1749,7 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {FILE_TYPE_OPTIONS.filter((opt) => opt.value !== "all").map((opt) => (
+                  {uploadTypeOptions.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
                       {opt.label}
                     </SelectItem>
@@ -1715,6 +1757,10 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
                 </SelectContent>
               </Select>
             )}
+            <p className="text-xs leading-5 text-gray-500">
+              当前上传策略允许：{uploadProfile.fileTypes.map((type) => getFileTypeLabel(type)).join("、")}
+              {uploadProfile.formats.length > 0 ? `；格式：${formatShortList(uploadProfile.formats, 8)}` : ""}
+            </p>
             <Input
               value={uploadTags}
               onChange={(event) => setUploadTags(event.target.value)}
@@ -1741,7 +1787,12 @@ function FilesTab({ files, projectId, onUpdate }: { files: FileEntity[]; project
               <input
                 type="file"
                 className="hidden"
-                onChange={(e) => handleUpload(e.target.files)}
+                accept={uploadAccept}
+                disabled={uploading}
+                onChange={(e) => {
+                  handleUpload(e.target.files);
+                  e.currentTarget.value = "";
+                }}
               />
               <Button type="button" variant="outline" size="sm" asChild>
                 <span>选择文件</span>

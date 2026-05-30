@@ -21,6 +21,20 @@ const strongPasswordSchema = z
   .regex(/\d/, "Password must include at least one number")
   .refine((value) => !/\s/.test(value), passwordPolicyMessage);
 
+const storedAvatarUrlSchema = z
+  .string()
+  .trim()
+  .max(2048)
+  .refine((value) => {
+    if (value.startsWith("/uploads/projects/avatars/")) {
+      return true;
+    }
+    if (value.startsWith("s3://")) {
+      return true;
+    }
+    return z.string().url().safeParse(value).success;
+  }, "Invalid avatar URL");
+
 export const registerSchema = z.object({
   username: z
     .string()
@@ -62,7 +76,7 @@ export const updateProfileSchema = z.object({
   nickname: z.string().max(50).optional(),
   email: z.string().email("Invalid email address").optional().nullable(),
   bio: z.string().max(500).optional().nullable(),
-  avatar_url: z.string().url("Invalid URL").optional().nullable(),
+  avatar_url: storedAvatarUrlSchema.optional().nullable(),
 });
 
 export const verifyQQSchema = z.object({

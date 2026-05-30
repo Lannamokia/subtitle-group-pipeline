@@ -423,6 +423,7 @@ const tableNames = [
   "projectUnit",
   "joinRequest",
   "projectMember",
+  "uploadPolicy",
   "project",
   "recycleBinRecord",
   "tagApplication",

@@ -84,6 +84,37 @@ describe("User Profile & Storage Tests", () => {
       expect(res.body.data.avatar_url).toBe("https://example.com/avatar.png");
     });
 
+    it("should update local stored avatar path", async () => {
+      const { token } = await createTestUser();
+
+      const res = await put(
+        app,
+        "/api/v1/auth/profile",
+        { avatar_url: "/uploads/projects/avatars/user-avatar.png" },
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.avatar_url).toBe("/uploads/projects/avatars/user-avatar.png");
+    });
+
+    it("should keep session-critical profile fields in update response", async () => {
+      const { token } = await createTestUser({ role: "supervisor" });
+
+      const res = await put(
+        app,
+        "/api/v1/auth/profile",
+        { nickname: "Updated Profile" },
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.nickname).toBe("Updated Profile");
+      expect(res.body.data.role).toBe("supervisor");
+      expect(res.body.data.status).toBe("active");
+      expect(res.body.data.created_at).toBeDefined();
+    });
+
     it("should reject invalid email format", async () => {
       const { token } = await createTestUser();
 
@@ -163,6 +194,59 @@ describe("User Profile & Storage Tests", () => {
 
       expect(result.avatarUrl).toBeDefined();
       expect(result.size).toBe(avatarBuffer.length);
+    });
+
+    it("should serve local avatar image through the storage avatar endpoint", async () => {
+      await createTestStorageBackend({
+        backend_type: "local",
+        is_default: true,
+        config: { basePath: "./uploads" },
+      });
+
+      const { user } = await createTestUser();
+      const avatarBuffer = Buffer.from("fake-image-data");
+      const result = await storageService.uploadAvatar(
+        user.id,
+        avatarBuffer,
+        "image/png",
+        "avatar.png"
+      );
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { avatar_url: result.avatarUrl },
+      });
+
+      const res = await get(app, `/api/v1/storage/avatar/${user.id}/image`);
+
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toContain("image/png");
+    });
+
+    it("should redirect S3 avatar image requests to a presigned URL", async () => {
+      await createTestStorageBackend({
+        backend_type: "s3",
+        is_default: true,
+        config: {
+          bucket: "avatars",
+          region: "us-east-1",
+          accessKeyId: "valid-access-key",
+          secretAccessKey: "valid-secret-key",
+          endpoint: "https://s3.example.com",
+        },
+      });
+      const { user } = await createTestUser();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { avatar_url: "s3://avatars/projects/avatars/user.png" },
+      });
+      jest
+        .spyOn(S3Adapter.prototype, "getPresignedUrl")
+        .mockResolvedValue("https://signed.example.com/avatar.png");
+
+      const res = await get(app, `/api/v1/storage/avatar/${user.id}/image`);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe("https://signed.example.com/avatar.png");
     });
 
     it("should reject invalid avatar file types", async () => {

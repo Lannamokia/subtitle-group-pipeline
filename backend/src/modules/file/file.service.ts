@@ -12,44 +12,59 @@ import type {
 } from "./file.schema";
 import { FileType, TaskRole, UserRole, TimelineEventType } from "@prisma/client";
 import * as timelineService from "../timeline/timeline.service";
-import { DEFAULT_ROLE_UPLOAD_POLICY } from "../../utils/defaultUploadPolicy";
+import {
+  DEFAULT_ROLE_UPLOAD_POLICY,
+  FONT_EXTENSIONS,
+  FONT_MIME_TYPES,
+  PACKAGE_EXTENSIONS,
+  PACKAGE_MIME_TYPES,
+  RELEASE_EXTENSIONS,
+  SUBTITLE_EXTENSIONS,
+  SUBTITLE_MIME_TYPES,
+  VIDEO_EXTENSIONS,
+  VIDEO_MIME_TYPES,
+} from "../../utils/defaultUploadPolicy";
+import { normalizeUploadPolicyJson } from "../../utils/uploadPolicy";
 
 // ============ Upload Policy ============
 
+function defaultUploadPolicyRecord() {
+  return {
+    allowed_types: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY),
+    max_size_bytes: 104857600,
+    require_approval: false,
+    extension_whitelist: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY.extensionWhitelist),
+  };
+}
+
 export async function getUploadPolicy(projectId?: string) {
-  const where: Record<string, unknown> = {};
-  if (projectId) {
-    where.project_id = projectId;
-  } else {
-    where.project_id = null;
-  }
-
-  const policy = await prisma.uploadPolicy.findFirst({
-    where,
-    orderBy: { created_at: "desc" },
-  });
-
-  return (
-    policy || {
-      allowed_types: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY),
-      max_size_bytes: 104857600, // 100MB
-      require_approval: false,
-      extension_whitelist: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY.extensionWhitelist),
-    }
+  const resolvedPolicy = resolvePolicyRuleFromCandidates(
+    await getUploadPolicyCandidates(projectId),
+    undefined,
+    "super_admin"
   );
+
+  return resolvedPolicy?.policy || defaultUploadPolicyRecord();
 }
 
 export async function updateUploadPolicy(
   data: UpdateUploadPolicyInput,
   projectId?: string
 ) {
+  const normalizedPolicy = normalizeUploadPolicyJson(data.allowed_types, { rejectInvalid: true });
+  const extensionWhitelist = data.extension_whitelist === undefined
+    ? data.extension_whitelist
+    : data.extension_whitelist === null
+      ? null
+      : JSON.stringify(tryParseStringList(data.extension_whitelist));
+
   const policy = await prisma.uploadPolicy.create({
     data: {
       project_id: projectId || null,
-      allowed_types: data.allowed_types,
+      allowed_types: normalizedPolicy.json,
       max_size_bytes: data.max_size_bytes,
       require_approval: data.require_approval,
-      extension_whitelist: data.extension_whitelist,
+      extension_whitelist: extensionWhitelist,
     },
   });
 
@@ -83,6 +98,14 @@ interface NormalizedPolicyRule {
   fileTypes: string[];
   extensions: string[];
 }
+
+type UploadPolicyRecord = {
+  id?: string;
+  allowed_types: string;
+  max_size_bytes: number;
+  require_approval: boolean;
+  extension_whitelist?: string | null;
+};
 
 function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
   if (!value) {
@@ -153,6 +176,22 @@ function mergePolicyRules(rules: NormalizedPolicyRule[]): NormalizedPolicyRule {
     fileTypes: unique(rules.flatMap((rule) => rule.fileTypes)),
     extensions: unique(rules.flatMap((rule) => rule.extensions)),
   };
+}
+
+function isPolicyRuleEmpty(rule: NormalizedPolicyRule | null): boolean {
+  return !rule || rule.raw.length + rule.mimeTypes.length + rule.fileTypes.length + rule.extensions.length === 0;
+}
+
+function tryParseStringList(value: string | null | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    return normalizeStringList(JSON.parse(value));
+  } catch {
+    throw new AppError("Extension whitelist must be valid JSON string array", "VALIDATION_ERROR", 400);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -231,6 +270,49 @@ function roleRuleFromPolicy(
   return null;
 }
 
+async function getUploadPolicyCandidates(projectId?: string): Promise<UploadPolicyRecord[]> {
+  const candidates: UploadPolicyRecord[] = [];
+
+  if (projectId) {
+    const projectPolicy = await prisma.uploadPolicy.findFirst({
+      where: { project_id: projectId },
+      orderBy: { created_at: "desc" },
+    });
+
+    if (projectPolicy) {
+      candidates.push(projectPolicy);
+    }
+  }
+
+  const globalPolicy = await prisma.uploadPolicy.findFirst({
+    where: { project_id: null },
+    orderBy: { created_at: "desc" },
+  });
+
+  if (globalPolicy && !candidates.some((policy) => policy.id === globalPolicy.id)) {
+    candidates.push(globalPolicy);
+  }
+
+  candidates.push(defaultUploadPolicyRecord());
+  return candidates;
+}
+
+function resolvePolicyRuleFromCandidates(
+  candidates: UploadPolicyRecord[],
+  taskRole: TaskRole | undefined,
+  userRole: UserRole
+) {
+  for (const policy of candidates) {
+    const policyConfig = safeJsonParse<unknown>(policy.allowed_types, {});
+    const allowedRule = roleRuleFromPolicy(policyConfig, taskRole, userRole);
+    if (!isPolicyRuleEmpty(allowedRule)) {
+      return { policy, allowedRule: allowedRule!, policyConfig };
+    }
+  }
+
+  return null;
+}
+
 function matchesAllowedType(
   rule: NormalizedPolicyRule,
   mimetype: string,
@@ -242,7 +324,11 @@ function matchesAllowedType(
     return true;
   }
 
-  const mimeMatches = [...rule.raw, ...rule.mimeTypes].some((allowed) => {
+  const rawContentValues = rule.raw.filter((value) =>
+    value.includes("/") || value.startsWith(".")
+  );
+  const contentValues = [...rawContentValues, ...rule.mimeTypes, ...rule.extensions];
+  const mimeMatches = [...rawContentValues, ...rule.mimeTypes].some((allowed) => {
     if (allowed === mimetype) {
       return true;
     }
@@ -256,10 +342,74 @@ function matchesAllowedType(
     ? [...rule.raw, ...rule.fileTypes].includes(fileType)
     : false;
   const extensionMatches = ext
-    ? [...rule.raw, ...rule.extensions].includes(ext)
+    ? [...rawContentValues, ...rule.extensions].includes(ext)
     : false;
 
-  return mimeMatches || fileTypeMatches || extensionMatches;
+  if (contentValues.length > 0) {
+    return mimeMatches || extensionMatches;
+  }
+
+  return fileTypeMatches;
+}
+
+function inferFileTypesFromFile(mimetype: string, ext: string): FileType[] {
+  const inferred = new Set<FileType>();
+
+  if (VIDEO_EXTENSIONS.includes(ext) || VIDEO_MIME_TYPES.some((allowed) => (
+    allowed.endsWith("/*")
+      ? mimetype.startsWith(allowed.slice(0, -1))
+      : mimetype === allowed
+  ))) {
+    inferred.add(FileType.video);
+  }
+
+  if (SUBTITLE_EXTENSIONS.includes(ext) || SUBTITLE_MIME_TYPES.some((allowed) => (
+    allowed !== "application/octet-stream" && mimetype === allowed
+  ))) {
+    inferred.add(FileType.subtitle);
+  }
+
+  if (FONT_EXTENSIONS.includes(ext) || FONT_MIME_TYPES.some((allowed) => (
+    allowed !== "application/octet-stream" && (
+      allowed.endsWith("/*")
+        ? mimetype.startsWith(allowed.slice(0, -1))
+        : mimetype === allowed
+    )
+  ))) {
+    inferred.add(FileType.font);
+  }
+
+  if (PACKAGE_EXTENSIONS.includes(ext) || PACKAGE_MIME_TYPES.some((allowed) => (
+    allowed !== "application/octet-stream" && mimetype === allowed
+  ))) {
+    inferred.add(FileType.project_package);
+  }
+
+  if (RELEASE_EXTENSIONS.includes(ext)) {
+    inferred.add(FileType.other);
+  }
+
+  return Array.from(inferred);
+}
+
+function validateDeclaredFileType(
+  fileType: FileType | undefined,
+  mimetype: string,
+  ext: string
+): ValidationResult {
+  if (!fileType) {
+    return { valid: true };
+  }
+
+  const inferredTypes = inferFileTypesFromFile(mimetype, ext);
+  if (inferredTypes.length > 0 && !inferredTypes.includes(fileType)) {
+    return {
+      valid: false,
+      error: `Declared file type ${fileType} does not match file extension or MIME type. Detected: ${inferredTypes.join(", ")}`,
+    };
+  }
+
+  return { valid: true };
 }
 
 async function resolveUploadRole(
@@ -386,22 +536,24 @@ export async function validateUpload(
     }
   }
 
-  // Get policy
-  const policy = await getUploadPolicy(projectId);
-  const policyConfig = safeJsonParse<unknown>(policy.allowed_types, []);
+  const declaredTypeValidation = validateDeclaredFileType(options.fileType, file.mimetype, ext);
+  if (!declaredTypeValidation.valid) {
+    return declaredTypeValidation;
+  }
+
   const taskRole = await resolveUploadRole(
     projectId,
     userRole,
     options.userId,
     options.taskRole
   );
-  const allowedRule = roleRuleFromPolicy(policyConfig, taskRole, userRole);
-  const maxSize = policy.max_size_bytes;
-  const whitelist = policy.extension_whitelist
-    ? safeJsonParse<string[]>(policy.extension_whitelist, [])
-    : null;
+  const resolvedPolicy = resolvePolicyRuleFromCandidates(
+    await getUploadPolicyCandidates(projectId),
+    taskRole,
+    userRole
+  );
 
-  if (!allowedRule || allowedRule.raw.length + allowedRule.mimeTypes.length + allowedRule.fileTypes.length + allowedRule.extensions.length === 0) {
+  if (!resolvedPolicy) {
     return {
       valid: false,
       error: taskRole
@@ -409,6 +561,11 @@ export async function validateUpload(
         : "No upload policy is configured for the uploader role",
     };
   }
+  const { policy, allowedRule } = resolvedPolicy;
+  const maxSize = policy.max_size_bytes;
+  const whitelist = policy.extension_whitelist
+    ? tryParseStringList(policy.extension_whitelist)
+    : null;
 
   // Check MIME/file asset type against global or role-specific policy
   if (!matchesAllowedType(allowedRule, file.mimetype, ext, options.fileType)) {

@@ -1,4 +1,4 @@
-import type { FileType, TaskRole } from "@/types";
+import type { FileType, TaskRole, UploadPolicy, UploadPolicyRule } from "@/types";
 
 export type TaskTemplatePreset = {
   title: string;
@@ -11,6 +11,13 @@ export type TaskDeliveryRule = {
   formats: string[];
   guidance: string;
   deliverables: string[];
+};
+
+type UploadPolicyProfile = {
+  fileTypes: FileType[];
+  accept: string;
+  formats: string[];
+  constrained: boolean;
 };
 
 export type TaskWorkflowStep = {
@@ -90,6 +97,189 @@ const RELEASE_ACCEPT = [".torrent", ".nfo", ".md", ".txt", ".json", ".csv"];
 
 function accept(...groups: string[][]) {
   return Array.from(new Set(groups.flat())).join(",");
+}
+
+const ALL_FILE_TYPES: FileType[] = ["video", "subtitle", "font", "project_package", "other"];
+const ALL_TASK_ROLES: TaskRole[] = [
+  "source",
+  "timing",
+  "translation",
+  "post_production",
+  "encoding",
+  "release",
+  "supervisor",
+];
+
+const FILE_TYPE_ACCEPT: Record<FileType, string[]> = {
+  video: VIDEO_ACCEPT,
+  subtitle: SUBTITLE_ACCEPT,
+  font: FONT_ACCEPT,
+  project_package: PACKAGE_ACCEPT,
+  other: RELEASE_ACCEPT,
+};
+
+export function getFileTypeAccept(type: FileType): string {
+  return accept(FILE_TYPE_ACCEPT[type] ?? RELEASE_ACCEPT);
+}
+
+export function getFileTypesAccept(types: FileType[]): string {
+  return accept(...types.map((type) => FILE_TYPE_ACCEPT[type] ?? RELEASE_ACCEPT));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function unique(values: string[]) {
+  return Array.from(new Set(values));
+}
+
+function normalizeFileTypes(value: unknown): FileType[] {
+  return normalizeStringList(value).filter((item): item is FileType =>
+    ALL_FILE_TYPES.includes(item as FileType)
+  );
+}
+
+function isAcceptValue(value: string) {
+  return value === "*" || value === "*/*" || value.startsWith(".") || value.includes("/");
+}
+
+function formatPolicyValues(values: string[]) {
+  const visible = values.filter((value) => value !== "*" && value !== "*/*");
+  return visible.length > 0 ? visible : ["全部格式"];
+}
+
+function normalizePolicyRule(rule: unknown): { fileTypes: FileType[]; acceptValues: string[] } {
+  if (Array.isArray(rule)) {
+    const values = normalizeStringList(rule);
+    return {
+      fileTypes: values.filter((item): item is FileType => ALL_FILE_TYPES.includes(item as FileType)),
+      acceptValues: values.filter(isAcceptValue),
+    };
+  }
+
+  if (!isRecord(rule)) {
+    return { fileTypes: [], acceptValues: [] };
+  }
+
+  const allowedValues = [
+    ...normalizeStringList(rule.allowed_types),
+    ...normalizeStringList(rule.allowedTypes),
+  ];
+  const mimeValues = [
+    ...normalizeStringList(rule.mime_types),
+    ...normalizeStringList(rule.mimeTypes),
+  ];
+  const extensionValues = normalizeStringList(rule.extensions);
+  const fileTypes = [
+    ...normalizeFileTypes(rule.file_types),
+    ...normalizeFileTypes(rule.fileTypes),
+    ...normalizeFileTypes(rule.allowed_types),
+    ...normalizeFileTypes(rule.allowedTypes),
+  ];
+
+  return {
+    fileTypes: unique(fileTypes) as FileType[],
+    acceptValues: unique([
+      ...allowedValues.filter(isAcceptValue),
+      ...mimeValues,
+      ...extensionValues,
+    ]),
+  };
+}
+
+function isRoleMatrix(value: unknown): value is Record<TaskRole, unknown> {
+  return isRecord(value) && Object.keys(value).some((key) => ALL_TASK_ROLES.includes(key as TaskRole));
+}
+
+function resolvePolicyMatrix(policy: UploadPolicy): Record<TaskRole, unknown> | null {
+  if (isRoleMatrix(policy.roles)) return policy.roles;
+  if (isRoleMatrix(policy.byRole)) return policy.byRole;
+  if (isRoleMatrix(policy.allowedTypes)) return policy.allowedTypes as Record<TaskRole, unknown>;
+  if (isRoleMatrix(policy.allowed_types)) return policy.allowed_types as unknown as Record<TaskRole, unknown>;
+  if (isRoleMatrix(policy)) return policy as Record<TaskRole, unknown>;
+  return null;
+}
+
+function mergePolicyRules(rules: unknown[]) {
+  const normalized = rules.map(normalizePolicyRule);
+  return {
+    fileTypes: unique(normalized.flatMap((rule) => rule.fileTypes)) as FileType[],
+    acceptValues: unique(normalized.flatMap((rule) => rule.acceptValues)),
+  };
+}
+
+function resolvePolicyRule(policy: UploadPolicy | null | undefined, role?: TaskRole) {
+  if (!policy || !isRecord(policy)) {
+    return null;
+  }
+
+  const matrix = resolvePolicyMatrix(policy);
+  if (matrix) {
+    if (role && matrix[role] !== undefined) {
+      return normalizePolicyRule(matrix[role]);
+    }
+    if (!role) {
+      return mergePolicyRules(Object.values(matrix));
+    }
+    return null;
+  }
+
+  const directRuleKeys: Array<keyof UploadPolicyRule> = [
+    "allowed_types",
+    "allowedTypes",
+    "mime_types",
+    "mimeTypes",
+    "file_types",
+    "fileTypes",
+    "extensions",
+  ];
+  if (directRuleKeys.some((key) => policy[key] !== undefined)) {
+    return normalizePolicyRule(policy);
+  }
+
+  return null;
+}
+
+export function getPolicyUploadProfile(
+  policy: UploadPolicy | null | undefined,
+  role?: TaskRole,
+  fallbackTypes: FileType[] = ALL_FILE_TYPES
+): UploadPolicyProfile {
+  const fallback = fallbackTypes.length > 0 ? fallbackTypes : ALL_FILE_TYPES;
+  const rule = resolvePolicyRule(policy, role);
+  if (!rule || (rule.fileTypes.length === 0 && rule.acceptValues.length === 0)) {
+    return {
+      fileTypes: fallback,
+      accept: getFileTypesAccept(fallback),
+      formats: [],
+      constrained: false,
+    };
+  }
+
+  const fileTypes = rule.fileTypes.length > 0 ? rule.fileTypes : fallback;
+  const acceptValues = unique(rule.acceptValues);
+  return {
+    fileTypes,
+    accept: acceptValues.includes("*") || acceptValues.includes("*/*")
+      ? ""
+      : acceptValues.length > 0
+        ? accept(acceptValues)
+        : getFileTypesAccept(fileTypes),
+    formats: formatPolicyValues(acceptValues),
+    constrained: true,
+  };
 }
 
 export const TASK_PIPELINE_ROLES: Exclude<TaskRole, "supervisor">[] = [
@@ -193,6 +383,20 @@ export function getTaskWorkflowStep(role: TaskRole) {
 
 export function getTaskDeliveryRule(role: TaskRole): TaskDeliveryRule {
   return TASK_DELIVERY_RULES[role];
+}
+
+export function getPolicyAwareTaskDeliveryRule(
+  role: TaskRole,
+  policy: UploadPolicy | null | undefined
+): TaskDeliveryRule {
+  const base = getTaskDeliveryRule(role);
+  const profile = getPolicyUploadProfile(policy, role, base.fileTypes);
+  return {
+    ...base,
+    fileTypes: profile.fileTypes,
+    accept: profile.accept,
+    formats: profile.constrained && profile.formats.length > 0 ? profile.formats : base.formats,
+  };
 }
 
 export function getDefaultTaskFileType(role: TaskRole): FileType {

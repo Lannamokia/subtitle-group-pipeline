@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import {
   Form,
   FormControl,
@@ -39,10 +40,12 @@ const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secon
 
 export function ProfilePage() {
   const user = useAuthStore((s) => s.user);
-  const setUser = useAuthStore((s) => s.login);
+  const updateUser = useAuthStore((s) => s.updateUser);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAvatarUploading, setIsAvatarUploading] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar || "");
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
   const [tagStatuses, setTagStatuses] = useState<UserRoleTagStatus[]>([]);
   const [tagsLoading, setTagsLoading] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,7 +68,7 @@ export function ProfilePage() {
           authApi.me(),
           roleTagApi.getMyTagStatuses().catch(() => [] as UserRoleTagStatus[]),
         ]);
-        setUser(meData);
+        updateUser(meData);
         setAvatarUrl(meData.avatar || "");
         form.reset({
           username: meData.username,
@@ -80,16 +83,16 @@ export function ProfilePage() {
       }
     };
     fetchData();
-  }, [form, setUser]);
+  }, [form, updateUser]);
 
   const handleSave = async (data: ProfileFormData) => {
     setIsSaving(true);
     try {
       const updated = await authApi.updateProfile({
         nickname: data.nickname,
-        avatar: avatarUrl,
       });
-      setUser(updated);
+      updateUser(updated);
+      setAvatarUrl(updated.avatar || avatarUrl || "");
       toast.success("保存成功");
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -102,7 +105,34 @@ export function ProfilePage() {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const closeCropDialog = () => {
+    setCropImageUrl((current) => {
+      if (current?.startsWith("blob:")) {
+        URL.revokeObjectURL(current);
+      }
+      return null;
+    });
+  };
+
+  const uploadAvatarFile = async (file: File) => {
+    setIsAvatarUploading(true);
+    try {
+      const result = await storageApi.uploadAvatar(file);
+      setAvatarUrl(result.url);
+      const updated = await authApi.updateProfile({ avatarUrl: result.storageUrl });
+      updateUser(updated);
+      setAvatarUrl(updated.avatar || result.url);
+      toast.success("头像上传成功");
+      closeCropDialog();
+    } catch (error) {
+      setAvatarUrl(user?.avatar || "");
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsAvatarUploading(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -115,21 +145,9 @@ export function ProfilePage() {
       return;
     }
 
-    // Preview
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setAvatarUrl(event.target?.result as string);
-    };
-    reader.readAsDataURL(file);
-
-    // Upload
-    try {
-      const result = await storageApi.uploadAvatar(file);
-      setAvatarUrl(result.url);
-      toast.success("头像上传成功");
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    }
+    closeCropDialog();
+    setCropImageUrl(URL.createObjectURL(file));
+    e.currentTarget.value = "";
   };
 
   return (
@@ -165,10 +183,16 @@ export function ProfilePage() {
                     </AvatarFallback>
                   </Avatar>
                   <button
+                    type="button"
                     onClick={handleAvatarClick}
+                    disabled={isAvatarUploading}
                     className="absolute -bottom-1 -right-1 w-7 h-7 bg-primary-500 text-white rounded-full flex items-center justify-center shadow-sm hover:bg-primary-600 transition-colors"
                   >
-                    <Camera className="w-3.5 h-3.5" />
+                    {isAvatarUploading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5" />
+                    )}
                   </button>
                   <input
                     ref={fileInputRef}
@@ -228,7 +252,7 @@ export function ProfilePage() {
                     <p className="text-xs text-gray-400">QQ号由系统绑定，不可修改</p>
                   </div>
 
-                  <Button type="submit" disabled={isSaving}>
+                  <Button type="submit" disabled={isSaving || isAvatarUploading}>
                     {isSaving ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -287,6 +311,14 @@ export function ProfilePage() {
           )}
         </CardContent>
       </Card>
+
+      <AvatarCropDialog
+        open={Boolean(cropImageUrl)}
+        imageUrl={cropImageUrl}
+        uploading={isAvatarUploading}
+        onCancel={closeCropDialog}
+        onConfirm={uploadAvatarFile}
+      />
     </div>
   );
 }

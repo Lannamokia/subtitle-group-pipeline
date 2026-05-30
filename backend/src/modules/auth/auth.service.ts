@@ -610,8 +610,12 @@ export async function updateProfile(userId: string, data: UpdateProfileInput) {
       username: true,
       nickname: true,
       email: true,
+      role: true,
+      status: true,
       bio: true,
       avatar_url: true,
+      qq_number: true,
+      created_at: true,
       updated_at: true,
     },
   });
