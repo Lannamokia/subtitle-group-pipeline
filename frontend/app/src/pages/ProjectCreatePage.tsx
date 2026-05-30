@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { api, getErrorMessage } from "@/lib/api";
+import { api, getErrorMessage, normalizeProject, normalizeStorageBackend, normalizeUser } from "@/lib/api";
 import { cn, getRoleLabel } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,8 +67,20 @@ const projectFormSchema = z.object({
 
 type ProjectFormValues = z.infer<typeof projectFormSchema>;
 
+type ApiEnvelope<T> = { data: T };
+
 function isUuid(value: string | undefined): value is string {
   return Boolean(value?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
+}
+
+function toBackendProjectType(type: ProjectFormValues["type"]) {
+  return type === "collection" ? "other" : type;
+}
+
+function fromBackendProjectType(type: ProjectTemplate["type"]): ProjectFormValues["type"] {
+  return type === "other" || type === "ova" || type === "special" || type === "music_video"
+    ? "collection"
+    : type;
 }
 
 const defaultValues: ProjectFormValues = {
@@ -108,13 +120,13 @@ export function ProjectCreatePage() {
   useEffect(() => {
     const fetchTemplates = async () => {
       try {
-        const res = await api.get<{ data: ProjectTemplate[] }>("/templates");
+        const res = await api.get<ApiEnvelope<ProjectTemplate[]>>("/templates");
         setTemplates(res.data.data);
         if (preselectedTemplateId) {
           const tmpl = res.data.data.find((t) => t.id === preselectedTemplateId);
           if (tmpl) {
             setSelectedTemplate(tmpl);
-            form.setValue("type", tmpl.type);
+            form.setValue("type", fromBackendProjectType(tmpl.type));
           }
         }
       } catch (error) {
@@ -128,8 +140,8 @@ export function ProjectCreatePage() {
   useEffect(() => {
     const fetchBackends = async () => {
       try {
-        const res = await api.get<StorageBackend[]>("/storage/backends");
-        setStorageBackends(res.data.filter((b) => b.isEnabled));
+        const res = await api.get<ApiEnvelope<unknown[]>>("/storage/backends");
+        setStorageBackends(res.data.data.map((b) => normalizeStorageBackend(b as Record<string, unknown>)).filter((b) => b.isEnabled));
       } catch (error) {
         toast.error("获取存储后端失败: " + getErrorMessage(error));
       }
@@ -141,8 +153,9 @@ export function ProjectCreatePage() {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const res = await api.get<User[]>("/users");
-        setUsers(res.data);
+        const res = await api.get<ApiEnvelope<{ items: unknown[] } | unknown[]>>("/users");
+        const usersData = Array.isArray(res.data.data) ? res.data.data : res.data.data.items;
+        setUsers(usersData.map((user) => normalizeUser(user as Record<string, unknown>)));
       } catch {
         setUsers([]);
       }
@@ -153,7 +166,7 @@ export function ProjectCreatePage() {
   const handleSelectTemplate = (template: ProjectTemplate) => {
     setSelectedTemplate(template);
     form.setValue("templateId", template.id);
-    form.setValue("type", template.type);
+    form.setValue("type", fromBackendProjectType(template.type));
 
     // Initialize members from template roles
     const memberSlots = template.roles
@@ -202,15 +215,47 @@ export function ProjectCreatePage() {
     setCurrentStep((s) => Math.max(s - 1, 1));
   };
 
-  const handleSubmit = async (values: ProjectFormValues) => {
+  const handleFormSubmit = async (values: ProjectFormValues) => {
+    if (currentStep < 5) {
+      await handleNext();
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const res = await api.post("/projects", {
-        ...values,
-        members: values.members.filter((m) => m.userId),
-      });
+      const payload = values.templateId
+        ? {
+            name: values.name,
+            template_id: values.templateId,
+            storage_backend_id: values.storageBackendId,
+            season_count: values.season,
+            units_per_season: values.episodes,
+          }
+        : {
+            name: values.name,
+            project_type: toBackendProjectType(values.type),
+            storage_backend_id: values.storageBackendId,
+          };
+
+      const res = await api.post<ApiEnvelope<unknown>>(
+        values.templateId ? "/projects/from-template" : "/projects",
+        payload
+      );
+      const project = normalizeProject(res.data.data as Record<string, unknown>);
+
+      await Promise.all(
+        values.members
+          .filter((m) => m.userId)
+          .map((member) =>
+            api.post(`/projects/${project.id}/members`, {
+              user_id: member.userId,
+              role: member.role,
+            })
+          )
+      );
+
       toast.success("项目创建成功");
-      navigate(`/projects/${res.data.id}`);
+      navigate(`/projects/${project.id}`);
     } catch (error) {
       toast.error("创建失败: " + getErrorMessage(error));
     } finally {
@@ -287,7 +332,7 @@ export function ProjectCreatePage() {
       </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+        <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-6">
           {/* Step 1: Select Template */}
           {currentStep === 1 && (
             <div className="space-y-4">
@@ -310,7 +355,7 @@ export function ProjectCreatePage() {
                         <div className="flex items-center gap-2">
                           {template.type === "anime" && <Monitor className="w-4 h-4 text-gray-400" />}
                           {template.type === "movie" && <Film className="w-4 h-4 text-gray-400" />}
-                          {template.type === "collection" && <FolderOpen className="w-4 h-4 text-gray-400" />}
+                          {(template.type === "collection" || template.type === "other") && <FolderOpen className="w-4 h-4 text-gray-400" />}
                           <span className="font-medium text-gray-800">{template.name}</span>
                         </div>
                         <Badge variant="outline" className="text-[10px]">
@@ -703,7 +748,11 @@ export function ProjectCreatePage() {
                 <ArrowRight className="w-4 h-4 ml-1.5" />
               </Button>
             ) : (
-              <Button type="submit" disabled={submitting}>
+              <Button
+                type="button"
+                disabled={submitting}
+                onClick={form.handleSubmit(handleFormSubmit)}
+              >
                 {submitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
                 创建项目
               </Button>
