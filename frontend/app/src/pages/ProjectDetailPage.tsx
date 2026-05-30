@@ -113,6 +113,7 @@ const WIKI_PAGE_TITLES: Record<WikiPageKey, string> = {
 };
 
 const DEFAULT_WIKI_PAGE_IDS = Object.keys(WIKI_PAGE_TITLES) as WikiPageKey[];
+const UNASSIGNED_SELECT_VALUE = "__unassigned__";
 
 const KANBAN_COLUMNS: { id: string; title: string; statuses: TaskStatus[] }[] = [
   { id: "todo", title: "待处理", statuses: ["pending_publish", "claimable", "assigned"] },
@@ -713,12 +714,17 @@ function TasksTab({ project, tasks, onUpdate }: { project: Project; tasks: Task[
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">负责人</label>
-                <Select value={newTaskAssigneeId} onValueChange={setNewTaskAssigneeId}>
+                <Select
+                  value={newTaskAssigneeId || UNASSIGNED_SELECT_VALUE}
+                  onValueChange={(value) =>
+                    setNewTaskAssigneeId(value === UNASSIGNED_SELECT_VALUE ? "" : value)
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="暂不分配" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">暂不分配</SelectItem>
+                    <SelectItem value={UNASSIGNED_SELECT_VALUE}>暂不分配</SelectItem>
                     {project.members.map((member) => (
                       <SelectItem key={member.user.id} value={member.user.id}>
                         {member.user.nickname || member.user.username} · {getRoleLabel(member.role)}

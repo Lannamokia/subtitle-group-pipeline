@@ -49,6 +49,8 @@ const STEPS = [
   { id: 5, title: "确认创建", icon: <Check className="w-4 h-4" /> },
 ];
 
+const UNASSIGNED_SELECT_VALUE = "__unassigned__";
+
 const projectFormSchema = z.object({
   name: z.string().min(1, "项目名称不能为空").max(100),
   type: z.enum(["anime", "movie", "collection"]),
@@ -610,7 +612,7 @@ export function ProjectCreatePage() {
                               return (
                                 <div key={i} className="flex items-center gap-2">
                                   <Select
-                                    value={member?.userId || ""}
+                                    value={member?.userId || UNASSIGNED_SELECT_VALUE}
                                     onValueChange={(val) => {
                                       const members = form.getValues("members");
                                       const idx = members.findIndex(
@@ -623,7 +625,8 @@ export function ProjectCreatePage() {
                                             i + 1
                                       );
                                       if (idx >= 0) {
-                                        members[idx].userId = val || undefined;
+                                        members[idx].userId =
+                                          val === UNASSIGNED_SELECT_VALUE ? undefined : val;
                                         form.setValue("members", [...members]);
                                       }
                                     }}
@@ -632,7 +635,7 @@ export function ProjectCreatePage() {
                                       <SelectValue placeholder={`选择${getRoleLabel(roleConfig.role)}成员`} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="">暂不分配</SelectItem>
+                                      <SelectItem value={UNASSIGNED_SELECT_VALUE}>暂不分配</SelectItem>
                                       {users.map((user) => (
                                         <SelectItem key={user.id} value={user.id}>
                                           {user.username}
