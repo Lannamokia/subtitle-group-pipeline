@@ -196,7 +196,7 @@ export function SetupPage() {
             <Label>连接地址</Label>
             <Input value={databaseUrl} onChange={(event) => setDatabaseUrl(event.target.value)} />
             <p className="text-xs leading-5 text-gray-500">
-              初始化会按这里选择的类型同步数据库结构，并写入连接参数。MySQL/MariaDB/PostgreSQL 初始化完成后需要重启服务。
+              初始化会按这里选择的类型同步数据库结构，并写入连接参数。MySQL/MariaDB/PostgreSQL 初始化完成后会自动重启后端。
             </p>
             {provider === "postgresql" ? (
               <p className="text-xs leading-5 text-amber-700">

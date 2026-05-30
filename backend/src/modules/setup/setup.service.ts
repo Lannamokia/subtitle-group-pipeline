@@ -1,4 +1,4 @@
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
 import fs from "fs";
@@ -86,10 +86,57 @@ async function generatePrismaClient(databaseUrl: string, provider: "sqlite" | "m
   }
 }
 
+function isRespawnManagedProcess() {
+  const argv = process.argv.join(" ").toLowerCase();
+  return Boolean(
+    process.env.TS_NODE_DEV ||
+      process.env.NODEMON ||
+      process.env.PM2_HOME ||
+      process.env.JEST_WORKER_ID ||
+      process.env.npm_lifecycle_event === "dev" ||
+      argv.includes("ts-node-dev") ||
+      argv.includes("nodemon")
+  );
+}
+
+function spawnDetachedRestartHelper(restartDelayMs: number) {
+  const currentArgs = process.argv.slice(1);
+  if (currentArgs.length === 0) return;
+
+  const helperScript = `
+const { spawn } = require("child_process");
+const [execPath, cwd, delayMsText, ...args] = process.argv.slice(1);
+const delayMs = Number(delayMsText) || 1500;
+setTimeout(() => {
+  const child = spawn(execPath, args, {
+    cwd,
+    env: process.env,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+}, delayMs);
+`;
+
+  const helper = spawn(process.execPath, ["-e", helperScript, process.execPath, process.cwd(), String(restartDelayMs), ...currentArgs], {
+    cwd: process.cwd(),
+    env: process.env,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  helper.unref();
+}
+
 function scheduleServerRestart() {
   const delayMs = Math.max(500, Number(process.env.SETUP_RESTART_DELAY_MS ?? 1500));
+  const restartDelayMs = Math.max(1000, Number(process.env.SETUP_RESTART_CHILD_DELAY_MS ?? 1500));
   const timer = setTimeout(() => {
     console.log("Setup completed. Restarting server to load the selected database provider...");
+    if (!isRespawnManagedProcess()) {
+      spawnDetachedRestartHelper(restartDelayMs);
+    }
     process.exit(0);
   }, delayMs);
   timer.unref();
