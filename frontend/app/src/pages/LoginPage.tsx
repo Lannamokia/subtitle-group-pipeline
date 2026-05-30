@@ -19,6 +19,13 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { RoleTagDefinition } from "@/types";
 import { toast } from "sonner";
 import {
@@ -66,6 +73,24 @@ const registerSchema = z
 
 type RegisterFormData = z.infer<typeof registerSchema>;
 
+const resetRequestSchema = z.object({
+  username: z.string().min(1, "用户名不能为空"),
+});
+
+const resetConfirmSchema = z
+  .object({
+    code: z.string().min(1, "验证码不能为空").max(16, "验证码过长"),
+    password: z.string().min(8, "密码至少8个字符").max(50, "密码最多50个字符"),
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "两次输入的密码不一致",
+    path: ["confirmPassword"],
+  });
+
+type ResetRequestFormData = z.infer<typeof resetRequestSchema>;
+type ResetConfirmFormData = z.infer<typeof resetConfirmSchema>;
+
 export function LoginPage() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
@@ -78,6 +103,10 @@ export function LoginPage() {
   const [availableTags, setAvailableTags] = useState<RoleTagDefinition[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetStep, setResetStep] = useState<"request" | "confirm">("request");
+  const [resetUsername, setResetUsername] = useState("");
+  const [resetInfo, setResetInfo] = useState<{ commandFormat?: string; emailSent?: boolean; qqSent?: boolean } | null>(null);
   const [verificationInfo, setVerificationInfo] = useState<{
     qqGroup: string;
     command: string;
@@ -93,6 +122,16 @@ export function LoginPage() {
   const registerForm = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
     defaultValues: { username: "", password: "", confirmPassword: "", qq: "" },
+  });
+
+  const resetRequestForm = useForm<ResetRequestFormData>({
+    resolver: zodResolver(resetRequestSchema),
+    defaultValues: { username: "" },
+  });
+
+  const resetConfirmForm = useForm<ResetConfirmFormData>({
+    resolver: zodResolver(resetConfirmSchema),
+    defaultValues: { code: "", password: "", confirmPassword: "" },
   });
 
   useEffect(() => {
@@ -163,6 +202,56 @@ export function LoginPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
       toast.success("已复制到剪贴板");
+    }
+  };
+
+  const openResetDialog = () => {
+    const username = loginForm.getValues("username");
+    resetRequestForm.reset({ username });
+    resetConfirmForm.reset({ code: "", password: "", confirmPassword: "" });
+    setResetUsername(username);
+    setResetInfo(null);
+    setResetStep("request");
+    setResetDialogOpen(true);
+  };
+
+  const handleRequestReset = async (data: ResetRequestFormData) => {
+    setIsLoading(true);
+    try {
+      const result = await authApi.requestPasswordReset({ username: data.username });
+      setResetUsername(data.username);
+      setResetInfo({
+        commandFormat: result.resetCommandFormat ?? result.resetCommand,
+        emailSent: result.emailSent,
+        qqSent: result.qqSent,
+      });
+      setResetStep("confirm");
+      toast.success(result.message || "验证码已发送");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleConfirmReset = async (data: ResetConfirmFormData) => {
+    setIsLoading(true);
+    try {
+      await authApi.confirmPasswordReset({
+        username: resetUsername,
+        code: data.code,
+        password: data.password,
+      });
+      toast.success("密码已重置，请使用新密码登录");
+      setResetDialogOpen(false);
+      setResetStep("request");
+      loginForm.setValue("username", resetUsername);
+      loginForm.setValue("password", "");
+      setView("login");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -360,6 +449,14 @@ export function LoginPage() {
                         "登录"
                       )}
                     </Button>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="w-full px-0 text-sm"
+                      onClick={openResetDialog}
+                    >
+                      忘记密码？
+                    </Button>
                   </form>
                 </Form>
               </TabsContent>
@@ -494,6 +591,110 @@ export function LoginPage() {
           )}
         </div>
       </div>
+      <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>重置密码</DialogTitle>
+            <DialogDescription>
+              通过邮件验证码，或用绑定 QQ 向机器人发送重置指令验证身份。
+            </DialogDescription>
+          </DialogHeader>
+
+          {resetStep === "request" ? (
+            <Form {...resetRequestForm}>
+              <form onSubmit={resetRequestForm.handleSubmit(handleRequestReset)} className="space-y-4">
+                <FormField
+                  control={resetRequestForm.control}
+                  name="username"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>用户名</FormLabel>
+                      <FormControl>
+                        <Input placeholder="输入需要重置密码的用户名" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  获取验证码
+                </Button>
+              </form>
+            </Form>
+          ) : (
+            <Form {...resetConfirmForm}>
+              <form onSubmit={resetConfirmForm.handleSubmit(handleConfirmReset)} className="space-y-4">
+                <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-600">
+                  <p>如果账号存在，验证码会发送至账号绑定的邮箱或 QQ 私聊。</p>
+                  {resetInfo?.commandFormat && (
+                    <p className="mt-2">
+                      QQ 机器人指令：
+                      <code className="ml-1 rounded bg-white px-1.5 py-0.5 text-primary-700">
+                        {resetInfo.commandFormat}
+                      </code>
+                    </p>
+                  )}
+                  <p className="mt-2 text-xs text-gray-500">验证码 15 分钟内有效。</p>
+                </div>
+                <FormField
+                  control={resetConfirmForm.control}
+                  name="code"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>验证码</FormLabel>
+                      <FormControl>
+                        <Input placeholder="输入 8 位验证码" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={resetConfirmForm.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>新密码</FormLabel>
+                      <FormControl>
+                        <Input type="password" placeholder="设置新密码" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={resetConfirmForm.control}
+                  name="confirmPassword"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>确认新密码</FormLabel>
+                      <FormControl>
+                        <Input type="password" placeholder="再次输入新密码" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setResetStep("request")}
+                  >
+                    重新发送
+                  </Button>
+                  <Button type="submit" className="flex-1" disabled={isLoading}>
+                    {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                    重置密码
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

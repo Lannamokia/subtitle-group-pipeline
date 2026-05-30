@@ -125,6 +125,19 @@ export async function requestPasswordReset(
   }
 }
 
+export async function confirmPasswordReset(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.confirmPasswordReset(req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getRegistrationPolicy(
   _req: Request,
   res: Response,

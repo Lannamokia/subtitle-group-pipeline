@@ -75,6 +75,15 @@ export const requestPasswordResetSchema = z.object({
   username: z.string().min(1, "Username is required"),
 });
 
+export const confirmPasswordResetSchema = z.object({
+  username: z.string().min(1, "Username is required"),
+  code: z.string().min(1, "Reset code is required"),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(128, "Password must be at most 128 characters"),
+});
+
 export const createRoleTagSchema = z.object({
   name: z.string().min(1, "Tag name is required").max(50),
   roleType: z.enum(["source", "timing", "translation", "post_production", "encoding", "release", "supervisor"]).optional(),
@@ -151,6 +160,7 @@ export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type VerifyQQInput = z.infer<typeof verifyQQSchema>;
 export type UpdateRegistrationPolicyInput = z.infer<typeof updateRegistrationPolicySchema>;
 export type RequestPasswordResetInput = z.infer<typeof requestPasswordResetSchema>;
+export type ConfirmPasswordResetInput = z.infer<typeof confirmPasswordResetSchema>;
 export type CreateRoleTagInput = z.infer<typeof createRoleTagSchema>;
 export type UpdateRoleTagInput = z.infer<typeof updateRoleTagSchema>;
 export type CreateTagApplicationInput = z.infer<typeof createTagApplicationSchema>;

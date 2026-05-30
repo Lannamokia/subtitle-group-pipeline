@@ -762,12 +762,71 @@ describe("Auth & Registration Tests", () => {
 
       expectSuccess(res, 200);
       expect(res.body.data.success).toBe(true);
+      expect(res.body.data.resetCommand).toBe("/resetpass 验证码");
 
       // Verify reset token was created
       const challenges = await prisma.verificationChallenge.findMany({
         where: { used_by: user.id },
       });
       expect(challenges.length).toBeGreaterThan(0);
+      expect(challenges[0].code).toMatch(/^PWD:[A-Za-z0-9]{8}$/);
+    });
+
+    it("should confirm password reset with verification code", async () => {
+      const { user } = await createTestUser({ password: "OldPass123!" });
+
+      const requestRes = await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+      expectSuccess(requestRes, 200);
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: {
+          used_by: user.id,
+          code: { startsWith: "PWD:" },
+          used_at: null,
+        },
+      });
+      const code = challenge.code.replace("PWD:", "");
+
+      const confirmRes = await post(app, "/api/v1/auth/confirm-password-reset", {
+        username: user.username,
+        code,
+        password: "NewPass123!",
+      });
+      expectSuccess(confirmRes, 200);
+
+      const loginRes = await post(app, "/api/v1/auth/login", {
+        username: user.username,
+        password: "NewPass123!",
+      });
+      expectSuccess(loginRes, 200);
+    });
+
+    it("should verify password reset code through QQ bridge command", async () => {
+      const { user } = await createTestUser({ qq_number: "123123999" });
+
+      const requestRes = await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+      expectSuccess(requestRes, 200);
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: {
+          used_by: user.id,
+          code: { startsWith: "PWD:" },
+          used_at: null,
+        },
+      });
+      const code = challenge.code.replace("PWD:", "");
+      const command = `/resetpass ${code}`;
+
+      const verifyRes = await post(app, "/api/v1/qq/verify", {
+        message: command,
+        qq_number: "123123999",
+      });
+
+      expectSuccess(verifyRes, 200);
+      expect(verifyRes.body.data.username).toBe(user.username);
+      expect(verifyRes.body.data.code).toBe(code);
     });
 
     it("should return success for non-existent user to prevent enumeration", async () => {

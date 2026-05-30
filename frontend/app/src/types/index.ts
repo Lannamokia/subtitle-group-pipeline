@@ -41,6 +41,16 @@ export interface RegisterData {
   tags: string[];
 }
 
+export interface PasswordResetRequestResponse {
+  success: boolean;
+  message: string;
+  expiresInSeconds?: number;
+  resetCommand?: string;
+  resetCommandFormat?: string;
+  emailSent?: boolean;
+  qqSent?: boolean;
+}
+
 export interface VerificationStatus {
   qqGroup: string;
   command: string;

@@ -7,6 +7,7 @@ import type {
   RegisterData,
   LoginResponse,
   RegisterResponse,
+  PasswordResetRequestResponse,
   RegistrationSettings,
   RoleTagDefinition,
   RoleTagApplication,
@@ -681,6 +682,12 @@ export const authApi = {
 
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     api.post<ApiResponse<void>>('/auth/change-password', data).then(extractData),
+
+  requestPasswordReset: (data: { username: string }) =>
+    api.post<ApiResponse<PasswordResetRequestResponse>>('/auth/request-password-reset', data).then(extractData),
+
+  confirmPasswordReset: (data: { username: string; code: string; password: string }) =>
+    api.post<ApiResponse<{ success: boolean }>>('/auth/confirm-password-reset', data).then(extractData),
 
   getRegistrationPolicy: () =>
     api.get<ApiResponse<RegistrationSettings>>('/auth/registration-policy').then(extractData),

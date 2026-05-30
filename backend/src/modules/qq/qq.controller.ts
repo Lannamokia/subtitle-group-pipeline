@@ -26,6 +26,12 @@ function extractVerifyCode(body: Record<string, unknown>) {
   return match?.[1] ?? "";
 }
 
+function extractResetPassCode(body: Record<string, unknown>) {
+  const message = typeof body.message === "string" ? body.message.trim() : "";
+  const match = message.match(/^\/resetpass\s+([A-Za-z0-9]+)$/);
+  return match?.[1] ?? "";
+}
+
 export async function verifyQQEvent(
   req: Request,
   res: Response,
@@ -34,15 +40,19 @@ export async function verifyQQEvent(
   try {
     ensureBridgeToken(req);
     const body = req.body as Record<string, unknown>;
-    const code = extractVerifyCode(body);
+    const resetCode = extractResetPassCode(body);
+    const code = resetCode || extractVerifyCode(body);
     const qqGroup = body.qq_group ?? body.group_id;
     const qqNumber = body.qq_number ?? body.user_id;
 
-    const result = await authService.verifyByQQ({
+    const payload = {
       code,
       qq_group: qqGroup === undefined || qqGroup === null ? undefined : String(qqGroup),
       qq_number: qqNumber === undefined || qqNumber === null ? undefined : String(qqNumber),
-    });
+    };
+    const result = resetCode
+      ? await authService.verifyPasswordResetByQQ(payload)
+      : await authService.verifyByQQ(payload);
     successResponse(res, result);
   } catch (error) {
     next(error);

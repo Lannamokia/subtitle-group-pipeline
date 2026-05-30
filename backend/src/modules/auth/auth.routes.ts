@@ -11,6 +11,7 @@ import {
   verifyQQSchema,
   updateRegistrationPolicySchema,
   requestPasswordResetSchema,
+  confirmPasswordResetSchema,
   createRoleTagSchema,
   updateRoleTagSchema,
   createTagApplicationSchema,
@@ -120,6 +121,7 @@ router.put("/profile", authenticate, validateBody(updateProfileSchema), controll
 router.post("/change-password", authenticate, validateBody(changePasswordSchema), controller.changePassword);
 router.post("/verify-qq", validateBody(verifyQQSchema), controller.verifyQQ);
 router.post("/request-password-reset", rateLimitMiddleware, validateBody(requestPasswordResetSchema), controller.requestPasswordReset);
+router.post("/confirm-password-reset", rateLimitMiddleware, validateBody(confirmPasswordResetSchema), controller.confirmPasswordReset);
 router.get("/registration-policy", controller.getRegistrationPolicy);
 router.put(
   "/registration-policy",

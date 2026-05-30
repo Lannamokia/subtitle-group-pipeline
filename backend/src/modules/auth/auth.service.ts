@@ -2,6 +2,8 @@ import { prisma } from "../../config/database";
 import { hashPassword, comparePassword } from "../../utils/password";
 import { signToken, signRefreshToken, verifyToken } from "../../utils/jwt";
 import { AppError } from "../../utils/response";
+import { sendEmail } from "../notification/adapters/email.adapter";
+import { sendPrivateMessage } from "../notification/adapters/qq.adapter";
 import type {
   RegisterInput,
   LoginInput,
@@ -19,9 +21,12 @@ import type {
   UpdateUserStatusInput,
   CreateMemberInput,
   ResetUserPasswordInput,
+  ConfirmPasswordResetInput,
 } from "./auth.schema";
 
 const NON_EXPIRING_VERIFICATION_EXPIRES_AT = new Date("9999-12-31T23:59:59.999Z");
+const PASSWORD_RESET_PREFIX = "PWD:";
+const PASSWORD_RESET_EXPIRES_MS = 15 * 60 * 1000;
 
 function generateVerificationCode(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -30,6 +35,16 @@ function generateVerificationCode(): string {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
+}
+
+function toPasswordResetChallengeCode(code: string): string {
+  return `${PASSWORD_RESET_PREFIX}${code}`;
+}
+
+function fromPasswordResetChallengeCode(challengeCode: string): string {
+  return challengeCode.startsWith(PASSWORD_RESET_PREFIX)
+    ? challengeCode.slice(PASSWORD_RESET_PREFIX.length)
+    : challengeCode;
 }
 
 function getRegisterQQNumber(data: RegisterInput): string | null | undefined {
@@ -635,35 +650,146 @@ export async function requestPasswordReset(username: string) {
   const user = await prisma.user.findUnique({
     where: { username },
   });
+  const message =
+    "如果该账号存在，系统已发送密码重置验证码。请使用邮件验证码或在绑定 QQ 上发送 /resetpass 指令完成验证。";
 
   if (!user) {
     // Return success even if user not found to prevent username enumeration
     return {
       success: true,
-      message:
-        "If an account with that username exists, a reset link has been sent.",
+      message,
     };
   }
 
-  // Generate a reset token (we reuse the verification challenge mechanism)
-  const resetCode = generateVerificationCode() + generateVerificationCode(); // 16 chars
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  const resetCode = generateVerificationCode();
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRES_MS);
+
+  await prisma.verificationChallenge.updateMany({
+    where: {
+      used_by: user.id,
+      code: { startsWith: PASSWORD_RESET_PREFIX },
+      used_at: null,
+    },
+    data: { used_at: new Date() },
+  });
 
   await prisma.verificationChallenge.create({
     data: {
-      code: resetCode,
+      code: toPasswordResetChallengeCode(resetCode),
       qq_number: user.qq_number || "",
       expires_at: expiresAt,
       used_by: user.id,
     },
   });
 
-  // In a real system, this would send an email or QQ message
+  const resetCommand = `/resetpass ${resetCode}`;
+
+  if (user.email) {
+    await sendEmail({
+      to: user.email,
+      subject: "密码重置验证码",
+      body: `你的密码重置验证码是：${resetCode}\n\n验证码 15 分钟内有效。也可以使用绑定 QQ 向机器人发送：${resetCommand}`,
+      notificationType: "system",
+    }).catch(() => undefined);
+  }
+
+  if (user.qq_number) {
+    await sendPrivateMessage({
+      userId: user.qq_number,
+      content: `密码重置验证码：${resetCode}\n请在登录页输入该验证码和新密码，或向机器人发送：${resetCommand}`,
+    }).catch(() => undefined);
+  }
 
   return {
     success: true,
-    message:
-      "If an account with that username exists, a reset link has been sent.",
+    message,
+    expiresInSeconds: PASSWORD_RESET_EXPIRES_MS / 1000,
+    resetCommand: "/resetpass 验证码",
+    emailSent: Boolean(user.email),
+    qqSent: Boolean(user.qq_number),
+  };
+}
+
+export async function confirmPasswordReset(data: ConfirmPasswordResetInput) {
+  const user = await prisma.user.findUnique({
+    where: { username: data.username },
+  });
+
+  if (!user) {
+    throw new AppError("Invalid or expired reset code", "INVALID_RESET_CODE", 400);
+  }
+
+  const resetCode = toPasswordResetChallengeCode(data.code.trim());
+  const challenge = await prisma.verificationChallenge.findUnique({
+    where: { code: resetCode },
+  });
+
+  if (
+    !challenge ||
+    challenge.used_by !== user.id ||
+    challenge.used_at ||
+    challenge.expires_at < new Date()
+  ) {
+    throw new AppError("Invalid or expired reset code", "INVALID_RESET_CODE", 400);
+  }
+
+  const passwordHash = await hashPassword(data.password);
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      data: { password_hash: passwordHash },
+    }),
+    prisma.verificationChallenge.update({
+      where: { id: challenge.id },
+      data: { used_at: new Date() },
+    }),
+  ]);
+
+  return { success: true };
+}
+
+export async function verifyPasswordResetByQQ(data: VerifyQQInput) {
+  const resetCode = toPasswordResetChallengeCode(data.code.trim());
+  const challenge = await prisma.verificationChallenge.findUnique({
+    where: { code: resetCode },
+  });
+
+  if (!challenge) {
+    throw new AppError("Invalid reset code", "NOT_FOUND", 404);
+  }
+
+  if (challenge.used_at) {
+    throw new AppError("Reset code already used", "CONFLICT", 409);
+  }
+
+  if (challenge.expires_at < new Date()) {
+    throw new AppError("Reset code expired", "INVALID_RESET_CODE", 400);
+  }
+
+  const userId = challenge.used_by;
+  if (!userId) {
+    throw new AppError("No user associated with this code", "NOT_FOUND", 404);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, username: true, qq_number: true },
+  });
+
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  if (user.qq_number && data.qq_number && user.qq_number !== data.qq_number) {
+    throw new AppError("QQ number does not match this account", "FORBIDDEN", 403);
+  }
+
+  return {
+    success: true,
+    username: user.username,
+    code: fromPasswordResetChallengeCode(challenge.code),
+    expires_at: challenge.expires_at,
   };
 }
 
