@@ -1,6 +1,5 @@
 import { prisma } from "../../config/database";
 import { env } from "../../config/env";
-import crypto from "crypto";
 import { AppError } from "../../utils/response";
 import * as storageService from "../storage/storage.service";
 import type {
@@ -163,30 +162,15 @@ async function getDatabaseVersion(databaseType: string): Promise<string | null> 
 }
 
 async function getOrCreateBrandingRecord() {
-  const existing = await prisma.$queryRaw<BrandingRecord[]>`
-    SELECT id, app_name, logo_storage_path, logo_backend_id, logo_mime_type, logo_size_bytes, logo_updated_at
-    FROM SystemBrandingSettings
-    ORDER BY created_at ASC
-    LIMIT 1
-  `;
+  const existing = await prisma.systemBrandingSettings.findFirst({
+    orderBy: { created_at: "asc" },
+  });
 
-  if (existing[0]) return existing[0];
+  if (existing) return existing;
 
-  const id = crypto.randomUUID();
-  await prisma.$executeRaw`
-    INSERT INTO SystemBrandingSettings (id, app_name, created_at, updated_at)
-    VALUES (${id}, ${DEFAULT_APP_NAME}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-  `;
-
-  return {
-    id,
-    app_name: DEFAULT_APP_NAME,
-    logo_storage_path: null,
-    logo_backend_id: null,
-    logo_mime_type: null,
-    logo_size_bytes: null,
-    logo_updated_at: null,
-  };
+  return prisma.systemBrandingSettings.create({
+    data: { app_name: DEFAULT_APP_NAME },
+  });
 }
 
 function toBrandingSettings(record: BrandingRecord): BrandingSettings {
@@ -210,16 +194,12 @@ export async function getBrandingSettings(): Promise<BrandingSettings> {
 
 export async function updateBrandingSettings(data: UpdateBrandingInput): Promise<BrandingSettings> {
   const current = await getOrCreateBrandingRecord();
-  await prisma.$executeRaw`
-    UPDATE SystemBrandingSettings
-    SET app_name = ${data.app_name}, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${current.id}
-  `;
-
-  return toBrandingSettings({
-    ...current,
-    app_name: data.app_name,
+  const updated = await prisma.systemBrandingSettings.update({
+    where: { id: current.id },
+    data: { app_name: data.app_name },
   });
+
+  return toBrandingSettings(updated);
 }
 
 export async function uploadLogo(
@@ -259,25 +239,18 @@ export async function uploadLogo(
   );
 
   const logoUpdatedAt = new Date();
-  await prisma.$executeRaw`
-    UPDATE SystemBrandingSettings
-    SET logo_backend_id = ${backend.id},
-        logo_storage_path = ${uploaded.storagePath},
-        logo_mime_type = ${contentType},
-        logo_size_bytes = ${uploaded.size},
-        logo_updated_at = ${logoUpdatedAt},
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${current.id}
-  `;
-
-  return toBrandingSettings({
-    ...current,
-    logo_backend_id: backend.id,
-    logo_storage_path: uploaded.storagePath,
-    logo_mime_type: contentType,
-    logo_size_bytes: uploaded.size,
-    logo_updated_at: logoUpdatedAt,
+  const updated = await prisma.systemBrandingSettings.update({
+    where: { id: current.id },
+    data: {
+      logo_backend_id: backend.id,
+      logo_storage_path: uploaded.storagePath,
+      logo_mime_type: contentType,
+      logo_size_bytes: uploaded.size,
+      logo_updated_at: logoUpdatedAt,
+    },
   });
+
+  return toBrandingSettings(updated);
 }
 
 export async function getLogoFile(): Promise<{ buffer: Buffer; contentType: string }> {
@@ -332,14 +305,9 @@ function serializeQqBridgeSettings(record: QqBridgeRuntimeSettings | null): QqBr
 }
 
 async function getSmtpSettingsRecord(): Promise<SmtpSettingsRecord | null> {
-  const records = await prisma.$queryRaw<SmtpSettingsRecord[]>`
-    SELECT id, enabled, host, port, secure, username, password, from_address, from_name, reject_unauthorized, created_at, updated_at
-    FROM SmtpSettings
-    ORDER BY created_at ASC
-    LIMIT 1
-  `;
-
-  const record = records[0];
+  const record = await prisma.smtpSettings.findFirst({
+    orderBy: { created_at: "asc" },
+  });
   if (!record) return null;
 
   return {
@@ -380,26 +348,34 @@ export async function updateSmtpSettings(data: SmtpSettingsInput): Promise<SmtpS
   }
 
   if (existing) {
-    await prisma.$executeRaw`
-      UPDATE SmtpSettings
-      SET enabled = ${enabled},
-          host = ${host},
-          port = ${data.port},
-          secure = ${secure},
-          username = ${username},
-          password = ${password},
-          from_address = ${fromAddress},
-          from_name = ${fromName},
-          reject_unauthorized = ${rejectUnauthorized},
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${existing.id}
-    `;
+    await prisma.smtpSettings.update({
+      where: { id: existing.id },
+      data: {
+        enabled,
+        host,
+        port: data.port,
+        secure,
+        username,
+        password,
+        from_address: fromAddress,
+        from_name: fromName,
+        reject_unauthorized: rejectUnauthorized,
+      },
+    });
   } else {
-    const id = crypto.randomUUID();
-    await prisma.$executeRaw`
-      INSERT INTO SmtpSettings (id, enabled, host, port, secure, username, password, from_address, from_name, reject_unauthorized, created_at, updated_at)
-      VALUES (${id}, ${enabled}, ${host}, ${data.port}, ${secure}, ${username}, ${password}, ${fromAddress}, ${fromName}, ${rejectUnauthorized}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `;
+    await prisma.smtpSettings.create({
+      data: {
+        enabled,
+        host,
+        port: data.port,
+        secure,
+        username,
+        password,
+        from_address: fromAddress,
+        from_name: fromName,
+        reject_unauthorized: rejectUnauthorized,
+      },
+    });
   }
 
   return getSmtpSettings();
@@ -437,14 +413,9 @@ export async function testSmtpSettings(data: SmtpTestInput): Promise<ChannelTest
 }
 
 async function getQqBridgeSettingsRecord(): Promise<QqBridgeRuntimeSettings | null> {
-  const records = await prisma.$queryRaw<QqBridgeRuntimeSettings[]>`
-    SELECT id, enabled, endpoint, secret, last_heartbeat_at, last_heartbeat_status, last_heartbeat_error, last_bot_id, last_bot_nickname, last_heartbeat_payload, created_at, updated_at
-    FROM QqBridgeSettings
-    ORDER BY created_at ASC
-    LIMIT 1
-  `;
-
-  const record = records[0];
+  const record = await prisma.qqBridgeSettings.findFirst({
+    orderBy: { created_at: "asc" },
+  });
   if (!record) return null;
 
   return {
@@ -497,20 +468,22 @@ export async function updateQqBridgeSettings(data: QqBridgeSettingsInput): Promi
   }
 
   if (existing) {
-    await prisma.$executeRaw`
-      UPDATE QqBridgeSettings
-      SET enabled = ${enabled},
-          endpoint = ${endpoint},
-          secret = ${secret},
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${existing.id}
-    `;
+    await prisma.qqBridgeSettings.update({
+      where: { id: existing.id },
+      data: {
+        enabled,
+        endpoint,
+        secret,
+      },
+    });
   } else {
-    const id = crypto.randomUUID();
-    await prisma.$executeRaw`
-      INSERT INTO QqBridgeSettings (id, enabled, endpoint, secret, created_at, updated_at)
-      VALUES (${id}, ${enabled}, ${endpoint}, ${secret}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `;
+    await prisma.qqBridgeSettings.create({
+      data: {
+        enabled,
+        endpoint,
+        secret,
+      },
+    });
   }
 
   return getQqBridgeSettings();
@@ -599,23 +572,31 @@ export async function recordQqBridgeHeartbeat(data: QqBridgeHeartbeatInput): Pro
   });
 
   if (existing) {
-    await prisma.$executeRaw`
-      UPDATE QqBridgeSettings
-      SET last_heartbeat_at = ${now},
-          last_heartbeat_status = ${status},
-          last_heartbeat_error = ${error},
-          last_bot_id = ${botId},
-          last_bot_nickname = ${botNickname},
-          last_heartbeat_payload = ${payload},
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${existing.id}
-    `;
+    await prisma.qqBridgeSettings.update({
+      where: { id: existing.id },
+      data: {
+        last_heartbeat_at: now,
+        last_heartbeat_status: status,
+        last_heartbeat_error: error,
+        last_bot_id: botId,
+        last_bot_nickname: botNickname,
+        last_heartbeat_payload: payload,
+      },
+    });
   } else {
-    const id = crypto.randomUUID();
-    await prisma.$executeRaw`
-      INSERT INTO QqBridgeSettings (id, enabled, endpoint, secret, last_heartbeat_at, last_heartbeat_status, last_heartbeat_error, last_bot_id, last_bot_nickname, last_heartbeat_payload, created_at, updated_at)
-      VALUES (${id}, ${Boolean(env.NONEBOT_HTTP_API)}, ${env.NONEBOT_HTTP_API ?? null}, ${env.QQ_BRIDGE_TOKEN ?? null}, ${now}, ${status}, ${error}, ${botId}, ${botNickname}, ${payload}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `;
+    await prisma.qqBridgeSettings.create({
+      data: {
+        enabled: Boolean(env.NONEBOT_HTTP_API),
+        endpoint: env.NONEBOT_HTTP_API ?? null,
+        secret: env.QQ_BRIDGE_TOKEN ?? null,
+        last_heartbeat_at: now,
+        last_heartbeat_status: status,
+        last_heartbeat_error: error,
+        last_bot_id: botId,
+        last_bot_nickname: botNickname,
+        last_heartbeat_payload: payload,
+      },
+    });
   }
 
   return getQqBridgeSettings();
