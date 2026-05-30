@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { authApi, roleTagApi, getErrorMessage } from "@/lib/api";
@@ -105,6 +105,19 @@ export function RegistrationSettingsPage() {
     defaultValues: { name: "", roleType: "", description: "" },
   });
 
+  const mode = useWatch({
+    control: form.control,
+    name: "mode",
+  });
+
+  const setRegistrationMode = (value: SettingsFormData["mode"]) => {
+    form.setValue("mode", value, {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    });
+  };
+
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -120,7 +133,7 @@ export function RegistrationSettingsPage() {
         roleTagEnabled: settingsData.roleTagEnabled,
       });
       setTags(tagsData);
-      setApplications(appsData.items);
+      setApplications(appsData);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -196,15 +209,13 @@ export function RegistrationSettingsPage() {
       await roleTagApi.reviewApplication(id, { status });
       toast.success(status === "approved" ? "已通过申请" : "已驳回申请");
       const appsData = await roleTagApi.getApplications({ status: "pending" });
-      setApplications(appsData.items);
+      setApplications(appsData);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
       setReviewingId(null);
     }
   };
-
-  const mode = form.watch("mode");
 
   const roleOptions = Object.entries(TASK_ROLE_MAP).map(([key, value]) => ({
     value: key as TaskRole,
@@ -272,14 +283,16 @@ export function RegistrationSettingsPage() {
                         <FormControl>
                           <RadioGroup
                             value={field.value}
-                            onValueChange={field.onChange}
+                            onValueChange={(value) =>
+                              setRegistrationMode(value as SettingsFormData["mode"])
+                            }
                             className="space-y-4"
                           >
                             <div
                               className={`flex items-start space-x-3 rounded-lg border p-3 md:p-4 cursor-pointer hover:bg-gray-50 ${
                                 mode === "disabled" ? "border-red-200 bg-red-50/30" : "border-gray-200"
                               }`}
-                              onClick={() => field.onChange("disabled")}
+                              onClick={() => setRegistrationMode("disabled")}
                             >
                               <RadioGroupItem value="disabled" id="disabled" className="mt-1" />
                               <div className="flex-1">
@@ -299,7 +312,7 @@ export function RegistrationSettingsPage() {
                               className={`flex items-start space-x-3 rounded-lg border p-3 md:p-4 cursor-pointer hover:bg-gray-50 ${
                                 mode === "open" ? "border-green-200 bg-green-50/30" : "border-gray-200"
                               }`}
-                              onClick={() => field.onChange("open")}
+                              onClick={() => setRegistrationMode("open")}
                             >
                               <RadioGroupItem value="open" id="open" className="mt-1" />
                               <div className="flex-1">
@@ -321,7 +334,7 @@ export function RegistrationSettingsPage() {
                                   ? "border-primary-200 bg-primary-50/50"
                                   : "border-gray-200 hover:bg-gray-50"
                               }`}
-                              onClick={() => field.onChange("qq_verification")}
+                              onClick={() => setRegistrationMode("qq_verification")}
                             >
                               <RadioGroupItem value="qq_verification" id="qq_verification" className="mt-1" />
                               <div className="flex-1">
