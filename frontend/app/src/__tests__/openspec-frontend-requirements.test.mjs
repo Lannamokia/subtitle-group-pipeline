@@ -32,6 +32,7 @@ const files = {
   api: await source("lib/api.ts"),
   app: await source("App.tsx"),
   login: await source("pages/LoginPage.tsx"),
+  projectList: await source("pages/ProjectListPage.tsx"),
   projectDetail: await source("pages/ProjectDetailPage.tsx"),
   taskWorkflow: await source("lib/taskWorkflow.ts"),
   fileList: await source("pages/FileListPage.tsx"),
@@ -69,6 +70,11 @@ assertIncludes("task workflow surface", files.projectDetail, [
   "taskApi.rejectTask",
   "blockedDependencies",
   "TaskCommentPanel",
+]);
+
+assertIncludes("participated projects include assigned tasks", files.projectList + files.api, [
+  "assignedUserIds",
+  "我参与的",
 ]);
 
 assertIncludes("serial task workflow stepper", files.projectDetail + files.taskWorkflow + files.api, [

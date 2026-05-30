@@ -784,6 +784,11 @@ export function normalizeProject(raw: AnyRecord): Project {
           joinedAt: member.joinedAt ?? member.joined_at ?? "",
         }))
       : [],
+    assignedUserIds: Array.isArray(raw.assignedUserIds)
+      ? raw.assignedUserIds
+      : Array.isArray(raw.assigned_user_ids)
+        ? raw.assigned_user_ids
+        : [],
     units,
     tasks,
     progress: raw.progress ?? (taskCount > 0 ? Math.round((completed / taskCount) * 100) : 0),

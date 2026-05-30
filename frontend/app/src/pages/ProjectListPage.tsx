@@ -37,7 +37,11 @@ export function ProjectListPage() {
     if (searchQuery && !p.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     if (statusFilter !== "all" && p.status !== statusFilter) return false;
     if (scope === "mine") {
-      return p.members.some((m) => m.user.id === currentUser?.id) || p.supervisorId === currentUser?.id;
+      return (
+        p.members.some((m) => m.user.id === currentUser?.id) ||
+        p.assignedUserIds?.includes(currentUser?.id || "") ||
+        p.supervisorId === currentUser?.id
+      );
     }
     return true;
   });

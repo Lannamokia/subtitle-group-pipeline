@@ -24,6 +24,38 @@ describe("Project & Workflow Tests", () => {
     await cleanDatabase();
   });
 
+  describe("Project Listing", () => {
+    it("should expose members and assigned users for participated project filtering", async () => {
+      const { user: owner, token } = await createTestUser();
+      const { user: member } = await createTestUser();
+      const { user: assignee } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+
+      await prisma.projectMember.create({
+        data: {
+          project_id: project.id,
+          user_id: member.id,
+          role: "translation",
+        },
+      });
+      await createTestTask({
+        project_id: project.id,
+        creator_id: owner.id,
+        assignee_id: assignee.id,
+        role: "timing",
+        status: "assigned",
+      });
+
+      const res = await get(app, "/api/v1/projects", token);
+
+      expectSuccess(res, 200);
+      const listedProject = res.body.data.find((item: { id: string }) => item.id === project.id);
+      expect(listedProject).toBeDefined();
+      expect(listedProject.members.some((item: { user: { id: string } }) => item.user.id === member.id)).toBe(true);
+      expect(listedProject.assigned_user_ids).toContain(assignee.id);
+    });
+  });
+
   describe("Template Instantiation", () => {
     it("should inherit delivery checklist from template", async () => {
       const { user, token } = await createTestUser();

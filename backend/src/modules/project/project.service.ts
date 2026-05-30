@@ -367,13 +367,39 @@ export async function getProjects(query: ProjectQueryInput, userId?: string) {
             units: true,
           },
         },
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                nickname: true,
+                avatar_url: true,
+              },
+            },
+          },
+        },
+        tasks: {
+          select: {
+            assignee_id: true,
+          },
+        },
       },
     }),
     prisma.project.count({ where }),
   ]);
 
   return {
-    projects,
+    projects: projects.map(({ tasks, ...project }) => ({
+      ...project,
+      assigned_user_ids: Array.from(
+        new Set(
+          tasks
+            .map((task) => task.assignee_id)
+            .filter((id): id is string => Boolean(id))
+        )
+      ),
+    })),
     meta: {
       page,
       pageSize,

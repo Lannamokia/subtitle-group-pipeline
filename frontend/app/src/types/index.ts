@@ -75,6 +75,7 @@ export interface Project {
   supervisor: User;
   qqGroupId?: string;
   members: ProjectMember[];
+  assignedUserIds?: string[];
   units?: ProjectUnit[];
   tasks?: Task[];
   progress: number;
