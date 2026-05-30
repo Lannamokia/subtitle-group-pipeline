@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate, Outlet } from "react-router";
+import { useEffect } from "react";
 import { useAuthStore } from "@/stores/authStore";
+import { useBrandingStore } from "@/stores/brandingStore";
 import { AppShell } from "@/components/AppShell";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -36,6 +38,12 @@ function SupervisorRoute() {
 }
 
 export default function App() {
+  const loadBranding = useBrandingStore((state) => state.loadBranding);
+
+  useEffect(() => {
+    void loadBranding();
+  }, [loadBranding]);
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />

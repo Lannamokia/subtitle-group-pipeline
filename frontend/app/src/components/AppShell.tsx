@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { getBrandLogoUrl, useBrandingStore } from "@/stores/brandingStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useNotificationStore } from "@/stores/notificationStore";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, isAdmin } = useAuthStore();
+  const branding = useBrandingStore((state) => state.branding);
+  const logoUrl = getBrandLogoUrl(branding);
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
   const { unreadCount } = useNotificationStore();
   const [searchQuery, setSearchQuery] = useState("");
@@ -109,12 +112,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Logo */}
           <div className="h-14 flex items-center px-4 border-b border-gray-100">
             <Link to="/dashboard" className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-primary-500 flex items-center justify-center shrink-0">
-                <span className="text-white font-bold text-sm">S</span>
-              </div>
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={branding.appName}
+                  className="w-8 h-8 rounded-lg object-cover shrink-0"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-lg bg-primary-500 flex items-center justify-center shrink-0">
+                  <span className="text-white font-bold text-sm">{branding.appName.charAt(0)}</span>
+                </div>
+              )}
               {!sidebarCollapsed && (
                 <span className="font-semibold text-gray-800 text-sm tracking-tight">
-                  SubtitleSync
+                  {branding.appName}
                 </span>
               )}
             </Link>
@@ -283,10 +294,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Mobile Top Bar */}
           <header className="md:hidden h-12 bg-white border-b border-gray-200 flex items-center px-3 gap-2 shrink-0">
             <Link to="/dashboard" className="flex items-center gap-2 mr-auto">
-              <div className="w-7 h-7 rounded-lg bg-primary-500 flex items-center justify-center shrink-0">
-                <span className="text-white font-bold text-xs">S</span>
-              </div>
-              <span className="font-semibold text-gray-800 text-sm">SubtitleSync</span>
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={branding.appName}
+                  className="w-7 h-7 rounded-lg object-cover shrink-0"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-lg bg-primary-500 flex items-center justify-center shrink-0">
+                  <span className="text-white font-bold text-xs">{branding.appName.charAt(0)}</span>
+                </div>
+              )}
+              <span className="font-semibold text-gray-800 text-sm">{branding.appName}</span>
             </Link>
 
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0 relative" onClick={() => navigate("/notifications")}>

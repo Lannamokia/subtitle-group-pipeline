@@ -253,6 +253,26 @@ export async function uploadFile(
   };
 }
 
+export async function downloadStoredFile(
+  backendId: string,
+  storagePath: string
+): Promise<Buffer> {
+  const backend = await prisma.storageBackend.findUnique({
+    where: { id: backendId },
+  });
+
+  if (!backend) {
+    throw new AppError("Storage backend not found", "NOT_FOUND", 404);
+  }
+
+  if (!backend.is_active) {
+    throw new AppError("Storage backend is inactive", "CONFIG_ERROR", 500);
+  }
+
+  const adapter = await initAdapterForBackend(backendId);
+  return adapter.download(storagePath);
+}
+
 export async function deleteFile(
   backendId: string,
   storagePath: string,

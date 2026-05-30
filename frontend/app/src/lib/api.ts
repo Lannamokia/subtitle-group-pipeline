@@ -28,6 +28,7 @@ import type {
   WikiDocument,
   Announcement,
   DataRetentionSettings,
+  SystemBrandingSettings,
   ApiResponse,
   PaginatedResponse,
 } from '@/types';
@@ -435,6 +436,14 @@ export function normalizeAnnouncement(raw: AnyRecord): Announcement {
   };
 }
 
+export function normalizeSystemBranding(raw: AnyRecord): SystemBrandingSettings {
+  return {
+    appName: raw.appName ?? raw.app_name ?? "SubtitleSync",
+    logoUrl: raw.logoUrl ?? raw.logo_url ?? null,
+    logoUpdatedAt: raw.logoUpdatedAt ?? raw.logo_updated_at ?? null,
+  };
+}
+
 export function normalizeTimelineEvent(raw: AnyRecord): TimelineEvent {
   return {
     id: raw.id,
@@ -745,6 +754,30 @@ export const storageApi = {
     api.put<ApiResponse<unknown>>('/storage/retention', toDataRetentionPayload(data)).then((response) =>
       normalizeDataRetentionSettings(response.data.data as AnyRecord)
     ),
+};
+
+// ========== System API ==========
+
+export const systemApi = {
+  getBranding: () =>
+    api.get<ApiResponse<unknown>>('/system/branding').then((response) =>
+      normalizeSystemBranding(response.data.data as AnyRecord)
+    ),
+
+  updateBranding: (data: { appName: string }) =>
+    api.put<ApiResponse<unknown>>('/system/branding', { app_name: data.appName }).then((response) =>
+      normalizeSystemBranding(response.data.data as AnyRecord)
+    ),
+
+  uploadLogo: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post<ApiResponse<unknown>>('/system/branding/logo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((response) =>
+      normalizeSystemBranding(response.data.data as AnyRecord)
+    );
+  },
 };
 
 // ========== Project API ==========

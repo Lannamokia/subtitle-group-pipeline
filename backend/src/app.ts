@@ -21,6 +21,7 @@ import storageRoutes from "./modules/storage/storage.routes";
 import announcementRoutes from "./modules/announcement/announcement.routes";
 import timelineRoutes from "./modules/timeline/timeline.routes";
 import qqRoutes from "./modules/qq/qq.routes";
+import systemRoutes from "./modules/system/system.routes";
 import { downloadByToken } from "./modules/file/file.controller";
 import * as fileController from "./modules/file/file.controller";
 import { createLinkSchema } from "./modules/file/file.schema";
@@ -110,6 +111,7 @@ export function createApp(): Application {
   app.use(`${apiPrefix}/announcements`, announcementRoutes);
   app.use(`${apiPrefix}/timeline`, timelineRoutes);
   app.use(`${apiPrefix}/qq`, qqRoutes);
+  app.use(`${apiPrefix}/system`, systemRoutes);
 
   // Compatibility aliases for frontend callers that use root-level member URLs.
   app.get(`${apiPrefix}/members`, authenticate, authController.getAllUsers);

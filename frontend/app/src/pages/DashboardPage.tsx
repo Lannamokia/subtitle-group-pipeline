@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn, formatFullDate, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { useBrandingStore } from "@/stores/brandingStore";
 import { taskApi, timelineApi, announcementApi, notificationApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ import {
 export function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const branding = useBrandingStore((state) => state.branding);
   const [taskTab, setTaskTab] = useState<"in_progress" | "submitted" | "overdue" | "all">("in_progress");
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem("onboarding-dismissed");
@@ -307,7 +309,7 @@ export function DashboardPage() {
                 <div className="w-14 h-14 rounded-full bg-primary-50 flex items-center justify-center mx-auto mb-3">
                   <ClipboardList className="w-7 h-7 text-primary-500" />
                 </div>
-                <h2 className="text-lg font-semibold text-gray-800">欢迎使用 SubtitleSync</h2>
+                <h2 className="text-lg font-semibold text-gray-800">欢迎使用 {branding.appName}</h2>
                 <p className="text-sm text-gray-500 mt-1">只需几步即可开始协作</p>
               </div>
               <div className="space-y-3">

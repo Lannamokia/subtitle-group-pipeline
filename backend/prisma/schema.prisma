@@ -1000,6 +1000,18 @@ model DataRetentionSettings {
   updated_at             DateTime @updatedAt
 }
 
+model SystemBrandingSettings {
+  id                 String   @id @default(uuid())
+  app_name           String   @default("SubtitleSync")
+  logo_storage_path  String?
+  logo_backend_id    String?
+  logo_mime_type     String?
+  logo_size_bytes    Int?
+  logo_updated_at    DateTime?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+}
+
 // ==================== RECYCLE BIN ====================
 
 model RecycleBinRecord {

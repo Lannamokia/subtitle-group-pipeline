@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { Badge } from "@/components/ui/badge";
 import {
   Bell,
+  Brush,
   Database,
   HardDrive,
   Layers,
@@ -18,8 +19,10 @@ import { AnnouncementAdminPage } from "@/pages/admin/AnnouncementAdminPage";
 import { DataRetentionPage } from "@/pages/admin/DataRetentionPage";
 import { RegistrationSettingsPage } from "@/pages/admin/RegistrationSettingsPage";
 import { StorageBackendPage } from "@/pages/admin/StorageBackendPage";
+import { BrandingSettingsPage } from "@/pages/admin/BrandingSettingsPage";
 
 type SettingsSection =
+  | "branding"
   | "registration"
   | "storage"
   | "retention"
@@ -33,10 +36,18 @@ interface SettingsCardConfig {
   description: string;
   icon: React.ComponentType<{ className?: string }>;
   adminOnly?: boolean;
+  superAdminOnly?: boolean;
   supervisorPlus?: boolean;
 }
 
 const SETTINGS_SECTIONS: SettingsCardConfig[] = [
+  {
+    id: "branding",
+    title: "系统标识",
+    description: "系统名称、Logo 和浏览器标题",
+    icon: Brush,
+    superAdminOnly: true,
+  },
   {
     id: "registration",
     title: "注册与标签",
@@ -82,17 +93,19 @@ const SETTINGS_SECTIONS: SettingsCardConfig[] = [
 
 export function SystemSettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const user = useAuthStore((state) => state.user);
   const isAdmin = useAuthStore((state) => state.isAdmin());
   const isSupervisor = useAuthStore((state) => state.isSupervisor());
 
   const sections = useMemo(
     () =>
       SETTINGS_SECTIONS.filter((section) => {
+        if (section.superAdminOnly) return user?.role === "super_admin";
         if (section.adminOnly) return isAdmin;
         if (section.supervisorPlus) return isSupervisor;
         return true;
       }),
-    [isAdmin, isSupervisor]
+    [isAdmin, isSupervisor, user?.role]
   );
 
   const requestedSection = searchParams.get("section") as SettingsSection | null;
@@ -162,6 +175,7 @@ export function SystemSettingsPage() {
 
         <div className="min-w-0">
           {activeSection === "registration" && <RegistrationSettingsPage />}
+          {activeSection === "branding" && <BrandingSettingsPage />}
           {activeSection === "storage" && <StorageBackendPage />}
           {activeSection === "retention" && <DataRetentionPage />}
           {activeSection === "templates" && <TemplatePage />}

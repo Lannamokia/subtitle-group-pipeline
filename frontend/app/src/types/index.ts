@@ -455,6 +455,12 @@ export interface DataRetentionSettings {
   wikiApprovalRequired?: boolean;
 }
 
+export interface SystemBrandingSettings {
+  appName: string;
+  logoUrl?: string | null;
+  logoUpdatedAt?: string | null;
+}
+
 // ========== Role Tag Types ==========
 
 export interface RoleTagDefinition {

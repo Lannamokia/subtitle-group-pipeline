@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useAuthStore } from "@/stores/authStore";
+import { getBrandLogoUrl, useBrandingStore } from "@/stores/brandingStore";
 import { authApi, getErrorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,6 +78,8 @@ type RegisterFormData = z.infer<typeof registerSchema>;
 export function LoginPage() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
+  const branding = useBrandingStore((state) => state.branding);
+  const logoUrl = getBrandLogoUrl(branding);
   const [view, setView] = useState<AuthView>("login");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -163,10 +166,14 @@ export function LoginPage() {
         <div className="absolute inset-0 bg-gradient-to-br from-primary-100/50 to-transparent" />
         <div className="relative z-10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">S</span>
-            </div>
-            <span className="text-xl font-semibold text-gray-800">SubtitleSync</span>
+            {logoUrl ? (
+              <img src={logoUrl} alt={branding.appName} className="w-10 h-10 rounded-xl object-cover" />
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center">
+                <span className="text-white font-bold text-lg">{branding.appName.charAt(0)}</span>
+              </div>
+            )}
+            <span className="text-xl font-semibold text-gray-800">{branding.appName}</span>
           </div>
         </div>
         <div className="relative z-10">
@@ -178,7 +185,7 @@ export function LoginPage() {
           </p>
         </div>
         <div className="relative z-10 text-xs text-gray-400">
-          SubtitleSync v1.0.0
+          {branding.appName} v1.0.0
         </div>
       </div>
 
@@ -187,10 +194,14 @@ export function LoginPage() {
         <div className="w-full max-w-sm">
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <div className="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">S</span>
-            </div>
-            <span className="text-xl font-semibold text-gray-800">SubtitleSync</span>
+            {logoUrl ? (
+              <img src={logoUrl} alt={branding.appName} className="w-10 h-10 rounded-xl object-cover" />
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center">
+                <span className="text-white font-bold text-lg">{branding.appName.charAt(0)}</span>
+              </div>
+            )}
+            <span className="text-xl font-semibold text-gray-800">{branding.appName}</span>
           </div>
 
           {view === "verification" ? (
