@@ -27,6 +27,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -442,9 +452,16 @@ function TasksTab({
   onUpdate: () => void;
 }) {
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
+  const currentUser = useAuthStore((s) => s.user);
+  const canManageTasks =
+    isSupervisor ||
+    currentUser?.id === project.supervisorId ||
+    project.members.some((member) => member.user.id === currentUser?.id && member.role === "supervisor");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [deleteTaskTarget, setDeleteTaskTarget] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [deletingTask, setDeletingTask] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskUnitId, setNewTaskUnitId] = useState(UNASSIGNED_UNIT_SELECT_VALUE);
   const [newTaskRole, setNewTaskRole] = useState<TaskRole>("translation");
@@ -511,6 +528,24 @@ function TasksTab({
       );
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleDeleteTask = async () => {
+    if (!deleteTaskTarget) return;
+    setDeletingTask(true);
+    try {
+      await taskApi.deleteTask(deleteTaskTarget.id);
+      toast.success("任务已删除");
+      if (selectedTask?.id === deleteTaskTarget.id) {
+        setSelectedTask(null);
+      }
+      setDeleteTaskTarget(null);
+      onUpdate();
+    } catch (error) {
+      toast.error("删除任务失败: " + getErrorMessage(error));
+    } finally {
+      setDeletingTask(false);
     }
   };
 
@@ -737,7 +772,7 @@ function TasksTab({
       </div>
 
       {/* Task Detail Sheet */}
-      <Sheet open={!!selectedTask} onOpenChange={() => setSelectedTask(null)}>
+      <Sheet open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)}>
         <SheetContent className="w-[min(100vw,560px)] max-w-[100vw] overflow-y-auto px-4 sm:px-6">
           {selectedTask && (
             <>
@@ -922,6 +957,18 @@ function TasksTab({
                         重新认领
                       </Button>
                     )}
+                    {canManageTasks && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => setDeleteTaskTarget(selectedTask)}
+                        disabled={updating || deletingTask}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1" />
+                        删除任务
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -933,6 +980,31 @@ function TasksTab({
           )}
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={!!deleteTaskTarget} onOpenChange={(open) => !open && setDeleteTaskTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除任务</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除后该任务会从任务列表中移除，并清理任务依赖关系。已经存在认领、提交、审核或评论记录的任务不会被删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingTask}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              disabled={deletingTask}
+              onClick={(event) => {
+                event.preventDefault();
+                handleDeleteTask();
+              }}
+            >
+              {deletingTask && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {createTaskDialog}
     </div>

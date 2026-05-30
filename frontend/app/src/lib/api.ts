@@ -1035,6 +1035,9 @@ export const taskApi = {
       normalizeTask(response.data.data as AnyRecord)
     ),
 
+  deleteTask: (id: string) =>
+    api.delete<ApiResponse<{ success: boolean; id: string }>>(`/tasks/${id}`).then(extractData),
+
   claimTask: (id: string) =>
     api.post<ApiResponse<unknown>>(`/tasks/${id}/claim`).then((response) =>
       normalizeTask(response.data.data as AnyRecord)

@@ -34,6 +34,16 @@ const ROLE_PIPELINE: TaskRole[] = [
   "release",
 ];
 
+const TASK_DELETE_BLOCKED_STATUSES: TaskStatus[] = [
+  "in_progress",
+  "submitted",
+  "review_approved",
+  "review_rejected",
+  "completed",
+  "overdue",
+  "frozen",
+];
+
 /**
  * Check if all dependencies for a task are completed
  */
@@ -147,6 +157,40 @@ async function canSupervisorOverride(projectId: string, actorId?: string): Promi
           project_id: projectId,
           user_id: actorId,
         },
+      },
+      select: { role: true, is_lead: true },
+    }),
+  ]);
+
+  return Boolean(
+    actor?.role === "super_admin" ||
+    actor?.role === "group_admin" ||
+    actor?.role === "supervisor" ||
+    project?.owner_id === actorId ||
+    membership?.role === "supervisor" ||
+    membership?.is_lead
+  );
+}
+
+async function canManageProjectTasks(projectId: string, actorId?: string): Promise<boolean> {
+  if (!actorId) {
+    return false;
+  }
+
+  const [actor, project, membership] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: actorId },
+      select: { role: true },
+    }),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { owner_id: true },
+    }),
+    prisma.projectMember.findFirst({
+      where: {
+        project_id: projectId,
+        user_id: actorId,
+        left_at: null,
       },
       select: { role: true, is_lead: true },
     }),
@@ -820,25 +864,150 @@ export async function updateTask(
 export async function deleteTask(taskId: string, actorId?: string) {
   const existing = await prisma.task.findUnique({
     where: { id: taskId },
+    include: {
+      project: {
+        select: {
+          id: true,
+          name: true,
+          owner_id: true,
+          is_archived: true,
+          deleted_at: true,
+        },
+      },
+      dependencies: {
+        select: {
+          id: true,
+          depends_on_id: true,
+        },
+      },
+      dependents: {
+        select: {
+          id: true,
+          task_id: true,
+        },
+      },
+      _count: {
+        select: {
+          claims: true,
+          submissions: true,
+          reviews: true,
+          comments: true,
+          notifications: true,
+        },
+      },
+    },
   });
 
   if (!existing) {
     throw new AppError("Task not found", "NOT_FOUND", 404);
   }
 
-  await prisma.task.delete({
-    where: { id: taskId },
+  if (existing.project.deleted_at) {
+    throw new AppError("Cannot delete task in deleted project", "BAD_REQUEST", 400);
+  }
+
+  if (existing.project.is_archived) {
+    throw new AppError("Cannot delete task in archived project", "BAD_REQUEST", 400);
+  }
+
+  if (!(await canManageProjectTasks(existing.project_id, actorId))) {
+    throw new AppError("Only project supervisors or admins can delete tasks", "FORBIDDEN", 403);
+  }
+
+  const hasActiveWork =
+    TASK_DELETE_BLOCKED_STATUSES.includes(existing.status) ||
+    Boolean(
+      existing.started_at ||
+      existing.submitted_at ||
+      existing.completed_at ||
+      existing.cancelled_at ||
+      existing.frozen_at
+    ) ||
+    existing._count.claims > 0 ||
+    existing._count.submissions > 0 ||
+    existing._count.reviews > 0 ||
+    existing._count.comments > 0;
+
+  if (hasActiveWork) {
+    throw new AppError(
+      "Cannot delete task because it already contains active work",
+      "BAD_REQUEST",
+      400
+    );
+  }
+
+  const dependentTaskIds = existing.dependents.map((dependent) => dependent.task_id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.notification.updateMany({
+      where: { task_id: taskId },
+      data: { task_id: null },
+    });
+
+    await tx.taskDependency.deleteMany({
+      where: {
+        OR: [
+          { task_id: taskId },
+          { depends_on_id: taskId },
+        ],
+      },
+    });
+
+    await tx.task.delete({
+      where: { id: taskId },
+    });
+
+    for (const dependentTaskId of dependentTaskIds) {
+      const blockingDependency = await tx.taskDependency.findFirst({
+        where: {
+          task_id: dependentTaskId,
+          depends_on: {
+            status: { not: "completed" },
+          },
+        },
+        select: { id: true },
+      });
+
+      if (!blockingDependency) {
+        await tx.task.updateMany({
+          where: {
+            id: dependentTaskId,
+            status: "pending_publish",
+          },
+          data: { status: "claimable" },
+        });
+      }
+    }
+
+    await tx.timelineEvent.create({
+      data: {
+        project_id: existing.project_id,
+        event_type: TimelineEventType.custom,
+        title: "任务已删除",
+        description: `任务「${existing.title}」已删除`,
+        actor_id: actorId,
+        metadata: JSON.stringify({
+          task_id: taskId,
+          role: existing.role,
+          unit_id: existing.unit_id,
+          dependency_count: existing.dependencies.length,
+          dependent_count: dependentTaskIds.length,
+          notification_count: existing._count.notifications,
+        }),
+      },
+    });
   });
 
   await auditService.log({
     user_id: actorId,
+    project_id: existing.project_id,
     action: "task.delete",
     resource_type: "task",
     resource_id: taskId,
     old_value: existing,
   });
 
-  return { success: true };
+  return { success: true, id: taskId };
 }
 
 // ==================== TASK STATE TRANSITIONS ====================

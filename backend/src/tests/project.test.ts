@@ -940,6 +940,119 @@ describe("Project & Workflow Tests", () => {
     });
   });
 
+  describe("Task Deletion", () => {
+    it("should delete an empty task, clear task notifications, and unlock downstream tasks", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "pending_publish",
+        creator_id: owner.id,
+      });
+
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+      const notification = await prisma.notification.create({
+        data: {
+          user_id: worker.id,
+          type: "task_assigned",
+          title: "Task assigned",
+          project_id: project.id,
+          task_id: upstream.id,
+          actor_id: owner.id,
+          channels: JSON.stringify(["in_site"]),
+        },
+      });
+
+      const deleteRes = await del(app, `/api/v1/tasks/${upstream.id}`, ownerToken);
+
+      expectSuccess(deleteRes, 200);
+      expect(deleteRes.body.data.id).toBe(upstream.id);
+
+      const deletedTask = await prisma.task.findUnique({ where: { id: upstream.id } });
+      const dependencyCount = await prisma.taskDependency.count({
+        where: {
+          OR: [
+            { task_id: upstream.id },
+            { depends_on_id: upstream.id },
+          ],
+        },
+      });
+      const updatedNotification = await prisma.notification.findUnique({ where: { id: notification.id } });
+      const updatedDownstream = await prisma.task.findUnique({ where: { id: downstream.id } });
+
+      expect(deletedTask).toBeNull();
+      expect(dependencyCount).toBe(0);
+      expect(updatedNotification!.task_id).toBeNull();
+      expect(updatedDownstream!.status).toBe("claimable");
+    });
+
+    it("should prevent deleting tasks that already contain active work", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      await prisma.translationClaim.create({
+        data: {
+          task_id: task.id,
+          unit_id: unit.id,
+          user_id: worker.id,
+          segment_start: 0,
+          segment_end: 120,
+        },
+      });
+
+      const deleteRes = await del(app, `/api/v1/tasks/${task.id}`, ownerToken);
+
+      expectError(deleteRes, 400, "BAD_REQUEST");
+      expect(await prisma.task.findUnique({ where: { id: task.id } })).not.toBeNull();
+    });
+
+    it("should prevent non-supervisors from deleting project tasks", async () => {
+      const { user: owner } = await createTestUser();
+      const { token: memberToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      const deleteRes = await del(app, `/api/v1/tasks/${task.id}`, memberToken);
+
+      expectError(deleteRes, 403, "FORBIDDEN");
+      expect(await prisma.task.findUnique({ where: { id: task.id } })).not.toBeNull();
+    });
+  });
+
   describe("Active Task Return", () => {
     it("should allow assignee to return an assigned task", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
