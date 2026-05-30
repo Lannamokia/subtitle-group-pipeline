@@ -476,6 +476,20 @@ export interface SystemBrandingSettings {
   logoUpdatedAt?: string | null;
 }
 
+export interface SmtpSettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  username?: string | null;
+  password?: string | null;
+  passwordConfigured?: boolean;
+  fromAddress: string;
+  fromName?: string | null;
+  rejectUnauthorized: boolean;
+  updatedAt?: string | null;
+}
+
 // ========== Role Tag Types ==========
 
 export interface RoleTagDefinition {

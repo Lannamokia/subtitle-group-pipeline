@@ -951,4 +951,46 @@ describe("Auth & Registration Tests", () => {
       expectError(res, 403, "FORBIDDEN");
     });
   });
+
+  describe("System SMTP Settings", () => {
+    it("should let admins save SMTP settings without exposing the password", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      const res = await put(
+        app,
+        "/api/v1/system/smtp",
+        {
+          enabled: true,
+          host: "smtp.example.com",
+          port: 465,
+          secure: true,
+          username: "mailer@example.com",
+          password: "secret-token",
+          from_address: "noreply@example.com",
+          from_name: "SubtitleSync",
+          reject_unauthorized: true,
+        },
+        admin.token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.enabled).toBe(true);
+      expect(res.body.data.host).toBe("smtp.example.com");
+      expect(res.body.data.password).toBeUndefined();
+      expect(res.body.data.passwordConfigured).toBe(true);
+
+      const getRes = await get(app, "/api/v1/system/smtp", admin.token);
+      expectSuccess(getRes, 200);
+      expect(getRes.body.data.password).toBeUndefined();
+      expect(getRes.body.data.passwordConfigured).toBe(true);
+    });
+
+    it("should require admin permissions for SMTP settings", async () => {
+      const member = await createTestUser();
+
+      const res = await get(app, "/api/v1/system/smtp", member.token);
+
+      expectError(res, 403, "FORBIDDEN");
+    });
+  });
 });

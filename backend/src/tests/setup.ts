@@ -430,6 +430,7 @@ const tableNames = [
   "registrationPolicy",
   "storageBackend",
   "dataRetentionSettings",
+  "smtpSettings",
   "user",
 ];
 

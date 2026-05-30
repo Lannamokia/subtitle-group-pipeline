@@ -73,3 +73,27 @@ export async function getLogo(
     next(error);
   }
 }
+
+export async function getSmtpSettings(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    successResponse(res, await systemService.getSmtpSettings());
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateSmtpSettings(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    successResponse(res, await systemService.updateSmtpSettings(req.body));
+  } catch (error) {
+    next(error);
+  }
+}

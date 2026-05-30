@@ -1,11 +1,26 @@
 import nodemailer from "nodemailer";
 import { env } from "../../../config/env";
 import { NotificationType } from "@prisma/client";
+import * as systemService from "../../system/system.service";
 
-let transporter: nodemailer.Transporter | null = null;
+let envTransporter: nodemailer.Transporter | null = null;
 
-function getTransporter(): nodemailer.Transporter | null {
-  if (transporter) return transporter;
+interface MailTransport {
+  transporter: nodemailer.Transporter;
+  from: string;
+}
+
+function formatFromAddress(fromAddress: string, fromName?: string | null): string {
+  return fromName ? `"${fromName.replace(/"/g, '\\"')}" <${fromAddress}>` : fromAddress;
+}
+
+function getEnvTransporter(): MailTransport | null {
+  if (envTransporter) {
+    return {
+      transporter: envTransporter,
+      from: process.env.SMTP_FROM || "noreply@subtitle-group.local",
+    };
+  }
 
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
@@ -20,7 +35,7 @@ function getTransporter(): nodemailer.Transporter | null {
     return null;
   }
 
-  transporter = nodemailer.createTransport({
+  envTransporter = nodemailer.createTransport({
     host: smtpHost,
     port: smtpPort,
     secure: smtpPort === 465,
@@ -32,7 +47,42 @@ function getTransporter(): nodemailer.Transporter | null {
     maxConnections: 5,
   });
 
-  return transporter;
+  return {
+    transporter: envTransporter,
+    from: smtpFrom,
+  };
+}
+
+async function getTransporter(): Promise<MailTransport | null> {
+  const settings = await systemService.getSmtpRuntimeSettings().catch(() => null);
+
+  if (settings?.enabled) {
+    if (!settings.host || !settings.from_address || !settings.password) {
+      return null;
+    }
+
+    return {
+      transporter: nodemailer.createTransport({
+        host: settings.host,
+        port: settings.port,
+        secure: settings.secure,
+        auth: settings.username
+          ? {
+              user: settings.username,
+              pass: settings.password,
+            }
+          : undefined,
+        tls: {
+          rejectUnauthorized: settings.reject_unauthorized,
+        },
+        pool: true,
+        maxConnections: 5,
+      }),
+      from: formatFromAddress(settings.from_address, settings.from_name),
+    };
+  }
+
+  return getEnvTransporter();
 }
 
 export interface EmailPayload {
@@ -113,19 +163,18 @@ function escapeHtml(text: string): string {
 }
 
 export async function sendEmail(payload: EmailPayload): Promise<EmailResult> {
-  const t = getTransporter();
+  const mailTransport = await getTransporter();
 
-  if (!t) {
+  if (!mailTransport) {
     console.log(`[EmailAdapter] Would send email to ${payload.to}: ${payload.subject}`);
     return { success: true, messageId: `mock-${Date.now()}` };
   }
 
   try {
-    const from = process.env.SMTP_FROM || "noreply@subtitle-group.local";
     const html = renderEmailTemplate(payload.subject, payload.body, payload.notificationType);
 
-    const info = await t.sendMail({
-      from,
+    const info = await mailTransport.transporter.sendMail({
+      from: mailTransport.from,
       to: payload.to,
       subject: payload.subject,
       html,
@@ -141,10 +190,10 @@ export async function sendEmail(payload: EmailPayload): Promise<EmailResult> {
 }
 
 export async function verifyEmailConnection(): Promise<boolean> {
-  const t = getTransporter();
-  if (!t) return false;
+  const mailTransport = await getTransporter();
+  if (!mailTransport) return false;
   try {
-    await t.verify();
+    await mailTransport.transporter.verify();
     return true;
   } catch {
     return false;

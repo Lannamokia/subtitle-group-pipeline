@@ -29,6 +29,7 @@ import type {
   Announcement,
   DataRetentionSettings,
   SystemBrandingSettings,
+  SmtpSettings,
   ApiResponse,
   PaginatedResponse,
 } from '@/types';
@@ -447,6 +448,21 @@ export function normalizeSystemBranding(raw: AnyRecord): SystemBrandingSettings 
   };
 }
 
+export function normalizeSmtpSettings(raw: AnyRecord): SmtpSettings {
+  return {
+    enabled: Boolean(raw.enabled),
+    host: raw.host ?? "",
+    port: Number(raw.port ?? 587),
+    secure: Boolean(raw.secure),
+    username: raw.username ?? null,
+    passwordConfigured: Boolean(raw.passwordConfigured ?? raw.password_configured),
+    fromAddress: raw.fromAddress ?? raw.from_address ?? "",
+    fromName: raw.fromName ?? raw.from_name ?? null,
+    rejectUnauthorized: raw.rejectUnauthorized ?? raw.reject_unauthorized ?? true,
+    updatedAt: raw.updatedAt ?? raw.updated_at ?? null,
+  };
+}
+
 export function normalizeTimelineEvent(raw: AnyRecord): TimelineEvent {
   return {
     id: raw.id,
@@ -810,6 +826,26 @@ export const systemApi = {
       normalizeSystemBranding(response.data.data as AnyRecord)
     );
   },
+
+  getSmtpSettings: () =>
+    api.get<ApiResponse<unknown>>('/system/smtp').then((response) =>
+      normalizeSmtpSettings(response.data.data as AnyRecord)
+    ),
+
+  updateSmtpSettings: (data: SmtpSettings) =>
+    api.put<ApiResponse<unknown>>('/system/smtp', {
+      enabled: data.enabled,
+      host: data.host,
+      port: data.port,
+      secure: data.secure,
+      username: data.username || null,
+      password: data.password || null,
+      from_address: data.fromAddress,
+      from_name: data.fromName || null,
+      reject_unauthorized: data.rejectUnauthorized,
+    }).then((response) =>
+      normalizeSmtpSettings(response.data.data as AnyRecord)
+    ),
 };
 
 // ========== Setup API ==========

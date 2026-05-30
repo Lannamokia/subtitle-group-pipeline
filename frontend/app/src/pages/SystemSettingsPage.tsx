@@ -9,6 +9,7 @@ import {
   Database,
   HardDrive,
   Layers,
+  Mail,
   Megaphone,
   Settings,
   ShieldCheck,
@@ -20,6 +21,7 @@ import { DataRetentionPage } from "@/pages/admin/DataRetentionPage";
 import { RegistrationSettingsPage } from "@/pages/admin/RegistrationSettingsPage";
 import { StorageBackendPage } from "@/pages/admin/StorageBackendPage";
 import { BrandingSettingsPage } from "@/pages/admin/BrandingSettingsPage";
+import { SmtpSettingsPage } from "@/pages/admin/SmtpSettingsPage";
 
 type SettingsSection =
   | "branding"
@@ -28,6 +30,7 @@ type SettingsSection =
   | "retention"
   | "templates"
   | "announcements"
+  | "smtp"
   | "notifications";
 
 interface SettingsCardConfig {
@@ -88,6 +91,13 @@ const SETTINGS_SECTIONS: SettingsCardConfig[] = [
     title: "通知偏好",
     description: "站内、邮件、QQ 和升级规则",
     icon: Bell,
+  },
+  {
+    id: "smtp",
+    title: "邮件服务",
+    description: "SMTP 主机、发件邮箱和加密选项",
+    icon: Mail,
+    adminOnly: true,
   },
 ];
 
@@ -181,6 +191,7 @@ export function SystemSettingsPage() {
           {activeSection === "templates" && <TemplatePage />}
           {activeSection === "announcements" && <AnnouncementAdminPage />}
           {activeSection === "notifications" && <NotificationSettingsPage />}
+          {activeSection === "smtp" && <SmtpSettingsPage />}
         </div>
       </div>
     </div>

@@ -3,7 +3,7 @@ import multer from "multer";
 import { authenticate, requireRole } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import * as controller from "./system.controller";
-import { updateBrandingSchema } from "./system.schema";
+import { smtpSettingsSchema, updateBrandingSchema } from "./system.schema";
 
 const router = Router();
 
@@ -36,5 +36,18 @@ router.post(
   controller.uploadLogo
 );
 router.get("/logo", controller.getLogo);
+router.get(
+  "/smtp",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  controller.getSmtpSettings
+);
+router.put(
+  "/smtp",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateBody(smtpSettingsSchema),
+  controller.updateSmtpSettings
+);
 
 export default router;
