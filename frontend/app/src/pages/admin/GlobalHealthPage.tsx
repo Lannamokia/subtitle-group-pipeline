@@ -156,11 +156,7 @@ export function GlobalHealthPage() {
                 <InfoRow label="机器人状态" value={health.qqBridge.heartbeatStatus ?? "-"} />
                 <InfoRow
                   label="机器人账号"
-                  value={
-                    health.qqBridge.botNickname || health.qqBridge.botId
-                      ? `${health.qqBridge.botNickname ?? "QQ Bot"}${health.qqBridge.botId ? ` (${health.qqBridge.botId})` : ""}`
-                      : "-"
-                  }
+                  value={health.qqBridge.botId ?? "-"}
                 />
                 {health.qqBridge.error && <InfoRow label="错误信息" value={health.qqBridge.error} />}
               </CardContent>

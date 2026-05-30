@@ -169,12 +169,12 @@ async def build_heartbeat_payload() -> dict[str, Any]:
             "error": "No OneBot V11 bot connected",
         }
 
-    nickname = str(getattr(bot, "nickname", "") or "")
+    bot_id = str(bot.self_id)
     return {
         "status": "online",
         "connected": True,
-        "bot_id": str(bot.self_id),
-        "bot_nickname": nickname or None,
+        "bot_id": bot_id,
+        "bot_nickname": None,
         "adapter": "onebot-v11",
     }
 
