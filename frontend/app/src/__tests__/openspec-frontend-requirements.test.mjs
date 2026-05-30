@@ -80,12 +80,13 @@ assertIncludes("serial task workflow stepper", files.projectDetail + files.taskW
   "rounded-full border-2",
   "right-1/2 top-1/2 h-0.5",
   "createDependency",
-  "我的岗位操作面板",
   "串行制作流水线",
   "提交任务文件",
   "任务模板",
   "TASK_TEMPLATE_CUSTOM_VALUE",
-  "getTaskWorkflowStep",
+  "SelectGroup",
+  "SelectLabel",
+  "getTaskTemplateValue",
   "ProductOutputRequirement",
   "成品配置",
   "内封成品",
@@ -96,10 +97,10 @@ assertIncludes("serial task workflow stepper", files.projectDetail + files.taskW
   ".ttml",
 ]);
 
-assertNotIncludes("task templates stay inside create dialog", files.projectDetail, [
+assertNotIncludes("task templates do not leave stale project-page panels", files.projectDetail, [
   "openCreateTaskDialog(step.role",
-  "step.templates.map((template)",
   "每一步都提供专属任务模板",
+  "我的岗位操作面板",
 ]);
 
 assertIncludes("file bucket history and explicit replace", files.fileList, [
