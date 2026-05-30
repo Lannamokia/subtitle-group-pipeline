@@ -33,6 +33,7 @@ const files = {
   archive: await source("pages/ArchivePage.tsx"),
   notifications: await source("pages/NotificationSettingsPage.tsx"),
   dashboard: await source("pages/DashboardPage.tsx"),
+  personalTaskBoard: await source("components/PersonalTaskBoard.tsx"),
   profile: await source("pages/ProfilePage.tsx"),
   storage: await source("pages/admin/StorageBackendPage.tsx"),
   announcements: await source("pages/admin/AnnouncementAdminPage.tsx"),
@@ -150,8 +151,13 @@ assertIncludes("storage backend configuration", files.storage, [
   "quotaBytes",
 ]);
 
+assertIncludes("personal task board on dashboard", files.dashboard + files.personalTaskBoard, [
+  "PersonalTaskBoard",
+  "我的任务看板",
+  "task.assigneeId === user?.id",
+]);
+
 assertIncludes("workload dashboard", files.workload, [
-  "PersonalView",
   "SupervisorView",
   "AdminView",
   "taskApi.getTasks",

@@ -58,11 +58,11 @@ const mainNavItems: NavItem[] = [
 
 const memberNavItems: NavItem[] = [
   { path: "/skill-profile", label: "技能档案", icon: <Award className="w-5 h-5 md:w-5 md:h-5" /> },
-  { path: "/workload", label: "工作量", icon: <BarChart3 className="w-5 h-5 md:w-5 md:h-5" /> },
   { path: "/archive", label: "归档", icon: <Archive className="w-5 h-5 md:w-5 md:h-5" /> },
 ];
 
 const adminNavItems: NavItem[] = [
+  { path: "/workload", label: "工作量", icon: <BarChart3 className="w-5 h-5" />, supervisorPlus: true },
   { path: "/members", label: "成员管理", icon: <Users className="w-5 h-5" />, adminOnly: true },
   { path: "/admin/settings", label: "系统设置", icon: <Settings className="w-5 h-5" />, supervisorPlus: true },
 ];

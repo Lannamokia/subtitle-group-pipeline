@@ -9,7 +9,6 @@ import { Progress } from "@/components/ui/progress";
 import { UserAvatar } from "@/components/UserAvatar";
 import type { Task, TaskStatus, User, Project } from "@/types";
 import {
-  LayoutDashboard,
   Users,
   Shield,
   Clock,
@@ -19,7 +18,7 @@ import {
   BarChart3,
 } from "lucide-react";
 
-type WorkloadView = "personal" | "supervisor" | "admin";
+type WorkloadView = "supervisor" | "admin";
 
 const STATUS_GROUPS: { id: string; label: string; statuses: TaskStatus[]; color: string }[] = [
   { id: "todo", label: "待处理", statuses: ["pending_publish", "claimable", "assigned"], color: "bg-gray-100" },
@@ -35,13 +34,11 @@ export function WorkloadPage() {
   const isSupervisor = useAuthStore((s) => s.isSupervisor)();
   const navigate = useNavigate();
 
-  // Determine default view based on role
-  const defaultView: WorkloadView = isAdmin ? "admin" : isSupervisor ? "supervisor" : "personal";
+  const defaultView: WorkloadView = isAdmin ? "admin" : "supervisor";
   const [activeView, setActiveView] = useState<WorkloadView>(defaultView);
 
-  // Filter views available to user
   const availableViews: WorkloadView[] = useMemo(() => {
-    const views: WorkloadView[] = ["personal"];
+    const views: WorkloadView[] = [];
     if (isSupervisor) views.push("supervisor");
     if (isAdmin) views.push("admin");
     return views;
@@ -68,7 +65,7 @@ export function WorkloadPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-display text-gray-800">工作量看板</h1>
-          <p className="text-sm text-gray-500 mt-1">查看任务分配和工作进度</p>
+          <p className="text-sm text-gray-500 mt-1">查看项目监管和全局工作进度</p>
         </div>
       </div>
 
@@ -86,74 +83,16 @@ export function WorkloadPage() {
                   : "text-gray-500 hover:text-gray-700"
               )}
             >
-              {view === "personal" && <LayoutDashboard className="w-4 h-4" />}
               {view === "supervisor" && <Users className="w-4 h-4" />}
               {view === "admin" && <Shield className="w-4 h-4" />}
-              {view === "personal" ? "我的任务" : view === "supervisor" ? "项目监管" : "全局管理"}
+              {view === "supervisor" ? "项目监管" : "全局管理"}
             </button>
           ))}
         </div>
       )}
 
-      {/* Content */}
-      {activeView === "personal" && <PersonalView user={user} navigate={navigate} tasks={tasks} />}
       {activeView === "supervisor" && <SupervisorView navigate={navigate} tasks={tasks} projects={projects} user={user} />}
       {activeView === "admin" && <AdminView tasks={tasks} />}
-    </div>
-  );
-}
-
-/* ---------- Personal View ---------- */
-
-function PersonalView({ user, navigate, tasks }: { user: User | null; navigate: ReturnType<typeof useNavigate>; tasks: Task[] }) {
-  const myTasks = tasks.filter((t) => t.assigneeId === user?.id);
-
-  const stats = useMemo(() => {
-    const total = myTasks.length;
-    const inProgress = myTasks.filter((t) => t.status === "in_progress").length;
-    const submitted = myTasks.filter((t) => t.status === "submitted").length;
-    const overdue = myTasks.filter((t) => t.status === "overdue").length;
-    const completed = myTasks.filter((t) => t.status === "completed" || t.status === "review_approved").length;
-    return { total, inProgress, submitted, overdue, completed };
-  }, [myTasks]);
-
-  return (
-    <div className="space-y-6">
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
-        <StatCard title="总任务" value={stats.total} icon={<ClipboardList className="w-5 h-5 text-primary-500" />} />
-        <StatCard title="进行中" value={stats.inProgress} icon={<Clock className="w-5 h-5 text-blue-500" />} />
-        <StatCard title="待审核" value={stats.submitted} icon={<CheckCircle2 className="w-5 h-5 text-yellow-500" />} />
-        <StatCard title="已超期" value={stats.overdue} icon={<AlertTriangle className="w-5 h-5 text-red-500" />} color={stats.overdue > 0 ? "warning" : "neutral"} />
-        <StatCard title="已完成" value={stats.completed} icon={<CheckCircle2 className="w-5 h-5 text-green-500" />} />
-      </div>
-
-      {/* Tasks by status group */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
-        {STATUS_GROUPS.filter((g) => g.id !== "done").map((group) => {
-          const groupTasks = myTasks.filter((t) => group.statuses.includes(t.status));
-          return (
-            <Card key={group.id} className={cn("border-gray-200/60", group.color)}>
-              <CardHeader className="px-4 py-3 pb-0">
-                <CardTitle className="text-h3 flex items-center justify-between">
-                  <span>{group.label}</span>
-                  <span className="text-xs text-gray-400 font-normal bg-white px-2 py-0.5 rounded-full border">
-                    {groupTasks.length}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 pt-3 space-y-2">
-                {groupTasks.map((task) => (
-                  <TaskMiniCard key={task.id} task={task} onClick={() => navigate(`/projects/${task.projectId}`)} />
-                ))}
-                {groupTasks.length === 0 && (
-                  <div className="text-center py-6 text-xs text-gray-400">暂无任务</div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
     </div>
   );
 }

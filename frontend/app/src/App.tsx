@@ -64,10 +64,10 @@ export default function App() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/skill-profile" element={<SkillProfilePage />} />
         <Route path="/archive" element={<ArchivePage />} />
-        <Route path="/workload" element={<WorkloadPage />} />
         <Route path="/admin/settings" element={<SystemSettingsPage />} />
 
         <Route element={<SupervisorRoute />}>
+          <Route path="/workload" element={<WorkloadPage />} />
           <Route path="/templates" element={<Navigate to="/admin/settings?section=templates" replace />} />
         </Route>
 

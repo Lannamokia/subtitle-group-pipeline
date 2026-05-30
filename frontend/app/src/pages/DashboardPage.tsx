@@ -1,21 +1,17 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { cn, formatFullDate, formatRelativeTime } from "@/lib/utils";
+import { formatFullDate, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrandingStore } from "@/stores/brandingStore";
 import { taskApi, timelineApi, announcementApi, notificationApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TaskCard } from "@/components/TaskCard";
+import { PersonalTaskBoard } from "@/components/PersonalTaskBoard";
 import { TimelineEventItem } from "@/components/TimelineEvent";
 import type { Task, TimelineEvent, Announcement } from "@/types";
 import {
   ClipboardList,
-  CheckCircle2,
-  AlertTriangle,
-  Bell,
   Plus,
   Layers,
   Megaphone,
@@ -26,7 +22,6 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const branding = useBrandingStore((state) => state.branding);
-  const [taskTab, setTaskTab] = useState<"in_progress" | "submitted" | "overdue" | "all">("in_progress");
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem("onboarding-dismissed");
   });
@@ -67,20 +62,6 @@ export function DashboardPage() {
       .then((data) => setUnreadCount(data.count))
       .catch(() => setUnreadCount(0));
   }, []);
-
-  // Stats
-  const inProgressTasks = tasks.filter((t) => t.status === "in_progress");
-  const submittedTasks = tasks.filter((t) => t.status === "submitted");
-  const overdueTasks = tasks.filter((t) => t.status === "overdue");
-
-  const filteredTasks =
-    taskTab === "in_progress"
-      ? inProgressTasks
-      : taskTab === "submitted"
-        ? submittedTasks
-        : taskTab === "overdue"
-          ? overdueTasks
-          : tasks;
 
   const dismissOnboarding = () => {
     setShowOnboarding(false);
@@ -151,101 +132,10 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-        <StatCard
-          title="进行中任务"
-          value={inProgressTasks.length}
-          icon={<ClipboardList className="w-5 h-5 text-primary-500" />}
-          color="primary"
-          onClick={() => { setTaskTab("in_progress"); }}
-        />
-        <StatCard
-          title="待审核"
-          value={submittedTasks.length}
-          icon={<CheckCircle2 className="w-5 h-5 text-gray-400" />}
-          color="neutral"
-          onClick={() => { setTaskTab("submitted"); }}
-        />
-        <StatCard
-          title="超期任务"
-          value={overdueTasks.length}
-          icon={<AlertTriangle className="w-5 h-5 text-yellow-500" />}
-          color={overdueTasks.length > 0 ? "warning" : "neutral"}
-          onClick={() => { setTaskTab("overdue"); }}
-        />
-        <StatCard
-          title="新通知"
-          value={unreadCount}
-          icon={<Bell className="w-5 h-5 text-primary-500" />}
-          color={unreadCount > 0 ? "primary" : "neutral"}
-          pulse={unreadCount > 0}
-          onClick={() => navigate("/notifications")}
-        />
-      </div>
+      <PersonalTaskBoard tasks={tasks} />
 
-      {/* Main content: Task list + Timeline */}
       <div className="grid grid-cols-1 lg:grid-cols-7 gap-4 md:gap-6">
-        {/* Task list (left, 5 cols) */}
         <div className="lg:col-span-5 space-y-4">
-          <Card>
-            <CardContent className="p-0">
-              <Tabs value={taskTab} onValueChange={(v) => setTaskTab(v as typeof taskTab)}>
-                <div className="flex items-center justify-between px-4 pt-4 pb-2">
-                  <TabsList>
-                    <TabsTrigger value="in_progress">
-                      进行中
-                      <span className="ml-1.5 text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                        {inProgressTasks.length}
-                      </span>
-                    </TabsTrigger>
-                    <TabsTrigger value="submitted">
-                      待审核
-                      <span className="ml-1.5 text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                        {submittedTasks.length}
-                      </span>
-                    </TabsTrigger>
-                    <TabsTrigger value="overdue">
-                      超期
-                      <span className="ml-1.5 text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                        {overdueTasks.length}
-                      </span>
-                    </TabsTrigger>
-                    <TabsTrigger value="all">
-                      全部
-                      <span className="ml-1.5 text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                        {tasks.length}
-                      </span>
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-
-                <TabsContent value={taskTab} className="mt-0">
-                  {filteredTasks.length > 0 ? (
-                    <div className="divide-y divide-gray-100">
-                      {filteredTasks.map((task) => (
-                        <div
-                          key={task.id}
-                          className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                          onClick={() => navigate(`/projects/${task.projectId}`)}
-                        >
-                          <TaskCard task={task} showProject />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <EmptyState
-                      icon={<ClipboardList className="w-10 h-10 text-gray-300" />}
-                      title={`暂无${taskTab === "in_progress" ? "进行中" : taskTab === "submitted" ? "待审核" : taskTab === "overdue" ? "超期" : ""}的任务`}
-                      subtitle="去项目页面领取或等待指派"
-                    />
-                  )}
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-
-          {/* Project announcements */}
           {projectAnnouncements.length > 0 && (
             <Card>
               <CardContent className="p-4">
@@ -282,7 +172,6 @@ export function DashboardPage() {
           )}
         </div>
 
-        {/* Timeline (right, 2 cols) */}
         <div className="lg:col-span-2">
           <Card>
             <CardContent className="p-4">
@@ -343,82 +232,6 @@ export function DashboardPage() {
           </Card>
         </div>
       )}
-    </div>
-  );
-}
-
-/* ---------- Sub-components ---------- */
-
-function StatCard({
-  title,
-  value,
-  icon,
-  color,
-  pulse,
-  onClick,
-}: {
-  title: string;
-  value: number;
-  icon: React.ReactNode;
-  color: "primary" | "warning" | "neutral";
-  pulse?: boolean;
-  onClick?: () => void;
-}) {
-  const colorClasses = {
-    primary: {
-      card: "",
-      number: "text-primary-600",
-    },
-    warning: {
-      card: "border-yellow-200 bg-yellow-50/50",
-      number: "text-red-600",
-    },
-    neutral: {
-      card: "",
-      number: "text-gray-600",
-    },
-  };
-
-  return (
-    <Card
-      className={cn(
-        "cursor-pointer hover:shadow-md transition-shadow",
-        colorClasses[color].card
-      )}
-      onClick={onClick}
-    >
-      <CardContent className="p-4 flex flex-col justify-between h-[88px]">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <span className="text-small text-gray-500">{title}</span>
-          <span className="relative">
-            {icon}
-            {pulse && (
-              <span className="absolute inset-0 rounded-full bg-primary-400 animate-pulse-ring" />
-            )}
-          </span>
-        </div>
-        <span className={cn("text-[28px] font-bold leading-none", colorClasses[color].number)}>
-          {value}
-        </span>
-      </CardContent>
-    </Card>
-  );
-}
-
-function EmptyState({
-  icon,
-  title,
-  subtitle,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <div className="flex flex-col items-center py-12 text-center">
-      {icon}
-      <p className="text-sm text-gray-500 mt-3">{title}</p>
-      <p className="text-xs text-gray-400 mt-1">{subtitle}</p>
     </div>
   );
 }
