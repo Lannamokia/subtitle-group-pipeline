@@ -156,7 +156,7 @@ export function SetupPage() {
                 next === "sqlite"
                   ? "file:./dev.db"
                   : next === "mariadb"
-                    ? "mariadb://user:password@localhost:3306/subtitle_group"
+                    ? "mysql://user:password@localhost:3306/subtitle_group"
                   : next === "mysql"
                     ? "mysql://user:password@localhost:3306/subtitle_group"
                     : "postgresql://user:password@localhost:5432/subtitle_group"

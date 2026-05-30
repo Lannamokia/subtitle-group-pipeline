@@ -69,7 +69,7 @@ async function syncSchema(databaseUrl: string, provider: "sqlite" | "mysql" | "p
   const tempSchemaPath = path.join(SCHEMA_DIR, `.setup-${crypto.randomUUID()}.prisma`);
   try {
     fs.writeFileSync(tempSchemaPath, buildPrismaSchema(provider));
-    await runPrismaCommand(["migrate", "deploy", "--schema", tempSchemaPath], env);
+    await runPrismaCommand(["db", "push", "--accept-data-loss", "--skip-generate", "--schema", tempSchemaPath], env);
   } finally {
     fs.rmSync(tempSchemaPath, { force: true });
   }
@@ -160,6 +160,10 @@ function sqliteFilePath(databaseUrl: string) {
 }
 
 function databaseUrlForPrismaCli(databaseUrl: string, provider: "sqlite" | "mysql" | "postgresql") {
+  if (provider === "mysql" && databaseUrl.startsWith("mariadb://")) {
+    return `mysql://${databaseUrl.slice("mariadb://".length)}`;
+  }
+
   if (provider !== "sqlite" || !databaseUrl.startsWith("file:")) {
     return databaseUrl;
   }
@@ -177,11 +181,17 @@ function ensureSqliteDirectory(sqlitePath: string) {
 
 async function runPrismaCommand(args: string[], env: NodeJS.ProcessEnv) {
   const prismaCli = path.resolve(process.cwd(), "node_modules/prisma/build/index.js");
-  await execFileAsync(process.execPath, [prismaCli, ...args], {
-    cwd: process.cwd(),
-    env,
-    windowsHide: true,
-  });
+  try {
+    await execFileAsync(process.execPath, [prismaCli, ...args], {
+      cwd: process.cwd(),
+      env,
+      windowsHide: true,
+    });
+  } catch (error) {
+    const commandError = error as Error & { stderr?: string; stdout?: string };
+    const details = (commandError.stderr || commandError.stdout || commandError.message).trim();
+    throw new AppError(details || "Database setup failed", "DATABASE_SETUP_FAILED", 400);
+  }
 }
 
 function sqlString(value: string | null | undefined): string {
@@ -276,12 +286,13 @@ export async function completeSetup(input: CompleteSetupInput) {
   if (prismaProvider(inferred) !== selectedProvider) {
     throw new AppError("Database provider does not match URL scheme", "VALIDATION_ERROR", 400);
   }
+  const databaseUrl = databaseUrlForPrismaCli(input.database.url, selectedProvider);
 
   const passwordHash = await hashPassword(input.admin.password);
   const backendType = input.storage.backend_type as "local" | "s3" | "s3_compatible";
   const config = storageService.normalizeStorageConfig(backendType, input.storage.config);
   await storageService.validateStorageBackendConfig(backendType, config);
-  await syncSchema(input.database.url, selectedProvider);
+  await syncSchema(databaseUrl, selectedProvider);
 
   if (selectedProvider !== "sqlite") {
     const adminId = crypto.randomUUID();
@@ -299,9 +310,9 @@ export async function completeSetup(input: CompleteSetupInput) {
       storageConfig: config,
       quotaBytes: input.storage.quota_bytes,
     });
-    await executeSql(input.database.url, selectedProvider, sql);
-    updateEnvFile({ DATABASE_URL: input.database.url, JWT_SECRET: input.security.jwt_secret });
-    process.env.DATABASE_URL = input.database.url;
+    await executeSql(databaseUrl, selectedProvider, sql);
+    updateEnvFile({ DATABASE_URL: databaseUrl, JWT_SECRET: input.security.jwt_secret });
+    process.env.DATABASE_URL = databaseUrl;
     process.env.JWT_SECRET = input.security.jwt_secret;
     env.JWT_SECRET = input.security.jwt_secret;
 
@@ -314,11 +325,11 @@ export async function completeSetup(input: CompleteSetupInput) {
     };
   }
 
-  updateEnvFile({ DATABASE_URL: input.database.url, JWT_SECRET: input.security.jwt_secret });
-  process.env.DATABASE_URL = input.database.url;
+  updateEnvFile({ DATABASE_URL: databaseUrl, JWT_SECRET: input.security.jwt_secret });
+  process.env.DATABASE_URL = databaseUrl;
   process.env.JWT_SECRET = input.security.jwt_secret;
   env.JWT_SECRET = input.security.jwt_secret;
-  await configurePrisma(input.database.url);
+  await configurePrisma(databaseUrl);
 
   const status = await getSetupStatus();
   if (status.initialized) {
