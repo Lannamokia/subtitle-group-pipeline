@@ -1101,6 +1101,11 @@ export async function approveVersion(
 export async function deleteFile(fileId: string, deletedBy: string) {
   const file = await prisma.fileEntity.findUnique({
     where: { id: fileId },
+    include: {
+      project: {
+        select: { owner_id: true },
+      },
+    },
   });
 
   if (!file) {
@@ -1111,14 +1116,49 @@ export async function deleteFile(fileId: string, deletedBy: string) {
     throw new AppError("File is already deleted", "BAD_REQUEST", 400);
   }
 
-  await prisma.fileEntity.update({
-    where: { id: fileId },
-    data: {
-      is_deleted: true,
-      deleted_at: new Date(),
-      deleted_by: deletedBy,
-    },
+  const actor = await prisma.user.findUnique({
+    where: { id: deletedBy },
+    select: { role: true },
   });
+
+  if (!actor) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  const isPrivilegedRole = ["super_admin", "group_admin", "supervisor"].includes(actor.role);
+  const isUploader = file.uploader_id === deletedBy;
+  const isProjectOwner = file.project.owner_id === deletedBy;
+  const membership = await prisma.projectMember.findFirst({
+    where: {
+      project_id: file.project_id,
+      user_id: deletedBy,
+      left_at: null,
+      OR: [{ role: "supervisor" }, { is_lead: true }],
+    },
+    select: { id: true },
+  });
+
+  if (!isPrivilegedRole && !isUploader && !isProjectOwner && !membership) {
+    throw new AppError("Insufficient permissions to delete this file", "FORBIDDEN", 403);
+  }
+
+  await prisma.$transaction([
+    prisma.fileEntity.update({
+      where: { id: fileId },
+      data: {
+        is_deleted: true,
+        deleted_at: new Date(),
+        deleted_by: deletedBy,
+      },
+    }),
+    prisma.downloadLink.updateMany({
+      where: {
+        file_id: fileId,
+        is_active: true,
+      },
+      data: { is_active: false },
+    }),
+  ]);
 
   return { success: true };
 }
@@ -1361,6 +1401,17 @@ export async function verifyDownloadToken(token: string) {
 
   if (link.max_downloads !== null && link.download_count >= link.max_downloads) {
     throw new AppError("Download limit exceeded", "GONE", 410);
+  }
+
+  if (link.file_id) {
+    const file = await prisma.fileEntity.findUnique({
+      where: { id: link.file_id },
+      select: { is_deleted: true },
+    });
+
+    if (!file || file.is_deleted) {
+      throw new AppError("File has been deleted", "GONE", 410);
+    }
   }
 
   // Increment download count

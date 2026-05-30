@@ -24,9 +24,20 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { FileListItem } from "@/components/FileListItem";
 import { toast } from "sonner";
 import type { FileEntity, FileType, FileVersion, LinkAsset, Project } from "@/types";
+import { useAuthStore } from "@/stores/authStore";
 import {
   Search,
   FileArchive,
@@ -63,6 +74,8 @@ const PROJECT_STATUS_LABEL: Record<string, string> = {
 };
 
 export function FileListPage() {
+  const currentUser = useAuthStore((state) => state.user);
+  const isSupervisor = useAuthStore((state) => state.isSupervisor());
   const [files, setFiles] = useState<FileEntity[]>([]);
   const [links, setLinks] = useState<LinkAsset[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -87,6 +100,8 @@ export function FileListPage() {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkForm, setLinkForm] = useState({ name: "", url: "", extractCode: "", description: "" });
   const [addingLink, setAddingLink] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<FileEntity | null>(null);
+  const [deletingFile, setDeletingFile] = useState(false);
 
   const fetchProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -159,6 +174,19 @@ export function FileListPage() {
   const selectedProject = selectedProjectId
     ? projects.find((project) => project.id === selectedProjectId)
     : null;
+
+  const canDeleteFile = useCallback(
+    (file: FileEntity) =>
+      isSupervisor ||
+      file.uploader.id === currentUser?.id ||
+      selectedProject?.supervisorId === currentUser?.id ||
+      selectedProject?.members.some(
+        (member) =>
+          member.user.id === currentUser?.id &&
+          member.role === "supervisor"
+      ) === true,
+    [currentUser?.id, isSupervisor, selectedProject]
+  );
 
   const enterProjectFiles = (projectId: string) => {
     setSelectedProjectId(projectId);
@@ -253,6 +281,25 @@ export function FileListPage() {
       setLinks((prev) => prev.filter((l) => l.id !== linkId));
     } catch (error) {
       toast.error("删除失败: " + getErrorMessage(error));
+    }
+  };
+
+  const handleDeleteFile = async () => {
+    if (!deleteTarget) return;
+    setDeletingFile(true);
+    try {
+      await fileApi.deleteFile(deleteTarget.id);
+      toast.success("文件已删除");
+      setFiles((prev) => prev.filter((file) => file.id !== deleteTarget.id));
+      if (selectedFile?.id === deleteTarget.id) {
+        setSelectedFile(null);
+      }
+      setDeleteTarget(null);
+      fetchFiles();
+    } catch (error) {
+      toast.error("删除失败: " + getErrorMessage(error));
+    } finally {
+      setDeletingFile(false);
     }
   };
 
@@ -421,6 +468,7 @@ export function FileListPage() {
                       file={file}
                       onDownload={() => handleDownload(file.id)}
                       onViewHistory={() => setSelectedFile(file)}
+                      onDelete={canDeleteFile(file) ? () => setDeleteTarget(file) : undefined}
                     />
                   ))}
                 </div>
@@ -670,6 +718,31 @@ export function FileListPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除文件</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除后文件会从列表中隐藏，已有临时下载链接会立即失效，历史版本和审阅引用会保留用于追溯。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingFile}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              disabled={deletingFile}
+              onClick={(event) => {
+                event.preventDefault();
+                handleDeleteFile();
+              }}
+            >
+              {deletingFile && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

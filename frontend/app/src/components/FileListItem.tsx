@@ -1,6 +1,6 @@
 import { cn, formatFileSize, formatRelativeTime, getFileTypeLabel } from "@/lib/utils";
 import type { FileEntity } from "@/types";
-import { Film, FileText, Type, Archive, Link2, File, Download, History, MoreHorizontal } from "lucide-react";
+import { Film, FileText, Type, Archive, Link2, File, Download, History, MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ interface FileListItemProps {
   file: FileEntity;
   onDownload?: () => void;
   onViewHistory?: () => void;
+  onDelete?: () => void;
   showVersion?: boolean;
   className?: string;
 }
@@ -25,7 +26,7 @@ const fileTypeIcons: Record<string, React.ReactNode> = {
   other: <File className="w-4 h-4 text-gray-500" />,
 };
 
-export function FileListItem({ file, onDownload, onViewHistory, showVersion = true, className }: FileListItemProps) {
+export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVersion = true, className }: FileListItemProps) {
   const isLink = file.size === 0;
 
   return (
@@ -105,6 +106,12 @@ export function FileListItem({ file, onDownload, onViewHistory, showVersion = tr
               <DropdownMenuItem onClick={onViewHistory}>
                 <History className="w-4 h-4 mr-2" />
                 版本历史
+              </DropdownMenuItem>
+            )}
+            {onDelete && (
+              <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={onDelete}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                删除
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

@@ -17,7 +17,7 @@ describe("File Management Tests", () => {
   let app: Application;
 
   beforeAll(() => {
-    app = createApp();
+    app = createApp({ databaseReady: true });
   });
 
   beforeEach(async () => {
@@ -1017,6 +1017,74 @@ describe("File Management Tests", () => {
       expect(res.body.data.version_count).toBeGreaterThanOrEqual(2);
       expect(res.body.data.has_multiple_versions).toBe(true);
       expect(res.body.data.uploader.id).toBe(user.id);
+    });
+
+    it("should allow a project supervisor to soft-delete another member file", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: supervisor, token: supervisorToken } = await createTestUser();
+      const { user: uploader } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: supervisor.id, role: "supervisor" },
+      });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: uploader.id,
+      });
+
+      const res = await del(app, `/api/v1/files/${file.id}`, supervisorToken);
+
+      expectSuccess(res, 200);
+      const deletedFile = await prisma.fileEntity.findUnique({ where: { id: file.id } });
+      expect(deletedFile!.is_deleted).toBe(true);
+      expect(deletedFile!.deleted_by).toBe(supervisor.id);
+    });
+
+    it("should reject file deletion by a project member without elevated permissions", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: uploader } = await createTestUser();
+      const { user: member, token: memberToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: member.id, role: "translation" },
+      });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: uploader.id,
+      });
+
+      const res = await del(app, `/api/v1/files/${file.id}`, memberToken);
+
+      expectError(res, 403, "FORBIDDEN");
+      const existingFile = await prisma.fileEntity.findUnique({ where: { id: file.id } });
+      expect(existingFile!.is_deleted).toBe(false);
+    });
+
+    it("should deactivate existing download links when a file is deleted", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: owner.id,
+      });
+      const link = await prisma.downloadLink.create({
+        data: {
+          project_id: project.id,
+          file_id: file.id,
+          created_by: owner.id,
+          token: "delete-file-link-token",
+          expires_at: new Date(Date.now() + 60000),
+          is_active: true,
+        },
+      });
+
+      const res = await del(app, `/api/v1/files/${file.id}`, ownerToken);
+
+      expectSuccess(res, 200);
+      const inactiveLink = await prisma.downloadLink.findUnique({ where: { id: link.id } });
+      expect(inactiveLink!.is_active).toBe(false);
+      const downloadRes = await get(app, `/api/v1/files/download/${link.token}`);
+      expectError(downloadRes, 410, "GONE");
     });
   });
 
