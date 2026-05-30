@@ -1029,12 +1029,18 @@ model SmtpSettings {
 }
 
 model QqBridgeSettings {
-  id               String   @id @default(uuid())
-  enabled          Boolean  @default(false)
-  endpoint         String?
-  secret           String?
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
+  id                     String   @id @default(uuid())
+  enabled                Boolean  @default(false)
+  endpoint               String?
+  secret                 String?
+  last_heartbeat_at      DateTime?
+  last_heartbeat_status  String?
+  last_heartbeat_error   String?
+  last_bot_id            String?
+  last_bot_nickname      String?
+  last_heartbeat_payload String?
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
 }
 
 // ==================== RECYCLE BIN ====================

@@ -1148,6 +1148,78 @@ describe("Auth & Registration Tests", () => {
       expect(res.body.data.qq_bridge.error).toEqual(expect.any(String));
     });
 
+    it("should record QQ bridge heartbeats and report the bridge as online", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      await put(
+        app,
+        "/api/v1/system/qq-bridge",
+        {
+          enabled: true,
+          endpoint: "http://127.0.0.1:8095",
+          secret: "bridge-secret",
+        },
+        admin.token
+      );
+
+      const heartbeatRes = await post(
+        app,
+        "/api/v1/qq/heartbeat",
+        {
+          status: "online",
+          connected: true,
+          bot_id: "10001",
+          bot_nickname: "Subtitle Bot",
+          adapter: "onebot-v11",
+          version: "test",
+        },
+        "bridge-secret"
+      );
+
+      expectSuccess(heartbeatRes, 200);
+      expect(heartbeatRes.body.data.last_heartbeat_at).toEqual(expect.any(String));
+      expect(heartbeatRes.body.data.last_heartbeat_status).toBe("online");
+
+      const healthRes = await get(app, "/api/v1/system/health", admin.token);
+
+      expectSuccess(healthRes, 200);
+      expect(healthRes.body.data.qq_bridge.configured).toBe(true);
+      expect(healthRes.body.data.qq_bridge.connected).toBe(true);
+      expect(healthRes.body.data.qq_bridge.last_heartbeat_at).toEqual(expect.any(String));
+      expect(healthRes.body.data.qq_bridge.heartbeat_status).toBe("online");
+      expect(healthRes.body.data.qq_bridge.heartbeat_age_seconds).toEqual(expect.any(Number));
+      expect(healthRes.body.data.qq_bridge.bot_id).toBe("10001");
+      expect(healthRes.body.data.qq_bridge.bot_nickname).toBe("Subtitle Bot");
+      expect(healthRes.body.data.qq_bridge.error).toBeNull();
+    });
+
+    it("should reject QQ bridge heartbeats with an invalid secret", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      await put(
+        app,
+        "/api/v1/system/qq-bridge",
+        {
+          enabled: true,
+          endpoint: "http://127.0.0.1:8095",
+          secret: "bridge-secret",
+        },
+        admin.token
+      );
+
+      const res = await post(
+        app,
+        "/api/v1/qq/heartbeat",
+        {
+          status: "online",
+          connected: true,
+        },
+        "wrong-secret"
+      );
+
+      expectError(res, 401, "UNAUTHORIZED");
+    });
+
     it("should require admin permissions for system health", async () => {
       const member = await createTestUser({ role: "member" });
 

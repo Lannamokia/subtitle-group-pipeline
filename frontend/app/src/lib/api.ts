@@ -499,6 +499,10 @@ export function normalizeQqBridgeSettings(raw: AnyRecord): QqBridgeSettings {
     enabled: Boolean(raw.enabled),
     endpoint: raw.endpoint ?? null,
     secretConfigured: Boolean(raw.secretConfigured ?? raw.secret_configured),
+    lastHeartbeatAt: raw.lastHeartbeatAt ?? raw.last_heartbeat_at ?? null,
+    lastHeartbeatStatus: raw.lastHeartbeatStatus ?? raw.last_heartbeat_status ?? null,
+    lastBotId: raw.lastBotId ?? raw.last_bot_id ?? null,
+    lastBotNickname: raw.lastBotNickname ?? raw.last_bot_nickname ?? null,
     updatedAt: raw.updatedAt ?? raw.updated_at ?? null,
   };
 }
@@ -520,6 +524,11 @@ export function normalizeGlobalHealth(raw: AnyRecord): GlobalHealthStatus {
       connected: Boolean(qqBridge.connected),
       endpoint: qqBridge.endpoint ?? null,
       tokenConfigured: Boolean(qqBridge.tokenConfigured ?? qqBridge.token_configured),
+      lastHeartbeatAt: qqBridge.lastHeartbeatAt ?? qqBridge.last_heartbeat_at ?? null,
+      heartbeatStatus: qqBridge.heartbeatStatus ?? qqBridge.heartbeat_status ?? null,
+      heartbeatAgeSeconds: qqBridge.heartbeatAgeSeconds ?? qqBridge.heartbeat_age_seconds ?? null,
+      botId: qqBridge.botId ?? qqBridge.bot_id ?? null,
+      botNickname: qqBridge.botNickname ?? qqBridge.bot_nickname ?? null,
       error: qqBridge.error ?? null,
     },
   };

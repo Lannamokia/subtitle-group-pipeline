@@ -3,13 +3,16 @@ import { env } from "../../config/env";
 import crypto from "crypto";
 import { AppError } from "../../utils/response";
 import * as storageService from "../storage/storage.service";
-import { checkQQBridgeHealth, getQQBridgeEndpoint } from "../notification/adapters/qq.adapter";
 import type { QqBridgeSettingsInput, SmtpSettingsInput, UpdateBrandingInput } from "./system.schema";
 
 const DEFAULT_APP_NAME = "SubtitleSync";
 const LOGO_MAX_SIZE = 2 * 1024 * 1024;
 const LOGO_ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const PASSWORD_MASK = "********";
+const QQ_HEARTBEAT_TTL_SECONDS = Math.max(
+  10,
+  Number(process.env.QQ_BRIDGE_HEARTBEAT_TTL_SECONDS ?? 90)
+);
 
 export interface BrandingSettings {
   app_name: string;
@@ -44,6 +47,10 @@ export interface QqBridgeSettings {
   enabled: boolean;
   endpoint: string | null;
   secret_configured: boolean;
+  last_heartbeat_at: Date | null;
+  last_heartbeat_status: string | null;
+  last_bot_id: string | null;
+  last_bot_nickname: string | null;
   updated_at: Date | null;
 }
 
@@ -67,8 +74,24 @@ export interface QqBridgeRuntimeSettings {
   enabled: boolean;
   endpoint: string | null;
   secret: string | null;
+  last_heartbeat_at?: Date | null;
+  last_heartbeat_status?: string | null;
+  last_heartbeat_error?: string | null;
+  last_bot_id?: string | null;
+  last_bot_nickname?: string | null;
+  last_heartbeat_payload?: string | null;
   created_at?: Date;
   updated_at?: Date | null;
+}
+
+export interface QqBridgeHeartbeatInput {
+  status?: string | null;
+  connected?: boolean;
+  bot_id?: string | number | null;
+  bot_nickname?: string | null;
+  error?: string | null;
+  adapter?: string | null;
+  version?: string | null;
 }
 
 export interface GlobalHealthStatus {
@@ -84,6 +107,11 @@ export interface GlobalHealthStatus {
     connected: boolean;
     endpoint: string | null;
     token_configured: boolean;
+    last_heartbeat_at: string | null;
+    heartbeat_status: string | null;
+    heartbeat_age_seconds: number | null;
+    bot_id: string | null;
+    bot_nickname: string | null;
     error: string | null;
   };
 }
@@ -272,6 +300,10 @@ function serializeQqBridgeSettings(record: QqBridgeRuntimeSettings | null): QqBr
     enabled: record?.enabled ?? Boolean(envEndpoint),
     endpoint,
     secret_configured: Boolean(secret),
+    last_heartbeat_at: record?.last_heartbeat_at ?? null,
+    last_heartbeat_status: record?.last_heartbeat_status ?? null,
+    last_bot_id: record?.last_bot_id ?? null,
+    last_bot_nickname: record?.last_bot_nickname ?? null,
     updated_at: record?.updated_at ?? null,
   };
 }
@@ -352,7 +384,7 @@ export async function updateSmtpSettings(data: SmtpSettingsInput): Promise<SmtpS
 
 async function getQqBridgeSettingsRecord(): Promise<QqBridgeRuntimeSettings | null> {
   const records = await prisma.$queryRaw<QqBridgeRuntimeSettings[]>`
-    SELECT id, enabled, endpoint, secret, created_at, updated_at
+    SELECT id, enabled, endpoint, secret, last_heartbeat_at, last_heartbeat_status, last_heartbeat_error, last_bot_id, last_bot_nickname, last_heartbeat_payload, created_at, updated_at
     FROM QqBridgeSettings
     ORDER BY created_at ASC
     LIMIT 1
@@ -366,6 +398,12 @@ async function getQqBridgeSettingsRecord(): Promise<QqBridgeRuntimeSettings | nu
     enabled: Boolean(record.enabled),
     endpoint: record.endpoint || null,
     secret: record.secret || null,
+    last_heartbeat_at: normalizeDate(record.last_heartbeat_at),
+    last_heartbeat_status: record.last_heartbeat_status || null,
+    last_heartbeat_error: record.last_heartbeat_error || null,
+    last_bot_id: record.last_bot_id || null,
+    last_bot_nickname: record.last_bot_nickname || null,
+    last_heartbeat_payload: record.last_heartbeat_payload || null,
     updated_at: record.updated_at ?? null,
   };
 }
@@ -380,6 +418,12 @@ export async function getQqBridgeRuntimeSettings(): Promise<QqBridgeRuntimeSetti
     enabled: record?.enabled ?? Boolean(env.NONEBOT_HTTP_API),
     endpoint: record?.endpoint ?? env.NONEBOT_HTTP_API ?? null,
     secret: record?.secret ?? env.QQ_BRIDGE_TOKEN ?? null,
+    last_heartbeat_at: record?.last_heartbeat_at ?? null,
+    last_heartbeat_status: record?.last_heartbeat_status ?? null,
+    last_heartbeat_error: record?.last_heartbeat_error ?? null,
+    last_bot_id: record?.last_bot_id ?? null,
+    last_bot_nickname: record?.last_bot_nickname ?? null,
+    last_heartbeat_payload: record?.last_heartbeat_payload ?? null,
     updated_at: record?.updated_at ?? null,
   };
 }
@@ -418,6 +462,85 @@ export async function updateQqBridgeSettings(data: QqBridgeSettingsInput): Promi
   return getQqBridgeSettings();
 }
 
+function normalizeDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function normalizeHeartbeatStatus(data: QqBridgeHeartbeatInput): string {
+  const explicit = data.status?.trim();
+  if (data.connected === false) {
+    return explicit && explicit !== "online" ? explicit.slice(0, 50) : "waiting_for_bot";
+  }
+  if (explicit) return explicit.slice(0, 50);
+  return "online";
+}
+
+function truncateNullable(value: unknown, maxLength: number): string | null {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function getHeartbeatAgeSeconds(heartbeatAt: Date | null): number | null {
+  if (!heartbeatAt) return null;
+  return Math.max(0, Math.floor((Date.now() - heartbeatAt.getTime()) / 1000));
+}
+
+function getQQHeartbeatError(
+  settings: QqBridgeRuntimeSettings,
+  heartbeatAt: Date | null,
+  heartbeatAgeSeconds: number | null
+): string | null {
+  if (!heartbeatAt) return "尚未收到 QQ 桥接器心跳";
+  if (heartbeatAgeSeconds !== null && heartbeatAgeSeconds > QQ_HEARTBEAT_TTL_SECONDS) {
+    return "QQ 桥接器心跳已超时";
+  }
+  if (settings.last_heartbeat_error) return settings.last_heartbeat_error;
+  if (settings.last_heartbeat_status && settings.last_heartbeat_status !== "online") {
+    return `QQ 桥接器状态：${settings.last_heartbeat_status}`;
+  }
+  return null;
+}
+
+export async function recordQqBridgeHeartbeat(data: QqBridgeHeartbeatInput): Promise<QqBridgeSettings> {
+  const existing = await getQqBridgeSettingsRecord().catch(() => null);
+  const now = new Date();
+  const status = normalizeHeartbeatStatus(data);
+  const error = truncateNullable(data.error, 1000);
+  const botId = truncateNullable(data.bot_id, 120);
+  const botNickname = truncateNullable(data.bot_nickname, 120);
+  const payload = JSON.stringify({
+    connected: data.connected ?? status === "online",
+    adapter: data.adapter ?? null,
+    version: data.version ?? null,
+  });
+
+  if (existing) {
+    await prisma.$executeRaw`
+      UPDATE QqBridgeSettings
+      SET last_heartbeat_at = ${now},
+          last_heartbeat_status = ${status},
+          last_heartbeat_error = ${error},
+          last_bot_id = ${botId},
+          last_bot_nickname = ${botNickname},
+          last_heartbeat_payload = ${payload},
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${existing.id}
+    `;
+  } else {
+    const id = crypto.randomUUID();
+    await prisma.$executeRaw`
+      INSERT INTO QqBridgeSettings (id, enabled, endpoint, secret, last_heartbeat_at, last_heartbeat_status, last_heartbeat_error, last_bot_id, last_bot_nickname, last_heartbeat_payload, created_at, updated_at)
+      VALUES (${id}, ${Boolean(env.NONEBOT_HTTP_API)}, ${env.NONEBOT_HTTP_API ?? null}, ${env.QQ_BRIDGE_TOKEN ?? null}, ${now}, ${status}, ${error}, ${botId}, ${botNickname}, ${payload}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `;
+  }
+
+  return getQqBridgeSettings();
+}
+
 export async function getGlobalHealthStatus(): Promise<GlobalHealthStatus> {
   const databaseType = getDatabaseType();
   const database = {
@@ -437,19 +560,26 @@ export async function getGlobalHealthStatus(): Promise<GlobalHealthStatus> {
 
   const qqSettings = await getQqBridgeRuntimeSettings();
   const qqConfigured = Boolean(qqSettings.enabled && qqSettings.endpoint);
-  const qqHealth = qqConfigured
-    ? await checkQQBridgeHealth()
-    : { success: false, error: "QQ bridge is not configured" };
+  const heartbeatAt = normalizeDate(qqSettings.last_heartbeat_at);
+  const heartbeatAgeSeconds = getHeartbeatAgeSeconds(heartbeatAt);
+  const qqError = qqConfigured
+    ? getQQHeartbeatError(qqSettings, heartbeatAt, heartbeatAgeSeconds)
+    : null;
 
   return {
     checked_at: new Date().toISOString(),
     database,
     qq_bridge: {
       configured: qqConfigured,
-      connected: qqConfigured ? qqHealth.success : false,
-      endpoint: qqConfigured ? await getQQBridgeEndpoint() : null,
+      connected: qqConfigured && !qqError,
+      endpoint: qqConfigured ? qqSettings.endpoint : null,
       token_configured: Boolean(qqSettings.secret),
-      error: qqConfigured ? qqHealth.error ?? null : null,
+      last_heartbeat_at: heartbeatAt?.toISOString() ?? null,
+      heartbeat_status: qqSettings.last_heartbeat_status ?? null,
+      heartbeat_age_seconds: heartbeatAgeSeconds,
+      bot_id: qqSettings.last_bot_id ?? null,
+      bot_nickname: qqSettings.last_bot_nickname ?? null,
+      error: qqError,
     },
   };
 }

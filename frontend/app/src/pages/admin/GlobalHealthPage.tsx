@@ -42,6 +42,17 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function formatHeartbeatTime(value?: string | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
+}
+
+function formatHeartbeatAge(value?: number | null) {
+  if (value === null || value === undefined) return "-";
+  if (value < 60) return `${value} 秒前`;
+  return `${Math.floor(value / 60)} 分 ${value % 60} 秒前`;
+}
+
 export function GlobalHealthPage() {
   const [health, setHealth] = useState<GlobalHealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -130,16 +141,27 @@ export function GlobalHealthPage() {
                     connected={health.qqBridge.connected}
                   />
                 </div>
-                <CardDescription>NoneBot HTTP 桥接器访问状态。</CardDescription>
+                <CardDescription>NoneBot 桥接器心跳和机器人连接状态。</CardDescription>
               </CardHeader>
               <CardContent>
                 <InfoRow label="配置状态" value={health.qqBridge.configured ? "已配置" : "未配置"} />
                 <InfoRow
-                  label="连接状态"
-                  value={!health.qqBridge.configured ? "未配置" : health.qqBridge.connected ? "已连接" : "未连接"}
+                  label="心跳状态"
+                  value={!health.qqBridge.configured ? "未配置" : health.qqBridge.connected ? "在线" : "离线"}
                 />
                 <InfoRow label="桥接地址" value={health.qqBridge.endpoint ?? "-"} />
                 <InfoRow label="访问令牌" value={health.qqBridge.tokenConfigured ? "已配置" : "未配置"} />
+                <InfoRow label="最近心跳" value={formatHeartbeatTime(health.qqBridge.lastHeartbeatAt)} />
+                <InfoRow label="心跳距今" value={formatHeartbeatAge(health.qqBridge.heartbeatAgeSeconds)} />
+                <InfoRow label="机器人状态" value={health.qqBridge.heartbeatStatus ?? "-"} />
+                <InfoRow
+                  label="机器人账号"
+                  value={
+                    health.qqBridge.botNickname || health.qqBridge.botId
+                      ? `${health.qqBridge.botNickname ?? "QQ Bot"}${health.qqBridge.botId ? ` (${health.qqBridge.botId})` : ""}`
+                      : "-"
+                  }
+                />
                 {health.qqBridge.error && <InfoRow label="错误信息" value={health.qqBridge.error} />}
               </CardContent>
             </Card>

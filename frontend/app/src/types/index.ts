@@ -513,6 +513,10 @@ export interface QqBridgeSettings {
   endpoint?: string | null;
   secret?: string | null;
   secretConfigured?: boolean;
+  lastHeartbeatAt?: string | null;
+  lastHeartbeatStatus?: string | null;
+  lastBotId?: string | null;
+  lastBotNickname?: string | null;
   updatedAt?: string | null;
 }
 
@@ -529,6 +533,11 @@ export interface GlobalHealthStatus {
     connected: boolean;
     endpoint?: string | null;
     tokenConfigured: boolean;
+    lastHeartbeatAt?: string | null;
+    heartbeatStatus?: string | null;
+    heartbeatAgeSeconds?: number | null;
+    botId?: string | null;
+    botNickname?: string | null;
     error?: string | null;
   };
 }

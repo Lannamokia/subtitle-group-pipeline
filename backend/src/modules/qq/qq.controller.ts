@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { successResponse } from "../../utils/response";
+import { AppError, successResponse } from "../../utils/response";
 import * as authService from "../auth/auth.service";
 import * as systemService from "../system/system.service";
 import { sendGroupMessage, sendPrivateMessage } from "../notification/adapters/qq.adapter";
@@ -11,10 +11,7 @@ async function ensureBridgeToken(req: Request) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   if (token !== settings.secret) {
-    const error = new Error("Invalid QQ bridge token") as Error & { statusCode?: number; code?: string };
-    error.statusCode = 401;
-    error.code = "UNAUTHORIZED";
-    throw error;
+    throw new AppError("Invalid QQ bridge token", "UNAUTHORIZED", 401);
   }
 }
 
@@ -81,6 +78,19 @@ export async function sendGroupQQMessage(
     });
 
     successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function recordQQHeartbeat(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    await ensureBridgeToken(req);
+    successResponse(res, await systemService.recordQqBridgeHeartbeat(req.body));
   } catch (error) {
     next(error);
   }

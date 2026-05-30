@@ -1,13 +1,15 @@
 import os
+import asyncio
 from typing import Any
 
 import httpx
 from nonebot import get_driver, logger, on_command
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageEvent, MessageSegment
 from nonebot.params import CommandArg
 
 BACKEND_API_BASE = os.getenv("BACKEND_API_BASE", "http://127.0.0.1:3000/api/v1").rstrip("/")
 QQ_BRIDGE_TOKEN = os.getenv("QQ_BRIDGE_TOKEN", "")
+HEARTBEAT_INTERVAL_SECONDS = max(10, int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "30")))
 
 
 def auth_headers() -> dict[str, str]:
@@ -29,6 +31,7 @@ async def post_backend(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 verify = on_command("verify", aliases={"验证"}, priority=5, block=True)
+resetpass = on_command("resetpass", aliases={"重置密码"}, priority=5, block=True)
 
 
 @verify.handle()
@@ -56,6 +59,31 @@ async def handle_verify(event: GroupMessageEvent, args: Message = CommandArg()):
     await verify.finish("验证成功，账号已激活。")
 
 
+@resetpass.handle()
+async def handle_resetpass(event: MessageEvent, args: Message = CommandArg()):
+    code = args.extract_plain_text().strip()
+    if not code:
+        await resetpass.finish("请输入验证码，例如：/resetpass ABCD1234")
+
+    payload: dict[str, Any] = {
+        "message": f"/resetpass {code}",
+        "qq_number": str(event.user_id),
+    }
+    if isinstance(event, GroupMessageEvent):
+        payload["qq_group"] = str(event.group_id)
+
+    try:
+        await post_backend("/qq/verify", payload)
+    except httpx.HTTPStatusError as exc:
+        logger.warning(f"QQ password reset verification failed: {exc.response.text}")
+        await resetpass.finish("密码重置验证失败，请确认验证码和 QQ 号是否正确。")
+    except Exception as exc:
+        logger.exception(f"QQ password reset bridge error: {exc}")
+        await resetpass.finish("验证服务暂时不可用，请稍后重试。")
+
+    await resetpass.finish("密码重置验证成功，请回到页面设置新密码。")
+
+
 driver = get_driver()
 
 
@@ -67,12 +95,54 @@ async def show_onebot_endpoint():
     logger.info(f"OneBot V11 reverse WebSocket endpoint: ws://{host}:{port}/onebot/v11/ws")
 
 
+def get_onebot() -> Bot | None:
+    bot = next(iter(driver.bots.values()), None)
+    if bot is None or not isinstance(bot, Bot):
+        return None
+    return bot
+
+
+async def build_heartbeat_payload() -> dict[str, Any]:
+    bot = get_onebot()
+    if bot is None:
+        return {
+            "status": "waiting_for_bot",
+            "connected": False,
+            "adapter": "onebot-v11",
+            "error": "No OneBot V11 bot connected",
+        }
+
+    nickname = str(getattr(bot, "nickname", "") or "")
+    return {
+        "status": "online",
+        "connected": True,
+        "bot_id": str(bot.self_id),
+        "bot_nickname": nickname or None,
+        "adapter": "onebot-v11",
+    }
+
+
+async def heartbeat_loop():
+    while True:
+        try:
+            await post_backend("/qq/heartbeat", await build_heartbeat_payload())
+        except Exception as exc:
+            logger.warning(f"QQ bridge heartbeat failed: {exc}")
+        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+
+
+@driver.on_startup
+async def start_heartbeat():
+    logger.info(f"QQ bridge heartbeat interval: {HEARTBEAT_INTERVAL_SECONDS}s")
+    asyncio.create_task(heartbeat_loop())
+
+
 @driver.server_app.post("/send_group_msg")
 async def send_group_msg(payload: dict[str, Any]):
     group_id = int(payload["group_id"])
     message = Message(payload.get("message", ""))
-    bot = next(iter(driver.bots.values()), None)
-    if bot is None or not isinstance(bot, Bot):
+    bot = get_onebot()
+    if bot is None:
         return {"success": False, "error": "No OneBot V11 bot connected"}
 
     result = await bot.send_group_msg(
@@ -87,8 +157,8 @@ async def send_group_msg(payload: dict[str, Any]):
 async def send_private_msg(payload: dict[str, Any]):
     user_id = int(payload["user_id"])
     message = Message(payload.get("message", ""))
-    bot = next(iter(driver.bots.values()), None)
-    if bot is None or not isinstance(bot, Bot):
+    bot = get_onebot()
+    if bot is None:
         return {"success": False, "error": "No OneBot V11 bot connected"}
 
     result = await bot.send_private_msg(
@@ -115,8 +185,8 @@ async def bridge_send_group(payload: dict[str, Any]):
     group_id = int(payload["group_id"])
     message = str(payload.get("message", ""))
     at_users = payload.get("at_users") or []
-    bot = next(iter(driver.bots.values()), None)
-    if bot is None or not isinstance(bot, Bot):
+    bot = get_onebot()
+    if bot is None:
         return {"success": False, "error": "No OneBot V11 bot connected"}
 
     result = await bot.send_group_msg(
