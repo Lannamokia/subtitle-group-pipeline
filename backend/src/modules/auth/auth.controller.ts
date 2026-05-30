@@ -86,6 +86,19 @@ export async function updateProfile(
   }
 }
 
+export async function requestQQRebind(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.requestQQRebind(req.user!.id, req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function changePassword(
   req: AuthenticatedRequest,
   res: Response,
@@ -320,6 +333,23 @@ export async function resetMemberTagStatuses(
   }
 }
 
+export async function grantMemberTagStatuses(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.grantMemberTagStatuses(
+      String(req.params.id),
+      req.user!.id,
+      req.body
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getAllUsers(
   _req: Request,
   res: Response,
@@ -353,6 +383,23 @@ export async function updateUserRole(
 ): Promise<void> {
   try {
     const result = await authService.updateUserRole(String(req.params.id), req.body, req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateMemberProfile(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.updateMemberProfile(
+      String(req.params.id),
+      req.user!.id,
+      req.body
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);

@@ -35,6 +35,8 @@ import {
   createMemberSchema,
   resetUserPasswordSchema,
   resetTagStatusSchema,
+  grantTagStatusSchema,
+  updateMemberProfileSchema,
 } from "./modules/auth/auth.schema";
 
 export function createApp(options: { databaseReady?: boolean } = {}): Application {
@@ -91,20 +93,32 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
         res.status(400).json({ success: false, error: "Missing message" });
         return;
       }
-      const match = message.trim().match(/^\/verify\s+([A-Za-z0-9]+)$/);
+      const trimmed = message.trim();
+      const verifyMatch = trimmed.match(/^\/verify\s+([A-Za-z0-9]+)$/);
+      const resetMatch = trimmed.match(/^\/resetpass\s+([A-Za-z0-9]+)$/);
+      const rebindOldMatch = trimmed.match(/^\/rebindqq-old\s+([A-Za-z0-9]+)$/);
+      const rebindNewMatch = trimmed.match(/^\/rebindqq-new\s+([A-Za-z0-9]+)$/);
+      const match = verifyMatch || resetMatch || rebindOldMatch || rebindNewMatch;
       if (!match) {
         res.status(400).json({ success: false, error: "Invalid command format" });
         return;
       }
-      const { verifyByQQ } = await import("./modules/auth/auth.service");
-      const result = await verifyByQQ({
+      const authService = await import("./modules/auth/auth.service");
+      const payload = {
         code: match[1],
         qq_group: group_id === undefined || group_id === null ? undefined : String(group_id),
         qq_number:
           req.body?.user_id === undefined || req.body?.user_id === null
             ? undefined
             : String(req.body.user_id),
-      });
+      };
+      const result = rebindOldMatch
+        ? await authService.verifyQQRebindByQQ(payload, "old")
+        : rebindNewMatch
+          ? await authService.verifyQQRebindByQQ(payload, "new")
+          : resetMatch
+            ? await authService.verifyPasswordResetByQQ(payload)
+            : await authService.verifyByQQ(payload);
       res.json({ success: true, data: result });
     } catch (error) {
       next(error);
@@ -155,6 +169,13 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
     authController.createMember
   );
   app.put(
+    `${apiPrefix}/members/:id/profile`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    validateBody(updateMemberProfileSchema),
+    authController.updateMemberProfile
+  );
+  app.put(
     `${apiPrefix}/members/:id/role`,
     authenticate,
     requireRole("super_admin", "group_admin"),
@@ -193,6 +214,13 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
     requireRole("super_admin", "group_admin"),
     validateBody(resetTagStatusSchema),
     authController.resetMemberTagStatuses
+  );
+  app.post(
+    `${apiPrefix}/members/:id/tags/grant`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    validateBody(grantTagStatusSchema),
+    authController.grantMemberTagStatuses
   );
   app.delete(
     `${apiPrefix}/members/:id`,

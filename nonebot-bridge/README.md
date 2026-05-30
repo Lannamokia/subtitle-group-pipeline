@@ -10,6 +10,10 @@ Minimal NoneBot2 bridge for SubtitleSync.
   - `验证 <code>`
   - `/resetpass <code>`
   - `重置密码 <code>`
+  - `/rebindqq-old <code>`
+  - `换绑旧QQ <code>`
+  - `/rebindqq-new <code>`
+  - `换绑新QQ <code>`
 - Forwards verification events to the backend:
   - `POST {BACKEND_API_BASE}/qq/verify`
 - Reports bridge liveness to the backend:
@@ -72,6 +76,14 @@ ws://127.0.0.1:8095/onebot/v11/ws
 3. User sends `/resetpass <code>` from the QQ account bound to that user.
 4. NoneBot forwards the command to `POST /api/v1/qq/verify`.
 5. Backend verifies the code and allows the user to finish the reset in the web UI.
+
+## QQ Rebind Flow
+
+1. User starts QQ rebind from the profile page and enters the new QQ number.
+2. Backend returns two commands: `/rebindqq-old <code>` and `/rebindqq-new <code>`.
+3. User sends `/rebindqq-old <code>` from the old bound QQ account.
+4. User sends `/rebindqq-new <code>` from the new QQ account.
+5. NoneBot forwards both commands to `POST /api/v1/qq/verify`; backend only updates the account after the old QQ step is complete and the new QQ number is not already bound to another account.
 
 ## Heartbeat Flow
 

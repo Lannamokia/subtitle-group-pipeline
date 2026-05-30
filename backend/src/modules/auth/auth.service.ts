@@ -18,16 +18,22 @@ import type {
   CreateTagApplicationInput,
   ReviewTagApplicationInput,
   ResetTagStatusInput,
+  GrantTagStatusInput,
   UpdateUserRoleInput,
   UpdateUserStatusInput,
   CreateMemberInput,
   ResetUserPasswordInput,
   ConfirmPasswordResetInput,
+  UpdateMemberProfileInput,
+  RequestQQRebindInput,
 } from "./auth.schema";
 
 const NON_EXPIRING_VERIFICATION_EXPIRES_AT = new Date("9999-12-31T23:59:59.999Z");
 const PASSWORD_RESET_PREFIX = "PWD:";
 const PASSWORD_RESET_EXPIRES_MS = 15 * 60 * 1000;
+const QQ_REBIND_OLD_PREFIX = "QQB_OLD:";
+const QQ_REBIND_NEW_PREFIX = "QQB_NEW:";
+const QQ_REBIND_EXPIRES_MS = 15 * 60 * 1000;
 
 function generateVerificationCode(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -48,11 +54,27 @@ function fromPasswordResetChallengeCode(challengeCode: string): string {
     : challengeCode;
 }
 
+function toQQRebindOldChallengeCode(code: string): string {
+  return `${QQ_REBIND_OLD_PREFIX}${code}`;
+}
+
+function toQQRebindNewChallengeCode(code: string): string {
+  return `${QQ_REBIND_NEW_PREFIX}${code}`;
+}
+
+function getQQRebindFlowPrefix(code: string): string {
+  return code.slice(0, 8);
+}
+
 function getRegisterQQNumber(data: RegisterInput): string | null | undefined {
   return data.qq_number ?? data.qq;
 }
 
 function getMemberQQNumber(data: CreateMemberInput): string | null | undefined {
+  return data.qq_number ?? data.qq;
+}
+
+function getUpdateMemberQQNumber(data: UpdateMemberProfileInput): string | null | undefined {
   return data.qq_number ?? data.qq;
 }
 
@@ -176,6 +198,7 @@ async function assertUniqueAccountIdentifiers(data: {
   username: string;
   email?: string | null;
   qqNumber?: string | null;
+  excludeUserId?: string;
 }) {
   const [existingUsername, existingEmail, existingQQ] = await Promise.all([
     prisma.user.findUnique({
@@ -196,15 +219,15 @@ async function assertUniqueAccountIdentifiers(data: {
       : Promise.resolve(null),
   ]);
 
-  if (existingUsername) {
+  if (existingUsername && existingUsername.id !== data.excludeUserId) {
     throw new AppError("Username already taken", "DUPLICATE_ERROR", 409);
   }
 
-  if (existingEmail) {
+  if (existingEmail && existingEmail.id !== data.excludeUserId) {
     throw new AppError("Email already registered", "DUPLICATE_ERROR", 409);
   }
 
-  if (existingQQ) {
+  if (existingQQ && existingQQ.id !== data.excludeUserId) {
     throw new AppError("QQ number already registered", "DUPLICATE_ERROR", 409);
   }
 }
@@ -565,6 +588,7 @@ export async function getCurrentUser(userId: string) {
             select: {
               id: true,
               name: true,
+              role_type: true,
               description: true,
               color: true,
             },
@@ -816,6 +840,190 @@ export async function verifyPasswordResetByQQ(data: VerifyQQInput) {
   };
 }
 
+export async function requestQQRebind(userId: string, data: RequestQQRebindInput) {
+  const newQQNumber = (data.qq_number ?? data.qq ?? "").trim();
+  if (!newQQNumber) {
+    throw new AppError("QQ number is required", "VALIDATION_ERROR", 400);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, username: true, qq_number: true },
+  });
+
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  if (!user.qq_number) {
+    throw new AppError("Current account has no QQ number bound", "VALIDATION_ERROR", 400);
+  }
+
+  if (user.qq_number === newQQNumber) {
+    throw new AppError("New QQ number must be different from current QQ number", "VALIDATION_ERROR", 400);
+  }
+
+  await assertUniqueAccountIdentifiers({
+    username: user.username,
+    qqNumber: newQQNumber,
+    excludeUserId: user.id,
+  });
+
+  const flowPrefix = generateVerificationCode();
+  const oldCode = `${flowPrefix}${generateVerificationCode()}`;
+  const newCode = `${flowPrefix}${generateVerificationCode()}`;
+  const expiresAt = new Date(Date.now() + QQ_REBIND_EXPIRES_MS);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.verificationChallenge.updateMany({
+      where: {
+        used_by: user.id,
+        used_at: null,
+        OR: [
+          { code: { startsWith: QQ_REBIND_OLD_PREFIX } },
+          { code: { startsWith: QQ_REBIND_NEW_PREFIX } },
+        ],
+      },
+      data: { used_at: new Date() },
+    });
+
+    await tx.verificationChallenge.createMany({
+      data: [
+        {
+          code: toQQRebindOldChallengeCode(oldCode),
+          qq_number: user.qq_number || "",
+          expires_at: expiresAt,
+          used_by: user.id,
+        },
+        {
+          code: toQQRebindNewChallengeCode(newCode),
+          qq_number: newQQNumber,
+          expires_at: expiresAt,
+          used_by: user.id,
+        },
+      ],
+    });
+  });
+
+  return {
+    success: true,
+    oldQQ: user.qq_number,
+    newQQ: newQQNumber,
+    oldCommand: `/rebindqq-old ${oldCode}`,
+    newCommand: `/rebindqq-new ${newCode}`,
+    expiresAt,
+    expiresInSeconds: QQ_REBIND_EXPIRES_MS / 1000,
+  };
+}
+
+export async function verifyQQRebindByQQ(data: VerifyQQInput, stage: "old" | "new") {
+  const displayCode = data.code.trim();
+  const challengeCode =
+    stage === "old"
+      ? toQQRebindOldChallengeCode(displayCode)
+      : toQQRebindNewChallengeCode(displayCode);
+  const challenge = await prisma.verificationChallenge.findUnique({
+    where: { code: challengeCode },
+  });
+
+  if (!challenge) {
+    throw new AppError("Invalid QQ rebind code", "NOT_FOUND", 404);
+  }
+
+  if (challenge.used_at) {
+    throw new AppError("QQ rebind code already used", "CONFLICT", 409);
+  }
+
+  if (challenge.expires_at < new Date()) {
+    throw new AppError("QQ rebind code expired", "INVALID_REBIND_CODE", 400);
+  }
+
+  if (!data.qq_number || data.qq_number !== challenge.qq_number) {
+    throw new AppError("QQ number does not match this rebind step", "FORBIDDEN", 403);
+  }
+
+  const userId = challenge.used_by;
+  if (!userId) {
+    throw new AppError("No user associated with this code", "NOT_FOUND", 404);
+  }
+
+  if (stage === "old") {
+    await prisma.verificationChallenge.update({
+      where: { id: challenge.id },
+      data: { used_at: new Date() },
+    });
+    return {
+      success: true,
+      status: "old_verified" as const,
+      message: "旧 QQ 已验证，请使用新 QQ 发送换绑确认命令。",
+    };
+  }
+
+  const flowPrefix = getQQRebindFlowPrefix(displayCode);
+  const oldChallenge = await prisma.verificationChallenge.findFirst({
+    where: {
+      used_by: userId,
+      code: { startsWith: `${QQ_REBIND_OLD_PREFIX}${flowPrefix}` },
+      used_at: { not: null },
+      expires_at: { gte: new Date() },
+    },
+  });
+
+  if (!oldChallenge) {
+    throw new AppError("Please verify with the old QQ number first", "FORBIDDEN", 403);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, username: true },
+  });
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  await assertUniqueAccountIdentifiers({
+    username: user.username,
+    qqNumber: challenge.qq_number,
+    excludeUserId: user.id,
+  });
+
+  const updatedUser = await prisma.$transaction(async (tx) => {
+    const updated = await tx.user.update({
+      where: { id: user.id },
+      data: { qq_number: challenge.qq_number },
+      select: {
+        id: true,
+        username: true,
+        nickname: true,
+        email: true,
+        role: true,
+        status: true,
+        avatar_url: true,
+        qq_number: true,
+      },
+    });
+
+    await tx.verificationChallenge.updateMany({
+      where: {
+        used_by: user.id,
+        OR: [
+          { code: { startsWith: `${QQ_REBIND_OLD_PREFIX}${flowPrefix}` } },
+          { code: { startsWith: `${QQ_REBIND_NEW_PREFIX}${flowPrefix}` } },
+        ],
+      },
+      data: { used_at: new Date() },
+    });
+
+    return updated;
+  });
+
+  return {
+    success: true,
+    status: "rebound" as const,
+    user: updatedUser,
+  };
+}
+
 export async function getRoleTags() {
   return prisma.roleTag.findMany({
     orderBy: { name: "asc" },
@@ -985,6 +1193,7 @@ const userSelect = {
   id: true,
   username: true,
   nickname: true,
+  email: true,
   avatar_url: true,
   role: true,
   status: true,
@@ -997,6 +1206,7 @@ const userSelect = {
         select: {
           id: true,
           name: true,
+          role_type: true,
           description: true,
           color: true,
           created_at: true,
@@ -1083,6 +1293,128 @@ export async function createMember(actorId: string, data: CreateMemberInput) {
   });
 
   return serializeManagedUser(user);
+}
+
+export async function updateMemberProfile(
+  userId: string,
+  actorId: string,
+  data: UpdateMemberProfileInput
+) {
+  const [target, actor] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        avatar_url: true,
+        qq_number: true,
+      },
+    }),
+    prisma.user.findUnique({
+      where: { id: actorId },
+      select: { id: true },
+    }),
+  ]);
+
+  if (!target) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+  if (!actor) {
+    throw new AppError("Actor not found", "NOT_FOUND", 404);
+  }
+
+  const qqNumber = getUpdateMemberQQNumber(data);
+  await assertUniqueAccountIdentifiers({
+    username: data.username ?? target.username,
+    email: data.email === undefined ? target.email : data.email,
+    qqNumber: qqNumber === undefined ? target.qq_number : qqNumber,
+    excludeUserId: target.id,
+  });
+
+  const updateData: Record<string, unknown> = {};
+  if (data.username !== undefined) updateData.username = data.username;
+  if (data.nickname !== undefined) updateData.nickname = data.nickname;
+  if (data.email !== undefined) updateData.email = data.email;
+  if (data.avatar_url !== undefined) updateData.avatar_url = data.avatar_url;
+  if (qqNumber !== undefined) updateData.qq_number = qqNumber;
+
+  const updated = await prisma.user.update({
+    where: { id: target.id },
+    data: updateData,
+    select: userSelect,
+  });
+
+  if (
+    data.avatar_url !== undefined &&
+    target.avatar_url &&
+    target.avatar_url !== data.avatar_url
+  ) {
+    try {
+      await deleteAvatarByUrl(target.avatar_url);
+    } catch (error) {
+      console.warn(`[Auth] Failed to delete old avatar for user ${target.id}:`, error);
+    }
+  }
+
+  return serializeManagedUser(updated);
+}
+
+export async function grantMemberTagStatuses(
+  userId: string,
+  actorId: string,
+  data: GrantTagStatusInput
+) {
+  const [target, actor] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { id: true } }),
+    prisma.user.findUnique({ where: { id: actorId }, select: { id: true } }),
+  ]);
+
+  if (!target) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+  if (!actor) {
+    throw new AppError("Actor not found", "NOT_FOUND", 404);
+  }
+
+  const uniqueTagIds = [...new Set(data.tagIds)];
+  const tags = await prisma.roleTag.findMany({
+    where: { id: { in: uniqueTagIds } },
+    select: { id: true },
+  });
+
+  if (tags.length !== uniqueTagIds.length) {
+    throw new AppError("One or more role tags do not exist", "VALIDATION_ERROR", 400);
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    for (const tagId of uniqueTagIds) {
+      await tx.tagApplication.upsert({
+        where: { user_id_tag_id: { user_id: target.id, tag_id: tagId } },
+        update: {
+          reason: "Directly assigned by administrator",
+          approved: true,
+          approved_by: actor.id,
+          approved_at: new Date(),
+        },
+        create: {
+          user_id: target.id,
+          tag_id: tagId,
+          reason: "Directly assigned by administrator",
+          approved: true,
+          approved_by: actor.id,
+          approved_at: new Date(),
+        },
+      });
+    }
+
+    return tx.user.findUniqueOrThrow({
+      where: { id: target.id },
+      select: userSelect,
+    });
+  });
+
+  return serializeManagedUser(updated);
 }
 
 export async function getAllUsers() {

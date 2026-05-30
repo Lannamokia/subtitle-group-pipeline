@@ -612,6 +612,97 @@ describe("Auth & Registration Tests", () => {
       const status = res.body.data.find((item: { tag: { id: string } }) => item.tag.id === tag.id);
       expect(status.status).toBe("pending");
     });
+
+    it("should allow admins to directly grant tags to a member", async () => {
+      const { user } = await createTestUser();
+      const { token: adminToken, user: admin } = await createTestUser({ role: "group_admin" });
+      const tag = await prisma.roleTag.create({
+        data: { name: unique("DirectGrant"), role_type: "encoding" },
+      });
+
+      const res = await post(
+        app,
+        `/api/v1/auth/members/${user.id}/tags/grant`,
+        { tagIds: [tag.id] },
+        adminToken
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.roleTags).toHaveLength(1);
+      expect(res.body.data.roleTags[0].id).toBe(tag.id);
+      expect(res.body.data.roleTags[0].role_type).toBe("encoding");
+
+      const application = await prisma.tagApplication.findUnique({
+        where: { user_id_tag_id: { user_id: user.id, tag_id: tag.id } },
+      });
+      expect(application?.approved).toBe(true);
+      expect(application?.approved_by).toBe(admin.id);
+    });
+
+    it("should allow admins to edit member account profile fields", async () => {
+      const { user } = await createTestUser({ qq_number: "11110000" });
+      const { token: adminToken } = await createTestUser({ role: "group_admin" });
+      const nextUsername = unique("renamed");
+
+      const res = await put(
+        app,
+        `/api/v1/auth/members/${user.id}/profile`,
+        {
+          username: nextUsername,
+          nickname: "新昵称",
+          qq_number: "22220000",
+          avatar_url: "/uploads/projects/avatars/member.png",
+        },
+        adminToken
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.username).toBe(nextUsername);
+      expect(res.body.data.nickname).toBe("新昵称");
+      expect(res.body.data.qq_number).toBe("22220000");
+      expect(res.body.data.avatar_url).toBe("/uploads/projects/avatars/member.png");
+    });
+  });
+
+  describe("QQ Rebind Flow", () => {
+    it("should require old QQ verification before binding the new QQ number", async () => {
+      const { user, token } = await createTestUser({ qq_number: "10001" });
+
+      const requestRes = await post(
+        app,
+        "/api/v1/auth/qq-rebind/request",
+        { qq_number: "20002" },
+        token
+      );
+      expectSuccess(requestRes, 200);
+      const oldCode = String(requestRes.body.data.oldCommand).split(" ").at(-1);
+      const newCode = String(requestRes.body.data.newCommand).split(" ").at(-1);
+      expect(oldCode).toBeDefined();
+      expect(newCode).toBeDefined();
+
+      const premature = await post(app, "/api/v1/qq/verify", {
+        message: `/rebindqq-new ${newCode}`,
+        qq_number: "20002",
+      });
+      expectError(premature, 403, "FORBIDDEN");
+
+      const oldRes = await post(app, "/api/v1/qq/verify", {
+        message: `/rebindqq-old ${oldCode}`,
+        qq_number: "10001",
+      });
+      expectSuccess(oldRes, 200);
+      expect(oldRes.body.data.status).toBe("old_verified");
+
+      const newRes = await post(app, "/api/v1/qq/verify", {
+        message: `/rebindqq-new ${newCode}`,
+        qq_number: "20002",
+      });
+      expectSuccess(newRes, 200);
+      expect(newRes.body.data.status).toBe("rebound");
+
+      const updated = await prisma.user.findUnique({ where: { id: user.id } });
+      expect(updated?.qq_number).toBe("20002");
+    });
   });
 
   describe("Login Flows", () => {

@@ -17,10 +17,13 @@ import {
   createTagApplicationSchema,
   reviewTagApplicationSchema,
   resetTagStatusSchema,
+  grantTagStatusSchema,
   updateUserRoleSchema,
   updateUserStatusSchema,
   createMemberSchema,
   resetUserPasswordSchema,
+  updateMemberProfileSchema,
+  requestQQRebindSchema,
 } from "./auth.schema";
 
 const router = Router();
@@ -118,6 +121,7 @@ router.post("/refresh", validateBody(refreshTokenSchema), controller.refresh);
 router.post("/logout", authenticate, controller.logout);
 router.get("/me", authenticate, controller.me);
 router.put("/profile", authenticate, validateBody(updateProfileSchema), controller.updateProfile);
+router.post("/qq-rebind/request", authenticate, validateBody(requestQQRebindSchema), controller.requestQQRebind);
 router.post("/change-password", authenticate, validateBody(changePasswordSchema), controller.changePassword);
 router.post("/verify-qq", validateBody(verifyQQSchema), controller.verifyQQ);
 router.post("/request-password-reset", rateLimitMiddleware, validateBody(requestPasswordResetSchema), controller.requestPasswordReset);
@@ -147,11 +151,13 @@ router.post("/role-tags/my-status/reset", authenticate, validateBody(resetTagSta
 router.get("/members", authenticate, controller.getAllUsers);
 router.get("/users", authenticate, controller.getAllUsers);
 router.post("/members", authenticate, requireRole("super_admin", "group_admin", "supervisor"), validateBody(createMemberSchema), controller.createMember);
+router.put("/members/:id/profile", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateMemberProfileSchema), controller.updateMemberProfile);
 router.put("/members/:id/role", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserRoleSchema), controller.updateUserRole);
 router.put("/members/:id/status", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserStatusSchema), controller.updateUserStatus);
 router.post("/members/:id/verify", authenticate, requireRole("super_admin", "group_admin"), controller.approveUserVerification);
 router.get("/members/:id/tags/statuses", authenticate, requireRole("super_admin", "group_admin"), controller.getMemberRoleTagStatuses);
 router.post("/members/:id/tags/reset", authenticate, requireRole("super_admin", "group_admin"), validateBody(resetTagStatusSchema), controller.resetMemberTagStatuses);
+router.post("/members/:id/tags/grant", authenticate, requireRole("super_admin", "group_admin"), validateBody(grantTagStatusSchema), controller.grantMemberTagStatuses);
 router.put("/members/:id/password", authenticate, requireRole("super_admin", "group_admin"), validateBody(resetUserPasswordSchema), controller.resetUserPassword);
 router.delete("/members/:id", authenticate, requireRole("super_admin", "group_admin"), controller.deleteMember);
 

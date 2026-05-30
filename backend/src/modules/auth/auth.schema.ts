@@ -137,6 +137,10 @@ export const resetTagStatusSchema = z.object({
   tagIds: z.array(z.string().uuid("Invalid tag ID")).min(1, "At least one tag ID is required"),
 });
 
+export const grantTagStatusSchema = z.object({
+  tagIds: z.array(z.string().uuid("Invalid tag ID")).min(1, "At least one tag ID is required"),
+});
+
 export const updateUserRoleSchema = z.object({
   role: z.enum(["super_admin", "group_admin", "supervisor", "member"]),
 });
@@ -168,6 +172,28 @@ export const resetUserPasswordSchema = z.object({
   password: strongPasswordSchema,
 });
 
+export const updateMemberProfileSchema = z.object({
+  username: z
+    .string()
+    .min(3, "Username must be at least 3 characters")
+    .max(30, "Username must be at most 30 characters")
+    .regex(
+      /^[a-zA-Z0-9_\-]+$/,
+      "Username can only contain letters, numbers, underscores, and hyphens"
+    )
+    .optional(),
+  nickname: z.string().max(50).optional().nullable(),
+  email: z.string().email("Invalid email address").optional().nullable(),
+  avatar_url: storedAvatarUrlSchema.optional().nullable(),
+  qq_number: z.string().max(20).optional().nullable(),
+  qq: z.string().max(20).optional().nullable(),
+});
+
+export const requestQQRebindSchema = z.object({
+  qq_number: z.string().min(1, "QQ number is required").max(20).optional(),
+  qq: z.string().min(1, "QQ number is required").max(20).optional(),
+}).refine((data) => Boolean(data.qq_number ?? data.qq), "QQ number is required");
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
@@ -182,7 +208,10 @@ export type UpdateRoleTagInput = z.infer<typeof updateRoleTagSchema>;
 export type CreateTagApplicationInput = z.infer<typeof createTagApplicationSchema>;
 export type ReviewTagApplicationInput = z.infer<typeof reviewTagApplicationSchema>;
 export type ResetTagStatusInput = z.infer<typeof resetTagStatusSchema>;
+export type GrantTagStatusInput = z.infer<typeof grantTagStatusSchema>;
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;
 export type CreateMemberInput = z.infer<typeof createMemberSchema>;
 export type ResetUserPasswordInput = z.infer<typeof resetUserPasswordSchema>;
+export type UpdateMemberProfileInput = z.infer<typeof updateMemberProfileSchema>;
+export type RequestQQRebindInput = z.infer<typeof requestQQRebindSchema>;

@@ -30,6 +30,13 @@ function extractResetPassCode(body: Record<string, unknown>) {
   return match?.[1] ?? "";
 }
 
+function extractQQRebindCode(body: Record<string, unknown>, stage: "old" | "new") {
+  const message = typeof body.message === "string" ? body.message.trim() : "";
+  const command = stage === "old" ? "rebindqq-old" : "rebindqq-new";
+  const match = message.match(new RegExp(`^/${command}\\s+([A-Za-z0-9]+)$`));
+  return match?.[1] ?? "";
+}
+
 export async function verifyQQEvent(
   req: Request,
   res: Response,
@@ -38,8 +45,10 @@ export async function verifyQQEvent(
   try {
     await ensureBridgeToken(req);
     const body = req.body as Record<string, unknown>;
+    const rebindOldCode = extractQQRebindCode(body, "old");
+    const rebindNewCode = extractQQRebindCode(body, "new");
     const resetCode = extractResetPassCode(body);
-    const code = resetCode || extractVerifyCode(body);
+    const code = rebindOldCode || rebindNewCode || resetCode || extractVerifyCode(body);
     const qqGroup = body.qq_group ?? body.group_id;
     const qqNumber = body.qq_number ?? body.user_id;
 
@@ -48,9 +57,13 @@ export async function verifyQQEvent(
       qq_group: qqGroup === undefined || qqGroup === null ? undefined : String(qqGroup),
       qq_number: qqNumber === undefined || qqNumber === null ? undefined : String(qqNumber),
     };
-    const result = resetCode
-      ? await authService.verifyPasswordResetByQQ(payload)
-      : await authService.verifyByQQ(payload);
+    const result = rebindOldCode
+      ? await authService.verifyQQRebindByQQ(payload, "old")
+      : rebindNewCode
+        ? await authService.verifyQQRebindByQQ(payload, "new")
+        : resetCode
+          ? await authService.verifyPasswordResetByQQ(payload)
+          : await authService.verifyByQQ(payload);
     successResponse(res, result);
   } catch (error) {
     next(error);
