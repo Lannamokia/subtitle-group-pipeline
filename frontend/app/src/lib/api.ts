@@ -8,6 +8,7 @@ import type {
   LoginResponse,
   RegisterResponse,
   PasswordResetRequestResponse,
+  QQRebindRequestResponse,
   RegistrationSettings,
   RoleTagDefinition,
   RoleTagApplication,
@@ -187,6 +188,7 @@ export function normalizeUser(raw: AnyRecord): User {
     id: raw.id,
     username: raw.username,
     nickname: raw.nickname,
+    email: raw.email,
     qq: raw.qq ?? raw.qq_number,
     avatar: normalizeAvatarUrl(typeof rawAvatar === "string" ? rawAvatar : undefined, raw.id),
     role: raw.role,
@@ -926,6 +928,11 @@ export const authApi = {
   confirmPasswordReset: (data: { username: string; code: string; password: string }) =>
     api.post<ApiResponse<{ success: boolean }>>('/auth/confirm-password-reset', data).then(extractData),
 
+  requestQQRebind: (data: { qq?: string; qqNumber?: string }) =>
+    api.post<ApiResponse<QQRebindRequestResponse>>('/auth/qq-rebind/request', {
+      qq_number: data.qqNumber ?? data.qq,
+    }).then(extractData),
+
   getRegistrationPolicy: () =>
     api.get<ApiResponse<RegistrationSettings>>('/auth/registration-policy').then(extractData),
 
@@ -1026,10 +1033,11 @@ export const storageApi = {
   deleteBackend: (id: string) =>
     api.delete<ApiResponse<void>>(`/storage/backends/${id}`).then(extractData),
 
-  uploadAvatar: (file: File) => {
+  uploadAvatar: (file: File, userId?: string) => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post<ApiResponse<unknown>>('/storage/avatar', formData, {
+    const endpointUrl = userId ? `/storage/avatar/${userId}` : '/storage/avatar';
+    return api.post<ApiResponse<unknown>>(endpointUrl, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((response) => {
       const raw = response.data.data as AnyRecord;
@@ -1037,11 +1045,11 @@ export const storageApi = {
       if (!storageUrl) {
         throw new Error("头像上传响应缺少 URL");
       }
-      const userId = useAuthStore.getState().user?.id;
-      const url = normalizeAvatarUrl(storageUrl, userId) ?? storageUrl;
+      const previewUserId = userId ?? useAuthStore.getState().user?.id;
+      const previewUrl = normalizeAvatarUrl(storageUrl, previewUserId) ?? storageUrl;
       return {
-        url,
-        avatarUrl: url,
+        url: previewUrl,
+        avatarUrl: previewUrl,
         storageUrl,
         size: Number(raw.size ?? 0),
       };
@@ -1569,6 +1577,21 @@ export const memberApi = {
       tagIds: data.tagIds,
     }).then((response) => normalizeUser(response.data.data as AnyRecord)),
 
+  updateMemberProfile: (id: string, data: {
+    username?: string;
+    nickname?: string | null;
+    email?: string | null;
+    qq?: string | null;
+    avatarUrl?: string | null;
+  }) =>
+    api.put<ApiResponse<unknown>>(`/members/${id}/profile`, {
+      username: data.username,
+      nickname: data.nickname,
+      email: data.email,
+      qq_number: data.qq,
+      avatar_url: data.avatarUrl,
+    }).then((response) => normalizeUser(response.data.data as AnyRecord)),
+
   updateMemberRole: (id: string, role: string) =>
     api.put<ApiResponse<unknown>>(`/members/${id}/role`, { role }).then((response) =>
       normalizeUser(response.data.data as AnyRecord)
@@ -1601,6 +1624,11 @@ export const memberApi = {
   resetMemberTagStatuses: (id: string, tagIds: string[]) =>
     api.post<ApiResponse<{ items: unknown[] }>>(`/members/${id}/tags/reset`, { tagIds }).then((response) =>
       response.data.data.items.map((user) => normalizeUser(user as AnyRecord))
+    ),
+
+  grantMemberTags: (id: string, tagIds: string[]) =>
+    api.post<ApiResponse<unknown>>(`/members/${id}/tags/grant`, { tagIds }).then((response) =>
+      normalizeUser(response.data.data as AnyRecord)
     ),
 
   deleteMember: (id: string) =>

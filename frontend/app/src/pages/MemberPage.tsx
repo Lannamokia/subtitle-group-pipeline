@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,11 +33,12 @@ import {
 } from "@/components/ui/select";
 import { PasswordRuleHint } from "@/components/PasswordRuleHint";
 import { UserAvatar } from "@/components/UserAvatar";
-import { getErrorMessage, memberApi, roleTagApi } from "@/lib/api";
+import { AvatarCropDialog } from "@/components/AvatarCropDialog";
+import { getErrorMessage, memberApi, roleTagApi, storageApi } from "@/lib/api";
 import { PASSWORD_RULE_MESSAGE, validatePassword } from "@/lib/passwordPolicy";
 import { useAuthStore } from "@/stores/authStore";
 import type { RoleTagDefinition, User, UserRole, UserRoleTagStatus, UserStatus } from "@/types";
-import { KeyRound, Loader2, Search, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
+import { Camera, KeyRound, Loader2, Pencil, Search, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 const roleLabels: Record<UserRole, string> = {
@@ -70,6 +71,12 @@ interface MemberFormState {
   tagIds: string[];
 }
 
+interface EditMemberFormState {
+  username: string;
+  nickname: string;
+  qq: string;
+}
+
 const initialMemberForm: MemberFormState = {
   username: "",
   password: "",
@@ -82,6 +89,7 @@ const initialMemberForm: MemberFormState = {
 
 export function MemberPage() {
   const currentUser = useAuthStore((state) => state.user);
+  const updateCurrentUser = useAuthStore((state) => state.updateUser);
   const [users, setUsers] = useState<User[]>([]);
   const [tags, setTags] = useState<RoleTagDefinition[]>([]);
   const [query, setQuery] = useState("");
@@ -92,12 +100,25 @@ export function MemberPage() {
   const [passwordTarget, setPasswordTarget] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [profileTarget, setProfileTarget] = useState<User | null>(null);
+  const [profileForm, setProfileForm] = useState<EditMemberFormState>({
+    username: "",
+    nickname: "",
+    qq: "",
+  });
+  const [profileAvatarPreview, setProfileAvatarPreview] = useState("");
+  const [profileAvatarFile, setProfileAvatarFile] = useState<File | null>(null);
+  const [profileCropImageUrl, setProfileCropImageUrl] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [tagResetTarget, setTagResetTarget] = useState<User | null>(null);
   const [tagResetStatuses, setTagResetStatuses] = useState<UserRoleTagStatus[]>([]);
   const [isLoadingTagStatuses, setIsLoadingTagStatuses] = useState(false);
   const [selectedTagResetIds, setSelectedTagResetIds] = useState<string[]>([]);
+  const [selectedTagGrantIds, setSelectedTagGrantIds] = useState<string[]>([]);
   const [isResettingTags, setIsResettingTags] = useState(false);
+  const [isGrantingTags, setIsGrantingTags] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const profileAvatarInputRef = useRef<HTMLInputElement>(null);
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -168,6 +189,99 @@ export function MemberPage() {
 
   const updateUserInList = (updated: User) => {
     setUsers((prev) => prev.map((user) => (user.id === updated.id ? { ...user, ...updated } : user)));
+  };
+
+  const closeProfileCropDialog = () => {
+    setProfileCropImageUrl((current) => {
+      if (current?.startsWith("blob:")) {
+        URL.revokeObjectURL(current);
+      }
+      return null;
+    });
+  };
+
+  const closeProfileDialog = () => {
+    setProfileAvatarPreview((current) => {
+      if (current.startsWith("blob:")) {
+        URL.revokeObjectURL(current);
+      }
+      return "";
+    });
+    setProfileAvatarFile(null);
+    closeProfileCropDialog();
+    setProfileTarget(null);
+  };
+
+  const openProfileDialog = (user: User) => {
+    setProfileTarget(user);
+    setProfileForm({
+      username: user.username || "",
+      nickname: user.nickname || "",
+      qq: user.qq || "",
+    });
+    setProfileAvatarPreview(user.avatar || "");
+    setProfileAvatarFile(null);
+  };
+
+  const handleProfileAvatarFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("请上传图片文件");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("图片大小不能超过5MB");
+      return;
+    }
+
+    closeProfileCropDialog();
+    setProfileCropImageUrl(URL.createObjectURL(file));
+    event.currentTarget.value = "";
+  };
+
+  const handleProfileAvatarCropped = async (file: File) => {
+    setProfileAvatarPreview((current) => {
+      if (current.startsWith("blob:")) {
+        URL.revokeObjectURL(current);
+      }
+      return URL.createObjectURL(file);
+    });
+    setProfileAvatarFile(file);
+    closeProfileCropDialog();
+  };
+
+  const handleUpdateMemberProfile = async () => {
+    if (!profileTarget) return;
+    const username = profileForm.username.trim();
+    if (username.length < 3) {
+      toast.error("用户名至少需要 3 个字符");
+      return;
+    }
+
+    setIsSavingProfile(true);
+    try {
+      const uploadedAvatar = profileAvatarFile
+        ? await storageApi.uploadAvatar(profileAvatarFile, profileTarget.id)
+        : null;
+      const updated = await memberApi.updateMemberProfile(profileTarget.id, {
+        username,
+        nickname: profileForm.nickname.trim() || null,
+        qq: profileForm.qq.trim() || null,
+        avatarUrl: uploadedAvatar?.storageUrl,
+      });
+      updateUserInList(updated);
+      if (currentUser?.id === updated.id) {
+        updateCurrentUser(updated);
+      }
+      closeProfileDialog();
+      toast.success("成员资料已更新");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const handleRoleChange = async (user: User, role: UserRole) => {
@@ -245,6 +359,7 @@ export function MemberPage() {
     setTagResetTarget(user);
     setTagResetStatuses([]);
     setSelectedTagResetIds([]);
+    setSelectedTagGrantIds([]);
     setIsLoadingTagStatuses(true);
     try {
       const statuses = await memberApi.getMemberTagStatuses(user.id);
@@ -263,6 +378,34 @@ export function MemberPage() {
     );
   };
 
+  const toggleTagGrant = (tagId: string, checked: boolean) => {
+    setSelectedTagGrantIds((prev) =>
+      checked ? [...prev, tagId] : prev.filter((id) => id !== tagId)
+    );
+  };
+
+  const handleGrantMemberTags = async () => {
+    if (!tagResetTarget || selectedTagGrantIds.length === 0) {
+      toast.error("请先选择要授予的标签");
+      return;
+    }
+
+    setIsGrantingTags(true);
+    try {
+      const updated = await memberApi.grantMemberTags(tagResetTarget.id, selectedTagGrantIds);
+      updateUserInList(updated);
+      setTagResetTarget(null);
+      setTagResetStatuses([]);
+      setSelectedTagGrantIds([]);
+      setSelectedTagResetIds([]);
+      toast.success("成员标签已授予");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsGrantingTags(false);
+    }
+  };
+
   const handleResetMemberTags = async () => {
     if (!tagResetTarget || selectedTagResetIds.length === 0) {
       toast.error("请先选择要重置的标签");
@@ -275,6 +418,7 @@ export function MemberPage() {
       setTagResetTarget(null);
       setTagResetStatuses([]);
       setSelectedTagResetIds([]);
+      setSelectedTagGrantIds([]);
       toast.success("成员标签状态已重置");
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -374,6 +518,15 @@ export function MemberPage() {
                         {user.status === "disabled" ? "启用" : "禁用"}
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openProfileDialog(user)}
+                      title="编辑资料"
+                    >
+                      <Pencil className="h-4 w-4 text-gray-500" />
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -547,6 +700,91 @@ export function MemberPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={Boolean(profileTarget)}
+        onOpenChange={(open) => {
+          if (!open) closeProfileDialog();
+        }}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>编辑成员资料</DialogTitle>
+            <DialogDescription>更新账号基础资料和绑定 QQ。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="flex items-center gap-4">
+              {profileTarget && (
+                <UserAvatar
+                  user={{ ...profileTarget, avatar: profileAvatarPreview }}
+                  size="lg"
+                />
+              )}
+              <div className="space-y-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => profileAvatarInputRef.current?.click()}
+                  disabled={isSavingProfile}
+                >
+                  <Camera className="mr-1.5 h-4 w-4" />
+                  更换头像
+                </Button>
+                <input
+                  ref={profileAvatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleProfileAvatarFileChange}
+                />
+                <p className="text-xs text-gray-500">上传后会先裁剪为 1:1 方形头像。</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="edit-username">用户名</Label>
+                <Input
+                  id="edit-username"
+                  value={profileForm.username}
+                  onChange={(event) =>
+                    setProfileForm((prev) => ({ ...prev, username: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-nickname">昵称</Label>
+                <Input
+                  id="edit-nickname"
+                  value={profileForm.nickname}
+                  onChange={(event) =>
+                    setProfileForm((prev) => ({ ...prev, nickname: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="edit-qq">绑定 QQ</Label>
+                <Input
+                  id="edit-qq"
+                  value={profileForm.qq}
+                  onChange={(event) =>
+                    setProfileForm((prev) => ({ ...prev, qq: event.target.value }))
+                  }
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeProfileDialog} disabled={isSavingProfile}>
+              取消
+            </Button>
+            <Button onClick={handleUpdateMemberProfile} disabled={isSavingProfile}>
+              {isSavingProfile && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              保存资料
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={Boolean(passwordTarget)} onOpenChange={(open) => !open && setPasswordTarget(null)}>
         <DialogContent>
           <DialogHeader>
@@ -575,6 +813,14 @@ export function MemberPage() {
         </DialogContent>
       </Dialog>
 
+      <AvatarCropDialog
+        open={Boolean(profileCropImageUrl)}
+        imageUrl={profileCropImageUrl}
+        uploading={isSavingProfile}
+        onCancel={closeProfileCropDialog}
+        onConfirm={handleProfileAvatarCropped}
+      />
+
       <Dialog
         open={Boolean(tagResetTarget)}
         onOpenChange={(open) => {
@@ -582,6 +828,7 @@ export function MemberPage() {
             setTagResetTarget(null);
             setTagResetStatuses([]);
             setSelectedTagResetIds([]);
+            setSelectedTagGrantIds([]);
           }
         }}
       >
@@ -589,11 +836,50 @@ export function MemberPage() {
           <DialogHeader>
             <DialogTitle>管理标签状态</DialogTitle>
             <DialogDescription>
-              将 {tagResetTarget?.username} 的一个或多个标签重置为未申请状态。
+              为 {tagResetTarget?.username} 直接授予标签，或把已有状态重置为未申请。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <Label>可重置标签</Label>
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <Label>可直接授予标签</Label>
+              <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto rounded-md border p-3 sm:grid-cols-2">
+                {isLoadingTagStatuses ? (
+                  <div className="col-span-full flex items-center gap-2 text-sm text-gray-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    正在加载标签状态...
+                  </div>
+                ) : tagResetStatuses.some((item) => item.status !== "granted") ? (
+                  tagResetStatuses
+                    .filter((item) => item.status !== "granted")
+                    .map((item) => (
+                      <label key={item.tag.id} className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={selectedTagGrantIds.includes(item.tag.id)}
+                          onCheckedChange={(checked) => toggleTagGrant(item.tag.id, checked === true)}
+                        />
+                        <span>{item.tag.name}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {tagStatusLabels[item.status]}
+                        </Badge>
+                      </label>
+                    ))
+                ) : (
+                  <p className="text-sm text-gray-500">该成员已经拥有所有标签。</p>
+                )}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleGrantMemberTags}
+                disabled={selectedTagGrantIds.length === 0 || isGrantingTags}
+              >
+                {isGrantingTags && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                授予所选标签
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              <Label>可重置标签</Label>
             <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto rounded-md border p-3 sm:grid-cols-2">
               {isLoadingTagStatuses ? (
                 <div className="col-span-full flex items-center gap-2 text-sm text-gray-500">
@@ -622,9 +908,18 @@ export function MemberPage() {
             <p className="text-xs text-gray-500">
               重置会删除对应标签申请记录；如果成员需要该标签，需要重新申请或由管理员重新授予。
             </p>
+            </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setTagResetTarget(null)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setTagResetTarget(null);
+                setSelectedTagResetIds([]);
+                setSelectedTagGrantIds([]);
+              }}
+            >
               取消
             </Button>
             <Button

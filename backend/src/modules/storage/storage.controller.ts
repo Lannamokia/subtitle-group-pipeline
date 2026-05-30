@@ -120,6 +120,38 @@ export async function uploadAvatar(
   }
 }
 
+export async function uploadMemberAvatar(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const files = req.files;
+    const uploadedFile =
+      req.file ||
+      (Array.isArray(files) ? files[0] : files ? Object.values(files)[0]?.[0] : undefined);
+
+    if (!uploadedFile) {
+      res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: "No file uploaded" },
+      });
+      return;
+    }
+
+    const result = await storageService.uploadAvatar(
+      String(req.params.userId),
+      uploadedFile.buffer,
+      uploadedFile.mimetype,
+      uploadedFile.originalname
+    );
+
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getAvatarImage(
   req: Request,
   res: Response,

@@ -10,6 +10,7 @@ export interface User {
   id: string;
   username: string;
   nickname?: string;
+  email?: string;
   qq?: string;
   avatar?: string;
   role: UserRole;
@@ -49,6 +50,16 @@ export interface PasswordResetRequestResponse {
   resetCommandFormat?: string;
   emailSent?: boolean;
   qqSent?: boolean;
+}
+
+export interface QQRebindRequestResponse {
+  success: boolean;
+  oldQQ: string;
+  newQQ: string;
+  oldCommand: string;
+  newCommand: string;
+  expiresAt: string;
+  expiresInSeconds: number;
 }
 
 export interface VerificationStatus {

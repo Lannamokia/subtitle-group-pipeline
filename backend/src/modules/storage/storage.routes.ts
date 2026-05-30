@@ -30,6 +30,7 @@ const upload = multer({
 });
 
 const idParamSchema = z.object({ id: z.string().uuid("Invalid backend ID") });
+const avatarUserParamSchema = z.object({ userId: z.string().uuid("Invalid user ID") });
 
 // Backward-compatible aliases for tests and older clients using /storage/backends.
 // MUST be registered BEFORE /:id to avoid "backends" being captured as an ID parameter.
@@ -43,6 +44,14 @@ router.delete("/backends/:id", authenticate, requireRole("super_admin", "group_a
 
 // Avatar and stats routes must be registered before /:id.
 router.get("/avatar/:userId/image", controller.getAvatarImage);
+router.post(
+  "/avatar/:userId",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateParams(avatarUserParamSchema),
+  upload.any(),
+  controller.uploadMemberAvatar
+);
 router.post("/avatar", authenticate, upload.any(), controller.uploadAvatar);
 router.get("/stats", authenticate, controller.getStorageStats);
 router.get("/retention", authenticate, requireRole("super_admin", "group_admin"), controller.getDataRetentionSettings);

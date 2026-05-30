@@ -13,6 +13,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Form,
   FormControl,
   FormField,
@@ -21,8 +29,8 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { toast } from "sonner";
-import { UserCircle, Camera, Save, Loader2, Shield, Clock, XCircle } from "lucide-react";
-import type { UserRoleTagStatus } from "@/types";
+import { UserCircle, Camera, Save, Loader2, Shield, Clock, XCircle, RefreshCw } from "lucide-react";
+import type { QQRebindRequestResponse, UserRoleTagStatus } from "@/types";
 
 const profileSchema = z.object({
   username: z.string().min(2, "用户名至少2个字符").max(20, "用户名最多20个字符"),
@@ -48,6 +56,10 @@ export function ProfilePage() {
   const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
   const [tagStatuses, setTagStatuses] = useState<UserRoleTagStatus[]>([]);
   const [tagsLoading, setTagsLoading] = useState(true);
+  const [isRebindOpen, setIsRebindOpen] = useState(false);
+  const [newQQ, setNewQQ] = useState("");
+  const [rebindResult, setRebindResult] = useState<QQRebindRequestResponse | null>(null);
+  const [isRequestingRebind, setIsRequestingRebind] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const form = useForm<ProfileFormData>({
@@ -129,6 +141,45 @@ export function ProfilePage() {
       toast.error(getErrorMessage(error));
     } finally {
       setIsAvatarUploading(false);
+    }
+  };
+
+  const handleRequestQQRebind = async () => {
+    const qq = newQQ.trim();
+    if (!qq) {
+      toast.error("请输入新的 QQ 号");
+      return;
+    }
+
+    setIsRequestingRebind(true);
+    try {
+      const result = await authApi.requestQQRebind({ qq });
+      setRebindResult(result);
+      toast.success("换绑验证命令已生成");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsRequestingRebind(false);
+    }
+  };
+
+  const handleRefreshProfile = async () => {
+    try {
+      const refreshed = await authApi.me();
+      updateUser(refreshed);
+      setAvatarUrl(refreshed.avatar || "");
+      form.reset({
+        username: refreshed.username,
+        nickname: refreshed.nickname || "",
+      });
+      toast.success("个人信息已刷新");
+      if (refreshed.qq === newQQ.trim()) {
+        setIsRebindOpen(false);
+        setRebindResult(null);
+        setNewQQ("");
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error));
     }
   };
 
@@ -248,8 +299,21 @@ export function ProfilePage() {
 
                   <div className="space-y-2">
                     <Label>QQ号</Label>
-                    <Input value={user?.qq || ""} disabled className="bg-gray-50" />
-                    <p className="text-xs text-gray-400">QQ号由系统绑定，不可修改</p>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Input value={user?.qq || ""} disabled className="bg-gray-50" />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setNewQQ("");
+                          setRebindResult(null);
+                          setIsRebindOpen(true);
+                        }}
+                      >
+                        申请换绑
+                      </Button>
+                    </div>
+                    <p className="text-xs text-gray-400">换绑需要旧 QQ 和新 QQ 依次向机器人发送验证命令。</p>
                   </div>
 
                   <Button type="submit" disabled={isSaving || isAvatarUploading}>
@@ -319,6 +383,72 @@ export function ProfilePage() {
         onCancel={closeCropDialog}
         onConfirm={uploadAvatarFile}
       />
+
+      <Dialog
+        open={isRebindOpen}
+        onOpenChange={(open) => {
+          setIsRebindOpen(open);
+          if (!open) {
+            setRebindResult(null);
+            setNewQQ("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>换绑 QQ</DialogTitle>
+            <DialogDescription>
+              先用当前绑定 QQ 发送旧 QQ 命令，再用新 QQ 发送新 QQ 命令。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-qq">新 QQ 号</Label>
+              <Input
+                id="new-qq"
+                value={newQQ}
+                onChange={(event) => setNewQQ(event.target.value)}
+                disabled={Boolean(rebindResult)}
+              />
+            </div>
+            {rebindResult && (
+              <div className="space-y-3 rounded-md border bg-gray-50 p-3 text-sm">
+                <div>
+                  <p className="font-medium text-gray-800">1. 当前 QQ 发送</p>
+                  <code className="mt-1 block break-all rounded bg-white px-2 py-1 text-gray-700">
+                    {rebindResult.oldCommand}
+                  </code>
+                </div>
+                <div>
+                  <p className="font-medium text-gray-800">2. 新 QQ 发送</p>
+                  <code className="mt-1 block break-all rounded bg-white px-2 py-1 text-gray-700">
+                    {rebindResult.newCommand}
+                  </code>
+                </div>
+                <p className="text-xs text-gray-500">
+                  验证命令 {Math.round(rebindResult.expiresInSeconds / 60)} 分钟内有效。
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsRebindOpen(false)}>
+              关闭
+            </Button>
+            {rebindResult ? (
+              <Button type="button" onClick={handleRefreshProfile}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                我已完成，刷新资料
+              </Button>
+            ) : (
+              <Button type="button" onClick={handleRequestQQRebind} disabled={isRequestingRebind}>
+                {isRequestingRebind && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                生成验证命令
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
