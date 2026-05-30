@@ -4,6 +4,7 @@ import { TaskRole, TaskStatus, ProjectStatus, TimelineEventType } from "@prisma/
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
+import { permanentlyDeleteProjectById } from "../../jobs/recyclebin.cleanup";
 import type {
   CreateProjectInput,
   CreateProjectFromTemplateInput,
@@ -776,6 +777,35 @@ export async function restoreProject(
   });
 
   return project;
+}
+
+export async function permanentlyDeleteProject(
+  projectId: string,
+  actorId?: string
+) {
+  const existing = await prisma.project.findUnique({
+    where: { id: projectId },
+  });
+
+  if (!existing) {
+    throw new AppError("Project not found", "NOT_FOUND", 404);
+  }
+
+  if (!existing.deleted_at) {
+    throw new AppError("Project is not in recycle bin", "BAD_REQUEST", 400);
+  }
+
+  await auditService.log({
+    user_id: actorId,
+    action: "project.permanent_delete",
+    resource_type: "project",
+    resource_id: projectId,
+    old_value: existing,
+  });
+
+  await permanentlyDeleteProjectById(projectId);
+
+  return { deleted: true, id: projectId };
 }
 
 export async function getProjectMembers(projectId: string) {

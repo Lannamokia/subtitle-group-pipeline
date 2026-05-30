@@ -785,6 +785,9 @@ export const projectApi = {
   deleteProject: (id: string) =>
     api.delete<ApiResponse<void>>(`/projects/${id}`).then(extractData),
 
+  permanentlyDeleteProject: (id: string) =>
+    api.delete<ApiResponse<void>>(`/projects/${id}/permanent`).then(extractData),
+
   addMember: (projectId: string, data: { userId: string; role: TaskRole; isLead?: boolean }) =>
     api.post<ApiResponse<unknown>>(`/projects/${projectId}/members`, {
       user_id: data.userId,

@@ -121,7 +121,11 @@ export function ArchivePage() {
   const handlePermanentDelete = async (projectId: string) => {
     setIsProcessing(projectId);
     try {
-      toast.info("物理清理由后台回收站保留任务执行");
+      await projectApi.permanentlyDeleteProject(projectId);
+      await fetchArchiveState();
+      toast.success("项目已彻底删除");
+    } catch (error) {
+      toast.error("彻底删除失败: " + getErrorMessage(error));
     } finally {
       setIsProcessing(null);
     }

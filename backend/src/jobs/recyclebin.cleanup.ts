@@ -82,6 +82,25 @@ interface ProjectToDelete {
   }>;
 }
 
+export async function permanentlyDeleteProjectById(projectId: string): Promise<void> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: {
+      files: {
+        include: {
+          versions: true,
+        },
+      },
+    },
+  });
+
+  if (!project) {
+    throw new Error("Project not found");
+  }
+
+  await permanentlyDeleteProject(project);
+}
+
 async function permanentlyDeleteProject(project: ProjectToDelete): Promise<void> {
   // Step 1: Delete all physical files from storage
   for (const file of project.files) {
@@ -243,6 +262,11 @@ async function permanentlyDeleteProject(project: ProjectToDelete): Promise<void>
         resource_type: "project",
         resource_id: project.id,
       },
+    });
+
+    // Delete audit logs that reference this project before the project row.
+    await tx.auditLog.deleteMany({
+      where: { project_id: project.id },
     });
 
     // Finally, delete the project itself

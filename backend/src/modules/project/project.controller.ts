@@ -166,6 +166,19 @@ export async function restoreProject(
   }
 }
 
+export async function permanentlyDeleteProject(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await projectService.permanentlyDeleteProject(getParam(req, "id"), req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getProjectMembers(
   req: Request,
   res: Response,

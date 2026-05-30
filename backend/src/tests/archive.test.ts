@@ -371,6 +371,40 @@ describe("Archive & Lifecycle Tests", () => {
 
       expect(restoredRecords.length).toBe(1);
     });
+
+    it("should permanently delete a recycled project on demand", async () => {
+      const { user, token } = await createTestUser({ role: "group_admin" });
+      const project = await createTestProject({
+        owner_id: user.id,
+        status: "deleted",
+        is_archived: true,
+        archived_at: new Date(),
+        deleted_at: new Date(),
+      });
+
+      await prisma.recycleBinRecord.create({
+        data: {
+          user_id: user.id,
+          resource_type: "project",
+          resource_id: project.id,
+          resource_data: JSON.stringify({ name: project.name }),
+          expires_at: new Date(Date.now() + 86400000),
+        },
+      });
+
+      const res = await del(app, `/api/v1/projects/${project.id}/permanent`, token);
+
+      expectSuccess(res, 200);
+      expect(res.body.data.deleted).toBe(true);
+
+      const deletedProject = await prisma.project.findUnique({ where: { id: project.id } });
+      const recycleRecords = await prisma.recycleBinRecord.findMany({
+        where: { resource_id: project.id },
+      });
+
+      expect(deletedProject).toBeNull();
+      expect(recycleRecords).toHaveLength(0);
+    });
   });
 
   describe("Restoration Bypassing Cleanup", () => {

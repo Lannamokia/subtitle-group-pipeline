@@ -43,6 +43,7 @@ router.post("/:id/archive", authenticate, validateParams(idParamSchema), control
 router.post("/:id/unarchive", authenticate, validateParams(idParamSchema), controller.unarchiveProject);
 router.post("/:id/delete", authenticate, validateParams(idParamSchema), controller.softDeleteProject);
 router.post("/:id/restore", authenticate, validateParams(idParamSchema), controller.restoreProject);
+router.delete("/:id/permanent", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), controller.permanentlyDeleteProject);
 router.delete("/:id", authenticate, validateParams(idParamSchema), controller.softDeleteProject);
 
 // Members
