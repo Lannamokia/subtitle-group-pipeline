@@ -139,7 +139,6 @@ export function ProjectCreatePage() {
         const res = await api.get<User[]>("/users");
         setUsers(res.data);
       } catch {
-        // Users endpoint may not exist, use mock
         setUsers([]);
       }
     };

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn, formatFullDate, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
-import { taskApi, timelineApi, announcementApi } from "@/lib/api";
+import { taskApi, timelineApi, announcementApi, notificationApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,7 @@ export function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -51,11 +52,16 @@ export function DashboardPage() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    notificationApi.getUnreadCount()
+      .then((data) => setUnreadCount(data.count))
+      .catch(() => setUnreadCount(0));
+  }, []);
+
   // Stats
   const inProgressTasks = tasks.filter((t) => t.status === "in_progress");
   const submittedTasks = tasks.filter((t) => t.status === "submitted");
   const overdueTasks = tasks.filter((t) => t.status === "overdue");
-  const unreadCount = 5;
 
   const filteredTasks =
     taskTab === "in_progress"
@@ -230,7 +236,7 @@ export function DashboardPage() {
                     >
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className="text-[10px]">
-                          {announcement.projectId === "p1" ? "夏日重现" : "项目"}
+                          项目公告
                         </Badge>
                         <span className="text-sm font-medium text-gray-800">
                           {announcement.title}
