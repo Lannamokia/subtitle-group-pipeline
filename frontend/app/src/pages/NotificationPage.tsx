@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useNotificationStore } from "@/stores/notificationStore";
-import { notificationApi } from "@/lib/api";
+import { getErrorMessage, notificationApi } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Link } from "react-router";
+import { toast } from "sonner";
 
 const typeIcons: Record<NotificationType, React.ReactNode> = {
   task: <ClipboardList className="w-4 h-4 text-blue-500" />,
@@ -43,6 +44,7 @@ export function NotificationPage() {
   const {
     markAsRead,
     markAllAsRead,
+    deleteNotification,
     preferences,
     setPreferences,
   } = useNotificationStore();
@@ -55,6 +57,31 @@ export function NotificationPage() {
       .then((data) => setNotifications(data.items || []))
       .catch(() => {});
   }, []);
+
+  const handleMarkAsRead = async (id: string) => {
+    try {
+      await notificationApi.markAsRead(id);
+      markAsRead(id);
+      setNotifications((prev) =>
+        prev.map((notification) =>
+          notification.id === id ? { ...notification, isRead: true } : notification
+        )
+      );
+    } catch (error) {
+      toast.error("标记已读失败: " + getErrorMessage(error));
+    }
+  };
+
+  const handleDismiss = async (id: string) => {
+    try {
+      await notificationApi.dismissNotification(id);
+      deleteNotification(id);
+      setNotifications((prev) => prev.filter((notification) => notification.id !== id));
+      toast.success("通知已删除");
+    } catch (error) {
+      toast.error("删除通知失败: " + getErrorMessage(error));
+    }
+  };
 
   const filtered =
     activeTab === "all"
@@ -84,7 +111,7 @@ export function NotificationPage() {
             <Settings className="w-4 h-4 mr-1.5" />
             快速设置
           </Button>
-          <Link to="/notifications/settings">
+          <Link to="/notifications/settings" aria-label="打开通知详细设置">
             <Button variant="outline" size="sm">
               <ArrowRight className="w-4 h-4 mr-1.5" />
               详细设置
@@ -176,7 +203,8 @@ export function NotificationPage() {
                   <NotificationItem
                     key={notification.id}
                     notification={notification}
-                    onRead={() => markAsRead(notification.id)}
+                    onRead={() => handleMarkAsRead(notification.id)}
+                    onDismiss={() => handleDismiss(notification.id)}
                   />
                 ))}
               </div>
@@ -193,9 +221,11 @@ export function NotificationPage() {
 function NotificationItem({
   notification,
   onRead,
+  onDismiss,
 }: {
   notification: Notification;
   onRead: () => void;
+  onDismiss: () => void;
 }) {
   return (
     <div
@@ -234,7 +264,7 @@ function NotificationItem({
             <CheckCheck className="w-4 h-4 text-gray-400" />
           </Button>
         )}
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); onDismiss(); }}>
           <Trash2 className="w-4 h-4 text-gray-400" />
         </Button>
       </div>

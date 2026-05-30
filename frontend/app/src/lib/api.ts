@@ -15,6 +15,7 @@ import type {
   StorageBackendInput,
   Project,
   Task,
+  TaskRole,
   TaskComment,
   FileEntity,
   FileVersion,
@@ -783,6 +784,20 @@ export const projectApi = {
 
   deleteProject: (id: string) =>
     api.delete<ApiResponse<void>>(`/projects/${id}`).then(extractData),
+
+  addMember: (projectId: string, data: { userId: string; role: TaskRole; isLead?: boolean }) =>
+    api.post<ApiResponse<unknown>>(`/projects/${projectId}/members`, {
+      user_id: data.userId,
+      role: data.role,
+      is_lead: data.isLead ?? false,
+    }).then((response) => {
+      const raw = response.data.data as AnyRecord;
+      return {
+        user: normalizeUser(raw.user ?? raw),
+        role: raw.role as TaskRole,
+        joinedAt: raw.joinedAt ?? raw.joined_at ?? "",
+      };
+    }),
 };
 
 // ========== Task API ==========
@@ -950,6 +965,9 @@ export const notificationApi = {
 
   markAllAsRead: () =>
     api.post<ApiResponse<void>>('/notifications/read-all').then(extractData),
+
+  dismissNotification: (id: string) =>
+    api.delete<ApiResponse<void>>(`/notifications/${id}`).then(extractData),
 
   getUnreadCount: () =>
     api.get<ApiResponse<{ count: number }>>('/notifications/unread-count').then(extractData),

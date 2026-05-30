@@ -12,6 +12,7 @@ import {
   normalizeTask,
   normalizeTimelineEvent,
   normalizeUser,
+  memberApi,
   projectApi,
   taskApi,
   wikiApi,
@@ -101,6 +102,17 @@ import {
 type ProjectTab = "tasks" | "files" | "wiki" | "members" | "settings" | "activity" | "dedup" | "announcements";
 
 type ApiEnvelope<T> = { data: T };
+
+type WikiPageKey = "project-overview" | "role-names" | "production-guide" | "term-glossary";
+
+const WIKI_PAGE_TITLES: Record<WikiPageKey, string> = {
+  "project-overview": "项目说明",
+  "role-names": "角色译名表",
+  "production-guide": "制作规范",
+  "term-glossary": "术语对照",
+};
+
+const DEFAULT_WIKI_PAGE_IDS = Object.keys(WIKI_PAGE_TITLES) as WikiPageKey[];
 
 const KANBAN_COLUMNS: { id: string; title: string; statuses: TaskStatus[] }[] = [
   { id: "todo", title: "待处理", statuses: ["pending_publish", "claimable", "assigned"] },
@@ -1045,24 +1057,63 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
   const [blocks, setBlocks] = useState<WikiBlock[]>(wiki?.blocks || []);
   const [title, setTitle] = useState(wiki?.title || "项目Wiki");
   const [status, setStatus] = useState<WikiStatus>(wiki?.status || "draft");
+  const [activePageId, setActivePageId] = useState<string>("project-overview");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setBlocks(wiki?.blocks || []);
+    setTitle(wiki?.title || "项目Wiki");
+    setStatus(wiki?.status || "draft");
+  }, [wiki]);
+
+  const getBlockPageId = (block: WikiBlock) =>
+    typeof block.data?.pageId === "string" ? block.data.pageId : "project-overview";
+
+  const getPageTitle = (pageId: string) =>
+    typeof WIKI_PAGE_TITLES[pageId as WikiPageKey] === "string"
+      ? WIKI_PAGE_TITLES[pageId as WikiPageKey]
+      : String(blocks.find((block) => getBlockPageId(block) === pageId)?.data?.pageTitle ?? pageId);
+
+  const pageIds = Array.from(new Set([...DEFAULT_WIKI_PAGE_IDS, ...blocks.map(getBlockPageId)]));
+  const activePageTitle = getPageTitle(activePageId);
+  const activeBlocks = blocks.filter((block) => getBlockPageId(block) === activePageId);
 
   const handleAddBlock = (type: WikiBlock["type"]) => {
     const newBlock: WikiBlock = {
       id: `block-${Date.now()}`,
       type,
       content: type === "markdown" ? "" : "",
-      data: type === "table" ? { headers: ["列1", "列2", "列3"], rows: [["", "", ""]] } : undefined,
+      data: {
+        pageId: activePageId,
+        pageTitle: activePageTitle,
+        ...(type === "table" ? { headers: ["列1", "列2", "列3"], rows: [["", "", ""]] } : {}),
+      },
     };
     setBlocks((prev) => [...prev, newBlock]);
   };
 
-  const handleUpdateBlock = (index: number, block: WikiBlock) => {
-    setBlocks((prev) => prev.map((b, i) => (i === index ? block : b)));
+  const handleUpdateBlock = (blockId: string, block: WikiBlock) => {
+    setBlocks((prev) => prev.map((b) => (b.id === blockId ? block : b)));
   };
 
-  const handleDeleteBlock = (index: number) => {
-    setBlocks((prev) => prev.filter((_, i) => i !== index));
+  const handleDeleteBlock = (blockId: string) => {
+    setBlocks((prev) => prev.filter((block) => block.id !== blockId));
+  };
+
+  const handleAddPage = () => {
+    const name = `新页面 ${pageIds.filter((id) => id.startsWith("custom-")).length + 1}`;
+    const pageId = `custom-${Date.now()}`;
+    setActivePageId(pageId);
+    setIsEditing(true);
+    setBlocks((prev) => [
+      ...prev,
+      {
+        id: `block-${Date.now()}`,
+        type: "markdown",
+        content: "",
+        data: { pageId, pageTitle: name },
+      },
+    ]);
   };
 
   const handleSave = async () => {
@@ -1084,8 +1135,7 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
   };
 
   // Keep the active editor state in sync with the loaded wiki document.
-  const displayBlocks = blocks.length > 0 ? blocks : (wiki?.blocks || []);
-  const displayTitle = title || wiki?.title || "项目Wiki";
+  const displayBlocks = activeBlocks;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 md:gap-6">
@@ -1095,12 +1145,17 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
         </CardHeader>
         <CardContent className="p-2 pt-0">
           <div className="space-y-0.5">
-            <WikiNavItem active>项目说明</WikiNavItem>
-            <WikiNavItem>角色译名表</WikiNavItem>
-            <WikiNavItem>制作规范</WikiNavItem>
-            <WikiNavItem>术语对照</WikiNavItem>
+            {pageIds.map((pageId) => (
+              <WikiNavItem
+                key={pageId}
+                active={activePageId === pageId}
+                onClick={() => setActivePageId(pageId)}
+              >
+                {getPageTitle(pageId)}
+              </WikiNavItem>
+            ))}
           </div>
-          <Button variant="ghost" size="sm" className="w-full mt-2 text-primary-500">
+          <Button variant="ghost" size="sm" className="w-full mt-2 text-primary-500" onClick={handleAddPage}>
             + 添加页面
           </Button>
         </CardContent>
@@ -1109,7 +1164,7 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
       <Card className="lg:col-span-3">
         <CardHeader className="flex flex-row items-center justify-between py-4 border-b">
           <div>
-            <CardTitle className="text-h2">{displayTitle}</CardTitle>
+            <CardTitle className="text-h2">{activePageTitle}</CardTitle>
             {wiki && (
               <p className="text-xs text-gray-400 mt-1">
                 最后更新：{wiki.updatedBy.username} ·{" "}
@@ -1149,9 +1204,9 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700">页面标题</label>
-                <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+                <Input value={activePageTitle} disabled />
               </div>
-              {blocks.map((block, index) => (
+              {activeBlocks.map((block) => (
                 <div key={block.id} className="border border-gray-200 rounded-lg p-4 space-y-2">
                   <div className="flex items-center justify-between">
                     <Badge variant="outline" className="text-[10px]">
@@ -1161,7 +1216,7 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
                       variant="ghost"
                       size="sm"
                       className="h-7 w-7 p-0 text-red-500"
-                      onClick={() => handleDeleteBlock(index)}
+                      onClick={() => handleDeleteBlock(block.id)}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
@@ -1169,11 +1224,11 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
                   {block.type === "markdown" ? (
                     <Textarea
                       value={block.content}
-                      onChange={(e) => handleUpdateBlock(index, { ...block, content: e.target.value })}
+                      onChange={(e) => handleUpdateBlock(block.id, { ...block, content: e.target.value })}
                       className="min-h-[100px] font-mono text-sm"
                     />
                   ) : (
-                    <EditableTableBlock block={block} onChange={(b) => handleUpdateBlock(index, b)} />
+                    <EditableTableBlock block={block} onChange={(b) => handleUpdateBlock(block.id, b)} />
                   )}
                 </div>
               ))}
@@ -1306,9 +1361,13 @@ function EditableTableBlock({ block, onChange }: { block: WikiBlock; onChange: (
   );
 }
 
-function WikiNavItem({ children, active }: { children: React.ReactNode; active?: boolean }) {
+function WikiNavItem({ children, active, onClick }: { children: React.ReactNode; active?: boolean; onClick: () => void }) {
   return (
-    <button className={cn("w-full text-left px-3 py-2 rounded-md text-sm transition-colors", active ? "bg-primary-50 text-primary-700 font-medium" : "text-gray-600 hover:bg-gray-50")}>
+    <button
+      type="button"
+      className={cn("w-full text-left px-3 py-2 rounded-md text-sm transition-colors", active ? "bg-primary-50 text-primary-700 font-medium" : "text-gray-600 hover:bg-gray-50")}
+      onClick={onClick}
+    >
       {children}
     </button>
   );
@@ -1428,6 +1487,10 @@ function ProjectAnnouncementsTab({ projectId }: { projectId: string }) {
 function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => void }) {
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [inviteUserId, setInviteUserId] = useState("");
+  const [inviteRole, setInviteRole] = useState<TaskRole>("translation");
+  const [inviting, setInviting] = useState(false);
   const [joinRequests, setJoinRequests] = useState<{ id: string; user: User; role: TaskRole; message?: string }[]>([]);
 
   useEffect(() => {
@@ -1451,6 +1514,16 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
     fetchJoinRequests();
   }, [isSupervisor, project.id]);
 
+  useEffect(() => {
+    if (!isSupervisor || !inviteOpen) return;
+    memberApi.getMembers({ pageSize: 100 })
+      .then((data) => setUsers(data.items))
+      .catch(() => setUsers([]));
+  }, [inviteOpen, isSupervisor]);
+
+  const existingMemberIds = new Set(project.members.map((member) => member.user.id));
+  const availableUsers = users.filter((user) => !existingMemberIds.has(user.id) && user.status !== "disabled");
+
   const handleApproveRequest = async (requestId: string) => {
     try {
       await api.post(`/projects/${project.id}/join-requests/${requestId}/approve`);
@@ -1469,6 +1542,27 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
       setJoinRequests((prev) => prev.filter((r) => r.id !== requestId));
     } catch (error) {
       toast.error("操作失败: " + getErrorMessage(error));
+    }
+  };
+
+  const handleInviteMember = async () => {
+    if (!inviteUserId) {
+      toast.error("请选择用户");
+      return;
+    }
+
+    setInviting(true);
+    try {
+      await projectApi.addMember(project.id, { userId: inviteUserId, role: inviteRole });
+      toast.success("成员已添加");
+      setInviteOpen(false);
+      setInviteUserId("");
+      setInviteRole("translation");
+      onUpdate();
+    } catch (error) {
+      toast.error("添加成员失败: " + getErrorMessage(error));
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -1559,11 +1653,22 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
           <div className="space-y-4">
             <div>
               <label className="text-sm font-medium">选择用户</label>
-              <Input placeholder="搜索用户..." />
+              <Select value={inviteUserId} onValueChange={setInviteUserId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择用户" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableUsers.map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.nickname || user.username}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <label className="text-sm font-medium">分配角色</label>
-              <Select>
+              <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as TaskRole)}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择角色" />
                 </SelectTrigger>
@@ -1577,7 +1682,10 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>取消</Button>
-            <Button>邀请</Button>
+            <Button onClick={handleInviteMember} disabled={!inviteUserId || inviting}>
+              {inviting && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}
+              邀请
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1702,10 +1810,24 @@ function DedupTab({ conflicts, projectId, isSupervisor }: { conflicts: SubtitleC
                   </div>
                   {isSupervisor && (
                     <div className="flex items-center gap-2 shrink-0">
-                      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); }}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedConflict(conflict);
+                        }}
+                      >
                         选择保留
                       </Button>
-                      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); }}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedConflict(conflict);
+                        }}
+                      >
                         合并
                       </Button>
                     </div>

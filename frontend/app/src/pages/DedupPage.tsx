@@ -331,7 +331,15 @@ export function DedupPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedConflict(conflict);
+                      }}
+                    >
                       <Eye className="w-4 h-4" />
                     </Button>
                     <ChevronRight className="w-4 h-4 text-gray-300" />
