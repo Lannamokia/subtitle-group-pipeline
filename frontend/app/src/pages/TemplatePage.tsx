@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router";
-import { useForm, useFieldArray, FormProvider } from "react-hook-form";
+import { useForm, useFieldArray, FormProvider, useFormContext } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { api, getErrorMessage } from "@/lib/api";
@@ -54,7 +54,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import type { ProjectTemplate, TaskRole } from "@/types";
+import type { ProductOutputConfig, ProjectTemplate, TaskRole } from "@/types";
 import {
   Plus,
   Search,
@@ -112,6 +112,19 @@ const deliveryItemSchema = z.object({
   required: z.boolean(),
 });
 
+const productOutputSchema = z.object({
+  resolution: z.string(),
+  frameRate: z.string(),
+  encoder: z.string(),
+  encoderPreset: z.string(),
+  videoBitrate: z.string(),
+  targetSize: z.string(),
+  audioCodec: z.string(),
+  audioBitrate: z.string(),
+  audioChannels: z.string(),
+  extraParams: z.string(),
+});
+
 const templateFormSchema = z.object({
   name: z.string().min(1, "模板名称不能为空").max(100),
   type: z.enum(["anime", "movie", "collection"]),
@@ -128,11 +141,11 @@ const templateFormSchema = z.object({
     dedupThreshold: z.number().min(0).max(1),
   }),
   productConfig: z.object({
-    resolution: z.string(),
-    bitrate: z.string(),
-    encoder: z.string(),
-    containerFormat: z.string(),
     namingRule: z.string(),
+    outputs: z.object({
+      muxed: productOutputSchema,
+      burned: productOutputSchema,
+    }),
   }),
   deliveryChecklist: z.array(deliveryItemSchema),
 });
@@ -165,6 +178,56 @@ function toTemplatePayload(values: TemplateFormValues) {
   };
 }
 
+const defaultMuxedOutput = {
+  resolution: "1920x1080",
+  frameRate: "23.976",
+  encoder: "x264",
+  encoderPreset: "slow",
+  videoBitrate: "8000k",
+  targetSize: "1.5GB",
+  audioCodec: "AAC",
+  audioBitrate: "192k",
+  audioChannels: "2.0",
+  extraParams: "",
+};
+
+const defaultBurnedOutput = {
+  resolution: "1920x1080",
+  frameRate: "23.976",
+  encoder: "x264",
+  encoderPreset: "slow",
+  videoBitrate: "9000k",
+  targetSize: "1.8GB",
+  audioCodec: "AAC",
+  audioBitrate: "192k",
+  audioChannels: "2.0",
+  extraParams: "",
+};
+
+function normalizeProductConfig(config: ProjectTemplate["productConfig"]): TemplateFormValues["productConfig"] {
+  const legacy = config as ProjectTemplate["productConfig"] & {
+    resolution?: string;
+    bitrate?: string;
+    encoder?: string;
+    containerFormat?: string;
+  };
+
+  const base = {
+    ...defaultMuxedOutput,
+    resolution: legacy.resolution ?? defaultMuxedOutput.resolution,
+    encoder: legacy.encoder ?? defaultMuxedOutput.encoder,
+    videoBitrate: legacy.bitrate ?? defaultMuxedOutput.videoBitrate,
+  };
+
+  return {
+    namingRule: config.namingRule ?? "{title}_{ep}_{quality}",
+    outputs: {
+      muxed: { ...base, ...(config.outputs?.muxed ?? {}) },
+      burned: { ...defaultBurnedOutput, ...base, ...(config.outputs?.burned ?? {}) },
+    },
+  };
+}
+
 const defaultFormValues: TemplateFormValues = {
   name: "",
   type: "anime",
@@ -186,11 +249,11 @@ const defaultFormValues: TemplateFormValues = {
   },
   assPolicy: { mergeRule: "default", dedupThreshold: 0.1 },
   productConfig: {
-    resolution: "1920x1080",
-    bitrate: "8000k",
-    encoder: "x264",
-    containerFormat: "mkv",
     namingRule: "{title}_{ep}_{quality}",
+    outputs: {
+      muxed: defaultMuxedOutput,
+      burned: defaultBurnedOutput,
+    },
   },
   deliveryChecklist: [
     { id: "d1", name: "成品视频", role: "encoding", required: true },
@@ -454,7 +517,7 @@ function TemplateFormDialog({
           uploadPolicy: template.uploadPolicy,
           notificationPolicy: template.notificationPolicy,
           assPolicy: template.assPolicy,
-          productConfig: template.productConfig,
+          productConfig: normalizeProductConfig(template.productConfig),
           deliveryChecklist: template.deliveryChecklist,
         }
       : defaultFormValues,
@@ -662,56 +725,6 @@ function TemplateFormDialog({
                 <AccordionItem value="product">
                   <AccordionTrigger>成品配置</AccordionTrigger>
                   <AccordionContent className="space-y-4 px-1">
-                    <div className="grid grid-cols-2 gap-4">
-                      <FormField
-                        control={form.control}
-                        name="productConfig.resolution"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>分辨率</FormLabel>
-                            <FormControl>
-                              <Input {...field} />
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="productConfig.bitrate"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>码率</FormLabel>
-                            <FormControl>
-                              <Input {...field} />
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="productConfig.encoder"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>编码器</FormLabel>
-                            <FormControl>
-                              <Input {...field} />
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="productConfig.containerFormat"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>容器格式</FormLabel>
-                            <FormControl>
-                              <Input {...field} />
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-                    </div>
                     <FormField
                       control={form.control}
                       name="productConfig.namingRule"
@@ -724,6 +737,8 @@ function TemplateFormDialog({
                         </FormItem>
                       )}
                     />
+                    <ProductOutputFields title="内封成品" prefix="productConfig.outputs.muxed" />
+                    <ProductOutputFields title="内嵌成品" prefix="productConfig.outputs.burned" />
                   </AccordionContent>
                 </AccordionItem>
 
@@ -876,6 +891,102 @@ function TemplateFormDialog({
   );
 }
 
+function ProductOutputFields({
+  title,
+  prefix,
+}: {
+  title: string;
+  prefix: `productConfig.outputs.${"muxed" | "burned"}`;
+}) {
+  const form = useFormContext<TemplateFormValues>();
+  const fields: Array<{ name: keyof TemplateFormValues["productConfig"]["outputs"]["muxed"]; label: string; placeholder?: string }> = [
+    { name: "resolution", label: "分辨率", placeholder: "1920x1080" },
+    { name: "frameRate", label: "帧率", placeholder: "23.976" },
+    { name: "encoder", label: "编码器", placeholder: "x264 / x265 / AV1" },
+    { name: "encoderPreset", label: "编码器预设", placeholder: "slow / medium / placebo" },
+    { name: "videoBitrate", label: "码率", placeholder: "8000k" },
+    { name: "targetSize", label: "成片大小", placeholder: "1.5GB" },
+    { name: "audioCodec", label: "音频编码方式", placeholder: "AAC / FLAC / Opus" },
+    { name: "audioBitrate", label: "音频码率", placeholder: "192k" },
+    { name: "audioChannels", label: "音频声道数", placeholder: "2.0 / 5.1" },
+  ];
+
+  return (
+    <div className="space-y-3 rounded-lg border bg-gray-50/50 p-4">
+      <h4 className="text-sm font-semibold text-gray-800">{title}</h4>
+      <div className="grid gap-3 md:grid-cols-3">
+        {fields.map((item) => (
+          <FormField
+            key={item.name}
+            control={form.control}
+            name={`${prefix}.${item.name}` as const}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{item.label}</FormLabel>
+                <FormControl>
+                  <Input placeholder={item.placeholder} {...field} />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+        ))}
+      </div>
+      <FormField
+        control={form.control}
+        name={`${prefix}.extraParams` as const}
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>额外参数</FormLabel>
+            <FormControl>
+              <Textarea rows={2} placeholder="例如 --aq-mode 3 --deband 或其它自定义参数" {...field} />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+    </div>
+  );
+}
+
+function ProductOutputSummary({
+  title,
+  output,
+}: {
+  title: string;
+  output: ProductOutputConfig;
+}) {
+  const items: Array<{ label: string; value: string }> = [
+    { label: "分辨率", value: output.resolution },
+    { label: "帧率", value: output.frameRate },
+    { label: "编码器", value: output.encoder },
+    { label: "编码器预设", value: output.encoderPreset },
+    { label: "码率", value: output.videoBitrate },
+    { label: "成片大小", value: output.targetSize },
+    { label: "音频编码方式", value: output.audioCodec },
+    { label: "音频码率", value: output.audioBitrate },
+    { label: "音频声道数", value: output.audioChannels },
+  ];
+
+  return (
+    <div className="rounded-lg border bg-gray-50/50 p-3">
+      <h5 className="mb-2 text-sm font-semibold text-gray-800">{title}</h5>
+      <div className="grid grid-cols-2 gap-2">
+        {items.map((item) => (
+          <div key={item.label} className="flex justify-between gap-3 rounded bg-white px-3 py-2">
+            <span className="text-gray-500">{item.label}</span>
+            <span className="text-right">{item.value || "-"}</span>
+          </div>
+        ))}
+        {output.extraParams && (
+          <div className="col-span-2 rounded bg-white px-3 py-2">
+            <div className="mb-1 text-gray-500">额外参数</div>
+            <div className="break-all font-mono text-xs text-gray-700">{output.extraParams}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Template Detail Dialog ---------- */
 
 function TemplateDetailDialog({
@@ -890,6 +1001,8 @@ function TemplateDetailDialog({
   isDefault: boolean;
 }) {
   if (!template) return null;
+
+  const productConfig = normalizeProductConfig(template.productConfig);
 
   return (
     <Dialog open={!!template} onOpenChange={onOpenChange}>
@@ -960,27 +1073,13 @@ function TemplateDetailDialog({
           {/* Product Config */}
           <div>
             <h4 className="text-sm font-medium text-gray-700 mb-2">成品配置</h4>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="flex justify-between px-3 py-2 bg-gray-50 rounded">
-                <span className="text-gray-500">分辨率</span>
-                <span>{template.productConfig.resolution}</span>
-              </div>
-              <div className="flex justify-between px-3 py-2 bg-gray-50 rounded">
-                <span className="text-gray-500">码率</span>
-                <span>{template.productConfig.bitrate}</span>
-              </div>
-              <div className="flex justify-between px-3 py-2 bg-gray-50 rounded">
-                <span className="text-gray-500">编码器</span>
-                <span>{template.productConfig.encoder}</span>
-              </div>
-              <div className="flex justify-between px-3 py-2 bg-gray-50 rounded">
-                <span className="text-gray-500">容器格式</span>
-                <span>{template.productConfig.containerFormat}</span>
-              </div>
-              <div className="col-span-2 flex justify-between px-3 py-2 bg-gray-50 rounded">
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between gap-3 px-3 py-2 bg-gray-50 rounded">
                 <span className="text-gray-500">命名规则</span>
-                <span className="font-mono">{template.productConfig.namingRule}</span>
+                <span className="font-mono text-right">{productConfig.namingRule}</span>
               </div>
+              <ProductOutputSummary title="内封成品" output={productConfig.outputs.muxed} />
+              <ProductOutputSummary title="内嵌成品" output={productConfig.outputs.burned} />
             </div>
           </div>
 

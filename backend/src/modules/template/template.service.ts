@@ -16,6 +16,50 @@ function safeParseJson<T>(json: string | null | undefined, defaultValue: T): T {
   }
 }
 
+const defaultMuxedOutput = {
+  resolution: "1920x1080",
+  frameRate: "23.976",
+  encoder: "x264",
+  encoderPreset: "slow",
+  videoBitrate: "8000k",
+  targetSize: "1.5GB",
+  audioCodec: "AAC",
+  audioBitrate: "192k",
+  audioChannels: "2.0",
+  extraParams: "",
+};
+
+const defaultBurnedOutput = {
+  resolution: "1920x1080",
+  frameRate: "23.976",
+  encoder: "x264",
+  encoderPreset: "slow",
+  videoBitrate: "9000k",
+  targetSize: "1.8GB",
+  audioCodec: "AAC",
+  audioBitrate: "192k",
+  audioChannels: "2.0",
+  extraParams: "",
+};
+
+function normalizeProductConfig(config: Record<string, any> | null | undefined) {
+  const source = config ?? {};
+  const base = {
+    ...defaultMuxedOutput,
+    resolution: source.resolution ?? defaultMuxedOutput.resolution,
+    encoder: source.encoder ?? defaultMuxedOutput.encoder,
+    videoBitrate: source.bitrate ?? defaultMuxedOutput.videoBitrate,
+  };
+
+  return {
+    namingRule: source.namingRule ?? "{title}_{ep}_{quality}",
+    outputs: {
+      muxed: { ...base, ...(source.outputs?.muxed ?? {}) },
+      burned: { ...defaultBurnedOutput, ...base, ...(source.outputs?.burned ?? {}) },
+    },
+  };
+}
+
 function serializeTemplate(template: {
   id: string;
   name: string;
@@ -42,13 +86,7 @@ function serializeTemplate(template: {
     uploadPolicy: safeParseJson(template.upload_policy, { allowedTypes: {} }),
     notificationPolicy: safeParseJson(template.notification_policy, { events: {} }),
     assPolicy: safeParseJson(template.ass_policy, { mergeRule: "default", dedupThreshold: 0.1 }),
-    productConfig: safeParseJson(template.product_config, {
-      resolution: "1920x1080",
-      bitrate: "8000k",
-      encoder: "x264",
-      containerFormat: "mkv",
-      namingRule: "{title}_{ep}_{quality}",
-    }),
+    productConfig: normalizeProductConfig(safeParseJson(template.product_config, {})),
     deliveryChecklist: safeParseJson(template.delivery_checklist, []),
     useCount: template._count?.projects ?? 0,
     createdAt: template.created_at.toISOString(),

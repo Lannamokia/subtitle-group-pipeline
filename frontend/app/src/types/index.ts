@@ -290,11 +290,24 @@ export interface AssPolicy {
 }
 
 export interface ProductConfig {
-  resolution: string;
-  bitrate: string;
-  encoder: string;
-  containerFormat: string;
   namingRule: string;
+  outputs: {
+    muxed: ProductOutputConfig;
+    burned: ProductOutputConfig;
+  };
+}
+
+export interface ProductOutputConfig {
+  resolution: string;
+  frameRate: string;
+  encoder: string;
+  encoderPreset: string;
+  videoBitrate: string;
+  targetSize: string;
+  audioCodec: string;
+  audioBitrate: string;
+  audioChannels: string;
+  extraParams: string;
 }
 
 export interface DeliveryItem {
