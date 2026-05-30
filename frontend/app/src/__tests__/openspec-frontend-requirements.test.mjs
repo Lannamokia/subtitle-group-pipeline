@@ -171,7 +171,7 @@ assertMatches("routes expose required pages", files.app, [
   /path="\/projects\/:projectId\/wiki"/,
   /path="\/archive"/,
   /path="\/workload"/,
-  /path="\/admin\/storage"/,
+  /path="\/admin\/settings"/,
 ]);
 
 console.log("OpenSpec frontend requirement checks passed");

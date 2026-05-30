@@ -36,10 +36,8 @@ import {
   PanelLeftOpen,
   Menu,
   Award,
-  Database,
   Archive,
   BarChart3,
-  Megaphone,
 } from "lucide-react";
 
 interface NavItem {
@@ -64,11 +62,8 @@ const memberNavItems: NavItem[] = [
 ];
 
 const adminNavItems: NavItem[] = [
-  { path: "/templates", label: "项目模板", icon: <Layers className="w-5 h-5" />, supervisorPlus: true },
   { path: "/members", label: "成员管理", icon: <Users className="w-5 h-5" />, adminOnly: true },
-  { path: "/admin/storage", label: "存储管理", icon: <Database className="w-5 h-5" />, adminOnly: true },
-  { path: "/admin/settings", label: "系统设置", icon: <Settings className="w-5 h-5" />, adminOnly: true },
-  { path: "/admin/announcements", label: "公告管理", icon: <Megaphone className="w-5 h-5" />, adminOnly: true },
+  { path: "/admin/settings", label: "系统设置", icon: <Settings className="w-5 h-5" />, supervisorPlus: true },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
