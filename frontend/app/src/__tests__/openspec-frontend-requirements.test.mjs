@@ -43,6 +43,9 @@ const files = {
   dashboard: await source("pages/DashboardPage.tsx"),
   personalTaskBoard: await source("components/PersonalTaskBoard.tsx"),
   profile: await source("pages/ProfilePage.tsx"),
+  members: await source("pages/MemberPage.tsx"),
+  passwordRuleHint: await source("components/PasswordRuleHint.tsx"),
+  passwordPolicy: await source("lib/passwordPolicy.ts"),
   storage: await source("pages/admin/StorageBackendPage.tsx"),
   announcements: await source("pages/admin/AnnouncementAdminPage.tsx"),
   comments: await source("components/TaskCommentPanel.tsx"),
@@ -180,6 +183,20 @@ assertIncludes("profile editing", files.profile, [
   "storageApi.uploadAvatar",
   "AvatarImage",
   "nickname",
+]);
+
+assertIncludes("member password validation UX", files.members + files.login + files.passwordRuleHint + files.passwordPolicy + files.api, [
+  "PasswordRuleHint",
+  "validatePassword",
+  "PASSWORD_RULE_MESSAGE",
+  "密码强度规则",
+  "8-128 个字符",
+  "至少包含 1 个英文字母",
+  "至少包含 1 个数字",
+  "不能包含空格或换行",
+  "VALIDATION_ERROR",
+  "translateValidationMessage",
+  "toast.error(PASSWORD_RULE_MESSAGE)",
 ]);
 
 assertIncludes("storage backend configuration", files.storage, [

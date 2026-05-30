@@ -31,8 +31,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PasswordRuleHint } from "@/components/PasswordRuleHint";
 import { UserAvatar } from "@/components/UserAvatar";
 import { getErrorMessage, memberApi, roleTagApi } from "@/lib/api";
+import { PASSWORD_RULE_MESSAGE, validatePassword } from "@/lib/passwordPolicy";
 import { useAuthStore } from "@/stores/authStore";
 import type { RoleTagDefinition, User, UserRole, UserRoleTagStatus, UserStatus } from "@/types";
 import { KeyRound, Loader2, Search, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
@@ -145,6 +147,12 @@ export function MemberPage() {
   };
 
   const handleCreateMember = async () => {
+    const passwordCheck = validatePassword(memberForm.password);
+    if (!passwordCheck.valid) {
+      toast.error(PASSWORD_RULE_MESSAGE);
+      return;
+    }
+
     setIsCreating(true);
     try {
       const created = await memberApi.createMember(memberForm);
@@ -201,6 +209,12 @@ export function MemberPage() {
 
   const handleResetPassword = async () => {
     if (!passwordTarget) return;
+    const passwordCheck = validatePassword(newPassword);
+    if (!passwordCheck.valid) {
+      toast.error(PASSWORD_RULE_MESSAGE);
+      return;
+    }
+
     setIsResettingPassword(true);
     try {
       await memberApi.resetPassword(passwordTarget.id, newPassword);
@@ -446,6 +460,7 @@ export function MemberPage() {
                   value={memberForm.password}
                   onChange={(event) => setMemberForm((prev) => ({ ...prev, password: event.target.value }))}
                 />
+                <PasswordRuleHint password={memberForm.password} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="nickname">昵称</Label>
@@ -546,6 +561,7 @@ export function MemberPage() {
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
             />
+            <PasswordRuleHint password={newPassword} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setPasswordTarget(null)}>

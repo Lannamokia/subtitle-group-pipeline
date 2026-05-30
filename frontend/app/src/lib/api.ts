@@ -761,15 +761,66 @@ export function normalizeProject(raw: AnyRecord): Project {
 }
 
 // Helper for error messages
+function translateValidationMessage(path: string, message: string): string {
+  const fieldLabels: Record<string, string> = {
+    username: "用户名",
+    password: "密码",
+    newPassword: "新密码",
+    currentPassword: "当前密码",
+    qq: "QQ号",
+    qq_number: "QQ号",
+    email: "邮箱",
+    nickname: "昵称",
+    role: "系统角色",
+    status: "账号状态",
+    tagIds: "岗位标签",
+  };
+  const label = fieldLabels[path] ?? path;
+
+  if (/at least 8 characters/i.test(message)) return `${label}至少需要 8 个字符`;
+  if (/at most 128 characters/i.test(message)) return `${label}最多 128 个字符`;
+  if (/at most 30 characters/i.test(message)) return `${label}最多 30 个字符`;
+  if (/at least 3 characters/i.test(message)) return `${label}至少需要 3 个字符`;
+  if (/include at least one letter/i.test(message)) return `${label}至少需要包含 1 个英文字母`;
+  if (/include at least one number/i.test(message)) return `${label}至少需要包含 1 个数字`;
+  if (/no spaces|not contain spaces/i.test(message)) return `${label}不能包含空格或换行`;
+  if (/only contain letters, numbers, underscores, and hyphens/i.test(message)) {
+    return `${label}只能包含英文字母、数字、下划线和连字符`;
+  }
+  if (/invalid email/i.test(message)) return "邮箱格式不正确";
+  if (/invalid tag id/i.test(message)) return "岗位标签无效，请刷新后重试";
+
+  return `${label}: ${message}`;
+}
+
 export function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
-    const message = error.response?.data?.error?.message || error.response?.data?.message || error.message || '请求失败';
-    const code = error.response?.data?.error?.code;
+    const responseData = error.response?.data as AnyRecord | undefined;
+    const responseError = responseData?.error as AnyRecord | undefined;
+    const message = responseError?.message || responseData?.message || error.message || '请求失败';
+    const code = responseError?.code;
+    const details = responseError?.details;
+
+    if (code === 'VALIDATION_ERROR' && Array.isArray(details) && details.length > 0) {
+      return details
+        .map((detail) => {
+          const record = detail as AnyRecord;
+          return translateValidationMessage(String(record.path ?? "字段"), String(record.message ?? message));
+        })
+        .join("；");
+    }
+
     if (code === 'DUPLICATE_ERROR') {
       if (message.includes('Username')) return '用户名已被使用，请换一个用户名';
       if (message.includes('QQ')) return 'QQ号已被其他账号使用，请检查后重新填写';
       if (message.includes('Email')) return '邮箱已被注册，请换一个邮箱';
+      return '账号信息已存在，请检查用户名、QQ号或邮箱是否重复';
     }
+
+    if (code === 'VALIDATION_ERROR') {
+      return message === 'Validation failed' ? '提交内容不符合要求，请检查表单后重试' : message;
+    }
+
     return message;
   }
   return '未知错误';

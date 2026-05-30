@@ -877,6 +877,34 @@ describe("Auth & Registration Tests", () => {
       expect(application!.approved_at).not.toBeNull();
     });
 
+    it("should reject managed account creation with a weak password", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      const res = await post(
+        app,
+        "/api/v1/members",
+        {
+          username: "managed_weak_password",
+          password: "abcdefgh",
+          nickname: "Weak Password",
+          qq_number: "2233445566",
+          role: "member",
+          status: "active",
+        },
+        admin.token
+      );
+
+      expectError(res, 400, "VALIDATION_ERROR");
+      expect(res.body.error.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: "password",
+            message: expect.stringContaining("number"),
+          }),
+        ])
+      );
+    });
+
     it("should persist role type when creating role tags", async () => {
       const admin = await createTestUser({ role: "group_admin" });
 

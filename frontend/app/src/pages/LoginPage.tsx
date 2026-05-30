@@ -26,6 +26,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PasswordRuleHint } from "@/components/PasswordRuleHint";
+import { PASSWORD_RULE_MESSAGE, validatePassword } from "@/lib/passwordPolicy";
 import type { RoleTagDefinition } from "@/types";
 import { toast } from "sonner";
 import {
@@ -58,7 +60,7 @@ const registerSchema = z
       .min(2, "用户名至少2个字符")
       .max(20, "用户名最多20个字符")
       .regex(/^[a-zA-Z0-9_一-龥]+$/, "用户名只能包含字母、数字、下划线和中文"),
-    password: z.string().min(8, "密码至少8个字符").max(50, "密码最多50个字符"),
+    password: z.string().refine((value) => validatePassword(value).valid, PASSWORD_RULE_MESSAGE),
     confirmPassword: z.string(),
     qq: z
       .string()
@@ -80,7 +82,7 @@ const resetRequestSchema = z.object({
 const resetConfirmSchema = z
   .object({
     code: z.string().min(1, "验证码不能为空").max(16, "验证码过长"),
-    password: z.string().min(8, "密码至少8个字符").max(50, "密码最多50个字符"),
+    password: z.string().refine((value) => validatePassword(value).valid, PASSWORD_RULE_MESSAGE),
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -133,6 +135,8 @@ export function LoginPage() {
     resolver: zodResolver(resetConfirmSchema),
     defaultValues: { code: "", password: "", confirmPassword: "" },
   });
+  const registerPassword = registerForm.watch("password") ?? "";
+  const resetPassword = resetConfirmForm.watch("password") ?? "";
 
   useEffect(() => {
     roleTagApi.getAllTags()
@@ -505,6 +509,7 @@ export function LoginPage() {
                               </button>
                             </div>
                           </FormControl>
+                          <PasswordRuleHint password={registerPassword} />
                           <FormMessage />
                         </FormItem>
                       )}
@@ -659,6 +664,7 @@ export function LoginPage() {
                       <FormControl>
                         <Input type="password" placeholder="设置新密码" {...field} />
                       </FormControl>
+                      <PasswordRuleHint password={resetPassword} />
                       <FormMessage />
                     </FormItem>
                   )}

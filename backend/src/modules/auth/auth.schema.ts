@@ -10,6 +10,17 @@ const taskRoleSchema = z.enum([
   "supervisor",
 ]);
 
+const passwordPolicyMessage =
+  "Password must be 8-128 characters and include at least one letter and one number, with no spaces";
+
+const strongPasswordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(128, "Password must be at most 128 characters")
+  .regex(/[A-Za-z]/, "Password must include at least one letter")
+  .regex(/\d/, "Password must include at least one number")
+  .refine((value) => !/\s/.test(value), passwordPolicyMessage);
+
 export const registerSchema = z.object({
   username: z
     .string()
@@ -19,10 +30,7 @@ export const registerSchema = z.object({
       /^[a-zA-Z0-9_\-]+$/,
       "Username can only contain letters, numbers, underscores, and hyphens"
     ),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .max(128, "Password must be at most 128 characters"),
+  password: strongPasswordSchema,
   nickname: z.string().max(50).optional(),
   email: z.string().email("Invalid email address").optional().nullable(),
   qq_number: z.string().max(20).optional().nullable(),
@@ -44,7 +52,10 @@ export const changePasswordSchema = z.object({
   newPassword: z
     .string()
     .min(8, "New password must be at least 8 characters")
-    .max(128, "New password must be at most 128 characters"),
+    .max(128, "New password must be at most 128 characters")
+    .regex(/[A-Za-z]/, "New password must include at least one letter")
+    .regex(/\d/, "New password must include at least one number")
+    .refine((value) => !/\s/.test(value), "New password must not contain spaces"),
 });
 
 export const updateProfileSchema = z.object({
@@ -78,10 +89,7 @@ export const requestPasswordResetSchema = z.object({
 export const confirmPasswordResetSchema = z.object({
   username: z.string().min(1, "Username is required"),
   code: z.string().min(1, "Reset code is required"),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .max(128, "Password must be at most 128 characters"),
+  password: strongPasswordSchema,
 });
 
 export const createRoleTagSchema = z.object({
@@ -132,10 +140,7 @@ export const createMemberSchema = z.object({
       /^[a-zA-Z0-9_\-]+$/,
       "Username can only contain letters, numbers, underscores, and hyphens"
     ),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .max(128, "Password must be at most 128 characters"),
+  password: strongPasswordSchema,
   nickname: z.string().max(50).optional().nullable(),
   email: z.string().email("Invalid email address").optional().nullable(),
   qq_number: z.string().max(20).optional().nullable(),
@@ -146,10 +151,7 @@ export const createMemberSchema = z.object({
 });
 
 export const resetUserPasswordSchema = z.object({
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .max(128, "Password must be at most 128 characters"),
+  password: strongPasswordSchema,
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
