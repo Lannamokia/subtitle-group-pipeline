@@ -416,8 +416,9 @@ export async function downloadByToken(
 
     if (backend?.backend_type === "s3" || backend?.backend_type === "s3_compatible") {
       // For S3, redirect to presigned URL
+      const { getS3Config } = await import("../storage/storage.service");
       const { S3Adapter } = await import("../storage/adapters/s3.adapter");
-      const config = JSON.parse(backend.config);
+      const config = getS3Config(backend.config);
       const s3Adapter = new S3Adapter(config);
       const presignedUrl = await s3Adapter.getPresignedUrl(
         currentVersion.storage_path,

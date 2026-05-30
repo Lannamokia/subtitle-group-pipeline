@@ -5,6 +5,9 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  type GetObjectCommandOutput,
+  type ListObjectsV2CommandOutput,
+  type PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import crypto from "crypto";
@@ -53,6 +56,31 @@ export class S3Adapter {
     });
   }
 
+  private async send<T>(command: any): Promise<T> {
+    try {
+      return (await this.client.send(command)) as T;
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes("Resolved credential object is not valid") ||
+        message.includes("Credential") ||
+        message.includes("credentials")
+      ) {
+        throw new AppError(
+          "S3 storage credentials are invalid or incomplete",
+          "CONFIG_ERROR",
+          500
+        );
+      }
+
+      throw error;
+    }
+  }
+
   private generateKey(projectId: string, originalFilename: string): string {
     const randomName = crypto.randomBytes(16).toString("hex");
     const ext = path.extname(originalFilename) || ".bin";
@@ -76,7 +104,7 @@ export class S3Adapter {
       ContentLength: buffer.length,
     });
 
-    const result = await this.client.send(command);
+    const result = await this.send<PutObjectCommandOutput>(command);
 
     return {
       key,
@@ -92,7 +120,7 @@ export class S3Adapter {
       Key: key,
     });
 
-    const result = await this.client.send(command);
+    const result = await this.send<GetObjectCommandOutput>(command);
 
     if (!result.Body) {
       throw new AppError("File not found in S3", "NOT_FOUND", 404);
@@ -115,7 +143,7 @@ export class S3Adapter {
       Key: key,
     });
 
-    await this.client.send(command);
+    await this.send(command);
   }
 
   async exists(key: string): Promise<boolean> {
@@ -124,7 +152,7 @@ export class S3Adapter {
         Bucket: this.config.bucket,
         Key: key,
       });
-      await this.client.send(command);
+      await this.send(command);
       return true;
     } catch {
       return false;
@@ -152,7 +180,7 @@ export class S3Adapter {
         MaxKeys: 1000,
       });
 
-      const result = await this.client.send(command);
+      const result = await this.send<ListObjectsV2CommandOutput>(command);
 
       if (result.Contents) {
         for (const obj of result.Contents) {

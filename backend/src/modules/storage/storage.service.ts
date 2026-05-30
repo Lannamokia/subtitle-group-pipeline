@@ -13,6 +13,8 @@ import type {
 const adapterCache = new Map<string, LocalAdapter | S3Adapter>();
 
 type StorageBackendRecord = Awaited<ReturnType<typeof prisma.storageBackend.findFirst>>;
+type StorageBackendType = "local" | "s3" | "s3_compatible";
+type StorageConfig = Record<string, unknown>;
 
 function toNumber(value: bigint | number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
@@ -25,6 +27,104 @@ export function serializeStorageBackend<T extends NonNullable<StorageBackendReco
     quota_bytes: toNumber(backend.quota_bytes),
     used_bytes: toNumber(backend.used_bytes) ?? 0,
   };
+}
+
+function parseStorageConfig(config: string): StorageConfig {
+  try {
+    const parsed = JSON.parse(config) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Config must be a JSON object");
+    }
+    return parsed as StorageConfig;
+  } catch {
+    throw new AppError("Config must be valid JSON", "VALIDATION_ERROR", 400);
+  }
+}
+
+function readString(config: StorageConfig, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = config[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function readOptionalString(config: StorageConfig, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = config[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function readBoolean(config: StorageConfig, keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = config[key];
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
+export function normalizeStorageConfig(
+  backendType: StorageBackendType,
+  configString: string,
+  previousConfigString?: string
+): string {
+  const config = parseStorageConfig(configString);
+  const previousConfig = previousConfigString ? parseStorageConfig(previousConfigString) : undefined;
+
+  if (backendType === "local") {
+    return JSON.stringify({
+      ...config,
+      basePath:
+        readOptionalString(config, ["basePath", "base_path", "rootPath", "root_path", "endpoint"]) ??
+        readOptionalString(previousConfig ?? {}, ["basePath", "base_path", "rootPath", "root_path", "endpoint"]) ??
+        "./uploads",
+    });
+  }
+
+  const endpoint = readOptionalString(config, ["endpoint"]) ?? readOptionalString(previousConfig ?? {}, ["endpoint"]);
+  const region = readString(config, ["region"]) ?? readString(previousConfig ?? {}, ["region"]);
+  const bucket = readString(config, ["bucket"]) ?? readString(previousConfig ?? {}, ["bucket"]);
+  const accessKeyId =
+    readString(config, ["accessKeyId", "accessKey", "access_key"]) ??
+    readString(previousConfig ?? {}, ["accessKeyId", "accessKey", "access_key"]);
+  const secretAccessKey =
+    readString(config, ["secretAccessKey", "secretKey", "secret_key"]) ??
+    readString(previousConfig ?? {}, ["secretAccessKey", "secretKey", "secret_key"]);
+
+  const missing: string[] = [];
+  if (!region) missing.push("region");
+  if (!bucket) missing.push("bucket");
+  if (!accessKeyId) missing.push("accessKeyId");
+  if (!secretAccessKey) missing.push("secretAccessKey");
+
+  if (missing.length > 0) {
+    throw new AppError(
+      `S3 config is missing required field(s): ${missing.join(", ")}`,
+      "VALIDATION_ERROR",
+      400
+    );
+  }
+
+  return JSON.stringify({
+    endpoint,
+    region,
+    bucket,
+    accessKeyId,
+    secretAccessKey,
+    forcePathStyle: readBoolean(config, ["forcePathStyle", "force_path_style"]) ?? readBoolean(previousConfig ?? {}, ["forcePathStyle", "force_path_style"]),
+    sslEnabled: readBoolean(config, ["sslEnabled", "ssl_enabled"]) ?? readBoolean(previousConfig ?? {}, ["sslEnabled", "ssl_enabled"]),
+  });
+}
+
+export function getS3Config(configString: string): S3Config {
+  return JSON.parse(normalizeStorageConfig("s3", configString)) as S3Config;
 }
 
 export function getAdapterForBackend(backendId: string): LocalAdapter | S3Adapter {
@@ -59,7 +159,7 @@ export async function initAdapterForBackend(backendId: string): Promise<LocalAda
   if (backend.backend_type === "local") {
     adapter = new LocalAdapter();
   } else if (backend.backend_type === "s3" || backend.backend_type === "s3_compatible") {
-    const config = JSON.parse(backend.config) as S3Config;
+    const config = getS3Config(backend.config);
     adapter = new S3Adapter(config);
   } else {
     throw new AppError("Unknown storage backend type", "CONFIG_ERROR", 500);
@@ -200,12 +300,7 @@ export async function getStorageBackends(query: StorageQueryInput) {
 }
 
 export async function createStorageBackend(data: CreateStorageBackendInput) {
-  // Validate config is valid JSON
-  try {
-    JSON.parse(data.config);
-  } catch {
-    throw new AppError("Config must be valid JSON", "VALIDATION_ERROR", 400);
-  }
+  const config = normalizeStorageConfig(data.backend_type as StorageBackendType, data.config);
 
   if (data.is_default) {
     await prisma.storageBackend.updateMany({
@@ -217,7 +312,7 @@ export async function createStorageBackend(data: CreateStorageBackendInput) {
     data: {
       name: data.name,
       backend_type: data.backend_type,
-      config: data.config,
+      config,
       is_default: data.is_default,
       quota_bytes: data.quota_bytes === null || data.quota_bytes === undefined
         ? data.quota_bytes
@@ -241,12 +336,10 @@ export async function updateStorageBackend(
   }
 
   // Validate config is valid JSON if provided
+  let config = data.config;
   if (data.config) {
-    try {
-      JSON.parse(data.config);
-    } catch {
-      throw new AppError("Config must be valid JSON", "VALIDATION_ERROR", 400);
-    }
+    const backendType = (data.backend_type ?? backend.backend_type) as StorageBackendType;
+    config = normalizeStorageConfig(backendType, data.config, backend.config);
   }
 
   if (data.is_default) {
@@ -260,7 +353,7 @@ export async function updateStorageBackend(
     data: {
       name: data.name,
       backend_type: data.backend_type,
-      config: data.config,
+      config,
       is_default: data.is_default,
       quota_bytes: data.quota_bytes === null || data.quota_bytes === undefined
         ? data.quota_bytes

@@ -213,6 +213,59 @@ describe("User Profile & Storage Tests", () => {
       expect(res.body.data.backend_type).toBe("local");
     });
 
+    it("should normalize S3 storage config aliases on create", async () => {
+      const { token } = await createTestUser({ role: "super_admin" });
+
+      const res = await post(
+        app,
+        "/api/v1/storage/backends",
+        {
+          name: "S3 Storage",
+          backend_type: "s3",
+          config: JSON.stringify({
+            endpoint: "https://s3.example.com",
+            bucket: "subtitle-files",
+            region: "us-east-1",
+            accessKey: "access-key",
+            secretKey: "secret-key",
+          }),
+          is_default: false,
+        },
+        token
+      );
+
+      expectSuccess(res, 201);
+
+      const config = JSON.parse(res.body.data.config);
+      expect(config.accessKeyId).toBe("access-key");
+      expect(config.secretAccessKey).toBe("secret-key");
+      expect(config.accessKey).toBeUndefined();
+      expect(config.secretKey).toBeUndefined();
+    });
+
+    it("should reject incomplete S3 storage config before upload", async () => {
+      const { token } = await createTestUser({ role: "super_admin" });
+
+      const res = await post(
+        app,
+        "/api/v1/storage/backends",
+        {
+          name: "Broken S3 Storage",
+          backend_type: "s3",
+          config: JSON.stringify({
+            endpoint: "https://s3.example.com",
+            bucket: "subtitle-files",
+            region: "us-east-1",
+          }),
+        },
+        token
+      );
+
+      expectError(res, 400, "VALIDATION_ERROR");
+      expect(res.body.error.message).toContain("accessKeyId");
+      expect(res.body.error.message).toContain("secretAccessKey");
+    });
+
     it("should enforce quota on storage backend", async () => {
       const backend = await createTestStorageBackend({
         quota_bytes: 1000,
@@ -288,6 +341,44 @@ describe("User Profile & Storage Tests", () => {
       expectSuccess(res, 200);
       expect(res.body.data.name).toBe("New Name");
       expect(res.body.data.is_active).toBe(false);
+    });
+
+    it("should preserve S3 secret when update payload leaves it blank", async () => {
+      const { token } = await createTestUser({ role: "super_admin" });
+      const backend = await createTestStorageBackend({
+        backend_type: "s3",
+        config: {
+          endpoint: "https://s3.example.com",
+          bucket: "old-bucket",
+          region: "us-east-1",
+          accessKeyId: "old-access-key",
+          secretAccessKey: "old-secret-key",
+        },
+      });
+
+      const res = await put(
+        app,
+        `/api/v1/storage/backends/${backend.id}`,
+        {
+          backend_type: "s3",
+          config: JSON.stringify({
+            endpoint: "https://s3.example.com",
+            bucket: "new-bucket",
+            region: "us-west-2",
+            accessKey: "new-access-key",
+            secretKey: "",
+          }),
+        },
+        token
+      );
+
+      expectSuccess(res, 200);
+
+      const config = JSON.parse(res.body.data.config);
+      expect(config.bucket).toBe("new-bucket");
+      expect(config.region).toBe("us-west-2");
+      expect(config.accessKeyId).toBe("new-access-key");
+      expect(config.secretAccessKey).toBe("old-secret-key");
     });
 
     it("should reject invalid JSON config", async () => {

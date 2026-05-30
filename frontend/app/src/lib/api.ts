@@ -146,8 +146,8 @@ export function normalizeStorageBackend(raw: AnyRecord): StorageBackend {
     bucket: raw.bucket ?? config.bucket,
     rootPath: raw.rootPath ?? raw.root_path ?? config.rootPath ?? config.root_path,
     region: raw.region ?? config.region,
-    accessKey: raw.accessKey ?? raw.access_key ?? config.accessKey ?? config.access_key,
-    secretKey: raw.secretKey ?? raw.secret_key ?? config.secretKey ?? config.secret_key,
+    accessKey: raw.accessKey ?? raw.access_key ?? config.accessKeyId ?? config.accessKey ?? config.access_key,
+    secretKey: raw.secretKey ?? raw.secret_key ?? config.secretAccessKey ?? config.secretKey ?? config.secret_key,
     quotaBytes: raw.quotaBytes ?? raw.quota_bytes ?? 0,
     usedBytes: raw.usedBytes ?? raw.used_bytes ?? 0,
     isDefault: raw.isDefault ?? raw.is_default ?? false,
@@ -159,14 +159,19 @@ export function normalizeStorageBackend(raw: AnyRecord): StorageBackend {
 }
 
 function toStorageBackendPayload(data: Partial<StorageBackendInput>) {
-  const config = {
-    endpoint: data.endpoint,
-    bucket: data.bucket,
-    rootPath: data.rootPath,
-    region: data.region,
-    accessKey: data.accessKey,
-    secretKey: data.secretKey,
-  };
+  const config: AnyRecord = data.type === "s3"
+    ? {
+        endpoint: data.endpoint,
+        bucket: data.bucket,
+        region: data.region,
+        accessKeyId: data.accessKey,
+        secretAccessKey: data.secretKey || undefined,
+      }
+    : {
+        endpoint: data.endpoint,
+        rootPath: data.rootPath,
+        basePath: data.rootPath || data.endpoint,
+      };
 
   return {
     name: data.name,
