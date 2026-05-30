@@ -67,6 +67,10 @@ const projectFormSchema = z.object({
 
 type ProjectFormValues = z.infer<typeof projectFormSchema>;
 
+function isUuid(value: string | undefined): value is string {
+  return Boolean(value?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
+}
+
 const defaultValues: ProjectFormValues = {
   name: "",
   type: "anime",
@@ -81,7 +85,8 @@ const defaultValues: ProjectFormValues = {
 export function ProjectCreatePage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const preselectedTemplateId = (location.state as { templateId?: string })?.templateId;
+  const rawPreselectedTemplateId = (location.state as { templateId?: string })?.templateId;
+  const preselectedTemplateId = isUuid(rawPreselectedTemplateId) ? rawPreselectedTemplateId : undefined;
 
   const [currentStep, setCurrentStep] = useState(preselectedTemplateId ? 2 : 1);
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);

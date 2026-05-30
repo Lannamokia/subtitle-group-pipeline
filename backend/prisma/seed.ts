@@ -3,6 +3,9 @@ import { hashPassword } from "../src/utils/password";
 
 const prisma = new PrismaClient();
 
+const DEFAULT_TEMPLATE_ID = "11111111-1111-4111-8111-111111111111";
+const DEFAULT_STORAGE_BACKEND_ID = "22222222-2222-4222-8222-222222222222";
+
 async function main(): Promise<void> {
   console.log("Starting seed...");
 
@@ -102,21 +105,20 @@ async function main(): Promise<void> {
 
   // 7. Create sample project template (standard anime template)
   const animeTemplate = await prisma.projectTemplate.upsert({
-    where: { id: "default-anime" },
+    where: { id: DEFAULT_TEMPLATE_ID },
     update: {},
     create: {
-      id: "default-anime",
+      id: DEFAULT_TEMPLATE_ID,
       name: "Standard Anime Template",
       description: "Default template for anime subtitle projects with standard roles and workflows.",
       project_type: ProjectType.anime,
       roles: JSON.stringify([
-        { role: "source", required: true, description: "Sources raw video/audio/subtitle materials" },
-        { role: "timing", required: true, description: "Times subtitles to match audio/video" },
-        { role: "translation", required: true, description: "Translates source language to target language" },
-        { role: "post_production", required: false, description: "Styles and positions subtitles (typesetting)" },
-        { role: "encoding", required: false, description: "Encodes final video with subtitles" },
-        { role: "release", required: false, description: "Distributes finished releases" },
-        { role: "supervisor", required: true, description: "Manages project timeline and quality" },
+        { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+        { role: "timing", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+        { role: "translation", enabled: true, slotCount: 3, assignmentStrategy: "open_claim", maxSegmentLength: 300 },
+        { role: "post_production", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+        { role: "encoding", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+        { role: "release", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
       ]),
       upload_policy: JSON.stringify({
         allowedTypes: [
@@ -194,10 +196,10 @@ async function main(): Promise<void> {
 
   // 8. Create default local storage backend
   const storageBackend = await prisma.storageBackend.upsert({
-    where: { id: "default-local" },
+    where: { id: DEFAULT_STORAGE_BACKEND_ID },
     update: {},
     create: {
-      id: "default-local",
+      id: DEFAULT_STORAGE_BACKEND_ID,
       name: "Default Local Storage",
       backend_type: "local",
       config: JSON.stringify({
