@@ -707,6 +707,18 @@ export const roleTagApi = {
       })
     ),
 
+  resetMyTagStatuses: (tagIds: string[]) =>
+    api.post<ApiResponse<{ resetCount: number; statuses: unknown[] }>>('/auth/role-tags/my-status/reset', { tagIds })
+      .then((response) =>
+        response.data.data.statuses.map((item) => {
+          const raw = item as AnyRecord;
+          return {
+            tag: normalizeRoleTag(raw.tag as AnyRecord),
+            status: raw.status,
+          } as UserRoleTagStatus;
+        })
+      ),
+
   applyForTag: (tagId: string, reason: string) =>
     api.post<ApiResponse<RoleTagApplication>>('/auth/tag-applications', { tag_id: tagId, reason }).then(extractData),
 
@@ -1206,6 +1218,22 @@ export const memberApi = {
 
   resetPassword: (id: string, password: string) =>
     api.put<ApiResponse<void>>(`/members/${id}/password`, { password }).then(extractData),
+
+  getMemberTagStatuses: (id: string) =>
+    api.get<ApiResponse<unknown[]>>(`/members/${id}/tags/statuses`).then((response) =>
+      response.data.data.map((item) => {
+        const raw = item as AnyRecord;
+        return {
+          tag: normalizeRoleTag(raw.tag as AnyRecord),
+          status: raw.status,
+        } as UserRoleTagStatus;
+      })
+    ),
+
+  resetMemberTagStatuses: (id: string, tagIds: string[]) =>
+    api.post<ApiResponse<{ items: unknown[] }>>(`/members/${id}/tags/reset`, { tagIds }).then((response) =>
+      response.data.data.items.map((user) => normalizeUser(user as AnyRecord))
+    ),
 
   deleteMember: (id: string) =>
     api.delete<ApiResponse<void>>(`/members/${id}`).then(extractData),

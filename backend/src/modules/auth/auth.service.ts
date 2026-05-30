@@ -14,6 +14,7 @@ import type {
   UpdateRoleTagInput,
   CreateTagApplicationInput,
   ReviewTagApplicationInput,
+  ResetTagStatusInput,
   UpdateUserRoleInput,
   UpdateUserStatusInput,
   CreateMemberInput,
@@ -704,6 +705,19 @@ export async function getMyRoleTagStatuses(userId: string) {
   });
 }
 
+export async function getMemberRoleTagStatuses(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  return getMyRoleTagStatuses(userId);
+}
+
 export async function createTagApplication(userId: string, data: CreateTagApplicationInput) {
   const existing = await prisma.tagApplication.findUnique({
     where: { user_id_tag_id: { user_id: userId, tag_id: data.tag_id } },
@@ -759,6 +773,40 @@ export async function reviewTagApplication(adminId: string, data: ReviewTagAppli
       user: { select: { id: true, username: true, nickname: true } },
     },
   });
+}
+
+export async function resetUserTagStatuses(userId: string, data: ResetTagStatusInput) {
+  const result = await prisma.tagApplication.deleteMany({
+    where: {
+      user_id: userId,
+      tag_id: { in: data.tagIds },
+    },
+  });
+
+  return {
+    resetCount: result.count,
+    statuses: await getMyRoleTagStatuses(userId),
+  };
+}
+
+export async function resetMemberTagStatuses(userId: string, data: ResetTagStatusInput) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  await prisma.tagApplication.deleteMany({
+    where: {
+      user_id: userId,
+      tag_id: { in: data.tagIds },
+    },
+  });
+
+  return getAllUsers();
 }
 
 const userSelect = {

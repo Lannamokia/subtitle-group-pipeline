@@ -102,6 +102,10 @@ export const reviewTagApplicationSchema = z.object({
   rejection_reason: z.string().max(500).optional(),
 });
 
+export const resetTagStatusSchema = z.object({
+  tagIds: z.array(z.string().uuid("Invalid tag ID")).min(1, "At least one tag ID is required"),
+});
+
 export const updateUserRoleSchema = z.object({
   role: z.enum(["super_admin", "group_admin", "supervisor", "member"]),
 });
@@ -151,6 +155,7 @@ export type CreateRoleTagInput = z.infer<typeof createRoleTagSchema>;
 export type UpdateRoleTagInput = z.infer<typeof updateRoleTagSchema>;
 export type CreateTagApplicationInput = z.infer<typeof createTagApplicationSchema>;
 export type ReviewTagApplicationInput = z.infer<typeof reviewTagApplicationSchema>;
+export type ResetTagStatusInput = z.infer<typeof resetTagStatusSchema>;
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;
 export type CreateMemberInput = z.infer<typeof createMemberSchema>;

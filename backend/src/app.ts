@@ -33,6 +33,7 @@ import {
   updateUserStatusSchema,
   createMemberSchema,
   resetUserPasswordSchema,
+  resetTagStatusSchema,
 } from "./modules/auth/auth.schema";
 
 export function createApp(options: { databaseReady?: boolean } = {}): Application {
@@ -163,12 +164,25 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
     requireRole("super_admin", "group_admin"),
     authController.approveUserVerification
   );
+  app.get(
+    `${apiPrefix}/members/:id/tags/statuses`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    authController.getMemberRoleTagStatuses
+  );
   app.put(
     `${apiPrefix}/members/:id/password`,
     authenticate,
     requireRole("super_admin", "group_admin"),
     validateBody(resetUserPasswordSchema),
     authController.resetUserPassword
+  );
+  app.post(
+    `${apiPrefix}/members/:id/tags/reset`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    validateBody(resetTagStatusSchema),
+    authController.resetMemberTagStatuses
   );
   app.delete(
     `${apiPrefix}/members/:id`,

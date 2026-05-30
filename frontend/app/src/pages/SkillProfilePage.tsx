@@ -7,6 +7,7 @@ import { roleTagApi, getErrorMessage } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -72,6 +73,8 @@ export function SkillProfilePage() {
   const [adminView, setAdminView] = useState(false);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [reasonApplication, setReasonApplication] = useState<RoleTagApplication | null>(null);
+  const [selectedResetTagIds, setSelectedResetTagIds] = useState<string[]>([]);
+  const [isResettingTags, setIsResettingTags] = useState(false);
 
   const form = useForm<ApplyFormData>({
     resolver: zodResolver(applySchema),
@@ -87,6 +90,11 @@ export function SkillProfilePage() {
       ]);
       setAllTags(tagsData);
       setMyStatuses(statusesData);
+      setSelectedResetTagIds((prev) =>
+        prev.filter((tagId) =>
+          statusesData.some((status) => status.tag.id === tagId && status.status !== "not_applied")
+        )
+      );
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -151,6 +159,32 @@ export function SkillProfilePage() {
     return status?.status || "not_applied";
   };
 
+  const resettableStatuses = myStatuses.filter((item) => item.status !== "not_applied");
+
+  const toggleResetTag = (tagId: string, checked: boolean) => {
+    setSelectedResetTagIds((prev) =>
+      checked ? [...prev, tagId] : prev.filter((id) => id !== tagId)
+    );
+  };
+
+  const handleResetMyTags = async () => {
+    if (selectedResetTagIds.length === 0) {
+      toast.error("请先选择要重置的标签");
+      return;
+    }
+    setIsResettingTags(true);
+    try {
+      const statuses = await roleTagApi.resetMyTagStatuses(selectedResetTagIds);
+      setMyStatuses(statuses);
+      setSelectedResetTagIds([]);
+      toast.success("标签状态已重置");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsResettingTags(false);
+    }
+  };
+
   return (
     <div className="max-w-full md:max-w-4xl mx-auto space-y-6 px-0">
       <div className="flex items-center justify-between">
@@ -195,21 +229,45 @@ export function SkillProfilePage() {
                   <p className="text-xs text-gray-400 mt-1">点击下方标签进行申请</p>
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {myStatuses.map((item) => {
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {myStatuses.map((item) => {
                     const config = STATUS_CONFIG[item.status];
+                    const canReset = item.status !== "not_applied";
                     return (
-                      <Badge
-                        key={item.tag.id}
-                        variant="outline"
-                        className={`px-3 py-1.5 gap-1 ${config.color}`}
-                      >
-                        {config.icon}
-                        {item.tag.name}
-                        <span className="text-[10px] opacity-80">{config.label}</span>
-                      </Badge>
+                      <label key={item.tag.id} className="inline-flex items-center gap-2">
+                        {canReset && (
+                          <Checkbox
+                            checked={selectedResetTagIds.includes(item.tag.id)}
+                            onCheckedChange={(checked) => toggleResetTag(item.tag.id, checked === true)}
+                          />
+                        )}
+                        <Badge
+                          variant="outline"
+                          className={`px-3 py-1.5 gap-1 ${config.color}`}
+                        >
+                          {config.icon}
+                          {item.tag.name}
+                          <span className="text-[10px] opacity-80">{config.label}</span>
+                        </Badge>
+                      </label>
                     );
-                  })}
+                    })}
+                  </div>
+                  {resettableStatuses.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={selectedResetTagIds.length === 0 || isResettingTags}
+                        onClick={handleResetMyTags}
+                      >
+                        {isResettingTags && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+                        重置所选标签
+                      </Button>
+                      <p className="text-xs text-gray-500">重置后标签回到未申请状态，可重新提交申请。</p>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

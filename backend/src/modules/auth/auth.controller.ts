@@ -216,6 +216,19 @@ export async function getMyRoleTagStatuses(
   }
 }
 
+export async function getMemberRoleTagStatuses(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.getMemberRoleTagStatuses(String(req.params.id));
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function createTagApplication(
   req: AuthenticatedRequest,
   res: Response,
@@ -263,6 +276,32 @@ export async function reviewTagApplication(
   try {
     const result = await authService.reviewTagApplication(req.user!.id, req.body);
     successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function resetMyTagStatuses(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.resetUserTagStatuses(req.user!.id, req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function resetMemberTagStatuses(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.resetMemberTagStatuses(String(req.params.id), req.body);
+    successResponse(res, { items: result });
   } catch (error) {
     next(error);
   }

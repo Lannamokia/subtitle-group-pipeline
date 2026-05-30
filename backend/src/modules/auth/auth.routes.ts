@@ -15,6 +15,7 @@ import {
   updateRoleTagSchema,
   createTagApplicationSchema,
   reviewTagApplicationSchema,
+  resetTagStatusSchema,
   updateUserRoleSchema,
   updateUserStatusSchema,
   createMemberSchema,
@@ -138,6 +139,7 @@ router.post("/tag-applications", authenticate, validateBody(createTagApplication
 router.get("/tag-applications/my", authenticate, controller.getMyTagApplications);
 router.get("/tag-applications/pending", authenticate, requireRole("super_admin", "group_admin"), controller.getPendingTagApplications);
 router.post("/tag-applications/review", authenticate, requireRole("super_admin", "group_admin"), validateBody(reviewTagApplicationSchema), controller.reviewTagApplication);
+router.post("/role-tags/my-status/reset", authenticate, validateBody(resetTagStatusSchema), controller.resetMyTagStatuses);
 
 // Member management routes (compatibility for /members and /users)
 router.get("/members", authenticate, controller.getAllUsers);
@@ -146,6 +148,8 @@ router.post("/members", authenticate, requireRole("super_admin", "group_admin", 
 router.put("/members/:id/role", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserRoleSchema), controller.updateUserRole);
 router.put("/members/:id/status", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserStatusSchema), controller.updateUserStatus);
 router.post("/members/:id/verify", authenticate, requireRole("super_admin", "group_admin"), controller.approveUserVerification);
+router.get("/members/:id/tags/statuses", authenticate, requireRole("super_admin", "group_admin"), controller.getMemberRoleTagStatuses);
+router.post("/members/:id/tags/reset", authenticate, requireRole("super_admin", "group_admin"), validateBody(resetTagStatusSchema), controller.resetMemberTagStatuses);
 router.put("/members/:id/password", authenticate, requireRole("super_admin", "group_admin"), validateBody(resetUserPasswordSchema), controller.resetUserPassword);
 router.delete("/members/:id", authenticate, requireRole("super_admin", "group_admin"), controller.deleteMember);
 

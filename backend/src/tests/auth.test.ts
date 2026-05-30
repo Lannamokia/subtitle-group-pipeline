@@ -13,7 +13,7 @@ describe("Auth & Registration Tests", () => {
   let app: Application;
 
   beforeAll(() => {
-    app = createApp();
+    app = createApp({ databaseReady: true });
   });
 
   beforeEach(async () => {
@@ -460,6 +460,118 @@ describe("Auth & Registration Tests", () => {
           },
         })
       ).rejects.toThrow();
+    });
+
+    it("should allow users to reset selected tag application statuses", async () => {
+      const { user, token } = await createTestUser();
+      const tagA = await prisma.roleTag.create({
+        data: { name: unique("ResetA"), role_type: "translation" },
+      });
+      const tagB = await prisma.roleTag.create({
+        data: { name: unique("ResetB"), role_type: "timing" },
+      });
+
+      await prisma.tagApplication.createMany({
+        data: [
+          {
+            user_id: user.id,
+            tag_id: tagA.id,
+            reason: "Approved",
+            approved: true,
+            approved_by: user.id,
+            approved_at: new Date(),
+          },
+          {
+            user_id: user.id,
+            tag_id: tagB.id,
+            reason: "Pending",
+          },
+        ],
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/auth/role-tags/my-status/reset",
+        { tagIds: [tagA.id] },
+        token
+      );
+
+      expectSuccess(res, 200);
+      await expect(
+        prisma.tagApplication.findUnique({
+          where: { user_id_tag_id: { user_id: user.id, tag_id: tagA.id } },
+        })
+      ).resolves.toBeNull();
+      await expect(
+        prisma.tagApplication.findUnique({
+          where: { user_id_tag_id: { user_id: user.id, tag_id: tagB.id } },
+        })
+      ).resolves.toBeDefined();
+    });
+
+    it("should allow admins to reset another user's selected tag statuses", async () => {
+      const { user, token: userToken } = await createTestUser();
+      const { token: adminToken } = await createTestUser({ role: "group_admin" });
+      const tag = await prisma.roleTag.create({
+        data: { name: unique("AdminReset"), role_type: "encoding" },
+      });
+      await prisma.tagApplication.create({
+        data: {
+          user_id: user.id,
+          tag_id: tag.id,
+          reason: "Approved",
+          approved: true,
+          approved_by: user.id,
+          approved_at: new Date(),
+        },
+      });
+
+      const denied = await post(
+        app,
+        `/api/v1/auth/members/${user.id}/tags/reset`,
+        { tagIds: [tag.id] },
+        userToken
+      );
+      expectError(denied, 403, "FORBIDDEN");
+
+      const res = await post(
+        app,
+        `/api/v1/auth/members/${user.id}/tags/reset`,
+        { tagIds: [tag.id] },
+        adminToken
+      );
+
+      expectSuccess(res, 200);
+      await expect(
+        prisma.tagApplication.findUnique({
+          where: { user_id_tag_id: { user_id: user.id, tag_id: tag.id } },
+        })
+      ).resolves.toBeNull();
+      const updatedUser = res.body.data.items.find((item: { id: string }) => item.id === user.id);
+      expect(updatedUser.roleTags).toHaveLength(0);
+    });
+
+    it("should allow admins to inspect another user's tag statuses before reset", async () => {
+      const { user, token: userToken } = await createTestUser();
+      const { token: adminToken } = await createTestUser({ role: "group_admin" });
+      const tag = await prisma.roleTag.create({
+        data: { name: unique("InspectStatus"), role_type: "translation" },
+      });
+      await prisma.tagApplication.create({
+        data: {
+          user_id: user.id,
+          tag_id: tag.id,
+          reason: "Pending",
+        },
+      });
+
+      const denied = await get(app, `/api/v1/auth/members/${user.id}/tags/statuses`, userToken);
+      expectError(denied, 403, "FORBIDDEN");
+
+      const res = await get(app, `/api/v1/auth/members/${user.id}/tags/statuses`, adminToken);
+      expectSuccess(res, 200);
+      const status = res.body.data.find((item: { tag: { id: string } }) => item.tag.id === tag.id);
+      expect(status.status).toBe("pending");
     });
   });
 

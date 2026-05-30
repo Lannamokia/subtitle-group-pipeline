@@ -34,8 +34,8 @@ import {
 import { UserAvatar } from "@/components/UserAvatar";
 import { getErrorMessage, memberApi, roleTagApi } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
-import type { RoleTagDefinition, User, UserRole, UserStatus } from "@/types";
-import { KeyRound, Loader2, Search, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import type { RoleTagDefinition, User, UserRole, UserRoleTagStatus, UserStatus } from "@/types";
+import { KeyRound, Loader2, Search, ShieldCheck, Tags, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 const roleLabels: Record<UserRole, string> = {
@@ -49,6 +49,13 @@ const statusLabels: Record<UserStatus, string> = {
   active: "正常",
   pending_verification: "待验证",
   disabled: "已禁用",
+};
+
+const tagStatusLabels: Record<UserRoleTagStatus["status"], string> = {
+  not_applied: "未申请",
+  pending: "待审核",
+  granted: "已授予",
+  rejected: "已拒绝",
 };
 
 interface MemberFormState {
@@ -83,6 +90,11 @@ export function MemberPage() {
   const [passwordTarget, setPasswordTarget] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [tagResetTarget, setTagResetTarget] = useState<User | null>(null);
+  const [tagResetStatuses, setTagResetStatuses] = useState<UserRoleTagStatus[]>([]);
+  const [isLoadingTagStatuses, setIsLoadingTagStatuses] = useState(false);
+  const [selectedTagResetIds, setSelectedTagResetIds] = useState<string[]>([]);
+  const [isResettingTags, setIsResettingTags] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
   const fetchData = async () => {
@@ -215,6 +227,48 @@ export function MemberPage() {
     }
   };
 
+  const openTagResetDialog = async (user: User) => {
+    setTagResetTarget(user);
+    setTagResetStatuses([]);
+    setSelectedTagResetIds([]);
+    setIsLoadingTagStatuses(true);
+    try {
+      const statuses = await memberApi.getMemberTagStatuses(user.id);
+      setTagResetStatuses(statuses);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      setTagResetTarget(null);
+    } finally {
+      setIsLoadingTagStatuses(false);
+    }
+  };
+
+  const toggleTagReset = (tagId: string, checked: boolean) => {
+    setSelectedTagResetIds((prev) =>
+      checked ? [...prev, tagId] : prev.filter((id) => id !== tagId)
+    );
+  };
+
+  const handleResetMemberTags = async () => {
+    if (!tagResetTarget || selectedTagResetIds.length === 0) {
+      toast.error("请先选择要重置的标签");
+      return;
+    }
+    setIsResettingTags(true);
+    try {
+      const updatedUsers = await memberApi.resetMemberTagStatuses(tagResetTarget.id, selectedTagResetIds);
+      setUsers(updatedUsers);
+      setTagResetTarget(null);
+      setTagResetStatuses([]);
+      setSelectedTagResetIds([]);
+      toast.success("成员标签状态已重置");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsResettingTags(false);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -306,6 +360,15 @@ export function MemberPage() {
                         {user.status === "disabled" ? "启用" : "禁用"}
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openTagResetDialog(user)}
+                      title="管理标签状态"
+                    >
+                      <Tags className="h-4 w-4 text-gray-500" />
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -491,6 +554,69 @@ export function MemberPage() {
             <Button onClick={handleResetPassword} disabled={isResettingPassword}>
               {isResettingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               保存密码
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(tagResetTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTagResetTarget(null);
+            setTagResetStatuses([]);
+            setSelectedTagResetIds([]);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>管理标签状态</DialogTitle>
+            <DialogDescription>
+              将 {tagResetTarget?.username} 的一个或多个标签重置为未申请状态。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label>可重置标签</Label>
+            <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto rounded-md border p-3 sm:grid-cols-2">
+              {isLoadingTagStatuses ? (
+                <div className="col-span-full flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  正在加载标签状态...
+                </div>
+              ) : tagResetStatuses.some((item) => item.status !== "not_applied") ? (
+                tagResetStatuses
+                  .filter((item) => item.status !== "not_applied")
+                  .map((item) => (
+                  <label key={item.tag.id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={selectedTagResetIds.includes(item.tag.id)}
+                      onCheckedChange={(checked) => toggleTagReset(item.tag.id, checked === true)}
+                    />
+                    <span>{item.tag.name}</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {tagStatusLabels[item.status]}
+                    </Badge>
+                  </label>
+                  ))
+              ) : (
+                <p className="text-sm text-gray-500">该成员当前没有待审核、已授予或已拒绝的标签。</p>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              重置会删除对应标签申请记录；如果成员需要该标签，需要重新申请或由管理员重新授予。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setTagResetTarget(null)}>
+              取消
+            </Button>
+            <Button
+              onClick={handleResetMemberTags}
+              disabled={selectedTagResetIds.length === 0 || isResettingTags}
+            >
+              {isResettingTags && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              重置所选
             </Button>
           </DialogFooter>
         </DialogContent>
