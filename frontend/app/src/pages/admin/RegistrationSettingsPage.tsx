@@ -113,6 +113,7 @@ export function RegistrationSettingsPage() {
   const [editingTag, setEditingTag] = useState<RoleTagDefinition | null>(null);
   const [isSubmittingTag, setIsSubmittingTag] = useState(false);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [reasonApplication, setReasonApplication] = useState<RoleTagApplication | null>(null);
   const [activeTab, setActiveTab] = useState<"settings" | "tags" | "applications">("settings");
 
   const form = useForm<SettingsFormData>({
@@ -541,7 +542,15 @@ export function RegistrationSettingsPage() {
                           <Badge variant="outline">{app.tag.name}</Badge>
                         </TableCell>
                         <TableCell>
-                          <p className="text-sm text-gray-600 max-w-xs truncate">{app.reason}</p>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 px-2 text-primary-600 hover:text-primary-700"
+                            onClick={() => setReasonApplication(app)}
+                          >
+                            <FileText className="w-3.5 h-3.5 mr-1.5" />
+                            查看理由
+                          </Button>
                         </TableCell>
                         <TableCell>
                           <span className="text-sm text-gray-500">
@@ -669,6 +678,25 @@ export function RegistrationSettingsPage() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!reasonApplication} onOpenChange={(open) => !open && setReasonApplication(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>申请理由</DialogTitle>
+            <DialogDescription>
+              {reasonApplication?.user.username} 申请 {reasonApplication?.tag.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-md border bg-gray-50 p-4 text-sm text-gray-700">
+            {reasonApplication?.reason || "未填写申请理由"}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReasonApplication(null)}>
+              关闭
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
