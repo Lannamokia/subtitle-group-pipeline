@@ -379,6 +379,27 @@ export async function getDownloadLink(
   }
 }
 
+// GET /files/:fileId/versions/:versionId/download - Get download link for a specific version
+export async function getVersionDownloadLink(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const ttl = getRequestedTtl(req);
+    const result = await fileService.getDownloadLink(
+      getParam(req, "fileId"),
+      req.user!.id,
+      req.user!.role as "super_admin" | "group_admin" | "supervisor" | "member",
+      ttl,
+      getParam(req, "versionId")
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 // GET /download/:token - Actual download (local)
 export async function downloadByToken(
   req: Request,
@@ -401,16 +422,25 @@ export async function downloadByToken(
       throw new AppError("File not found", "NOT_FOUND", 404);
     }
 
-    // Get the current version
+    const versionId = fileService.getVersionIdFromDownloadToken(link.token);
     const currentVersion = await prisma.fileVersion.findFirst({
-      where: {
-        file_id: link.file_id,
-        is_current: true,
-      },
+      where: versionId
+        ? {
+            file_id: link.file_id,
+            id: versionId,
+          }
+        : {
+            file_id: link.file_id,
+            is_current: true,
+          },
     });
 
     if (!currentVersion) {
-      throw new AppError("No current version available", "NOT_FOUND", 404);
+      throw new AppError(
+        versionId ? "File version not found" : "No current version available",
+        "NOT_FOUND",
+        404
+      );
     }
 
     // Get the storage backend

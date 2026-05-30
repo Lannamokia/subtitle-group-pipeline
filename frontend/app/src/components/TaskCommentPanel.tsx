@@ -26,6 +26,7 @@ import {
 
 type FileVersionOption = FileVersion & {
   fileName: string;
+  fileType?: string;
 };
 
 interface TaskCommentPanelProps {
@@ -56,7 +57,7 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
         const [commentData, memberData, fileData] = await Promise.all([
           taskApi.getComments(taskId),
           memberApi.getMembers().catch(() => ({ items: [] as User[] })),
-          fileApi.getFiles({ projectId, type: "subtitle" }).catch(() => ({ items: [] })),
+          fileApi.getFiles({ projectId, taskId }).catch(() => ({ items: [] })),
         ]);
         setComments(commentData);
         setAllUsers(memberData.items || []);
@@ -64,7 +65,7 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
         const versionGroups = await Promise.all(
           fileData.items.slice(0, 20).map(async (file) => {
             const versions = await fileApi.getVersions(file.id).catch(() => []);
-            return versions.map((version) => ({ ...version, fileName: file.name }));
+            return versions.map((version) => ({ ...version, fileName: file.name, fileType: file.type }));
           })
         );
         setFileVersions(versionGroups.flat());
@@ -163,6 +164,9 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
     }
   };
 
+  const selectedVersion = fileVersions.find((version) => version.id === selectedFileVersion);
+  const canReferenceLine = selectedVersion?.fileType === "subtitle";
+
   return (
     <div className="flex flex-col h-full">
       {/* Comment list */}
@@ -191,7 +195,8 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
           <FileText className="w-4 h-4 text-gray-400" />
           <Select value={selectedFileVersion} onValueChange={(value) => {
             setSelectedFileVersion(value);
-            if (value === "none") setSelectedLine(null);
+            const nextVersion = fileVersions.find((version) => version.id === value);
+            if (value === "none" || nextVersion?.fileType !== "subtitle") setSelectedLine(null);
           }}>
             <SelectTrigger className="w-fit h-8 text-xs">
               <SelectValue placeholder="引用文件版本（可选）" />
@@ -206,7 +211,7 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
             </SelectContent>
           </Select>
 
-          {selectedFileVersion !== "none" && (
+          {selectedFileVersion !== "none" && canReferenceLine && (
             <Input
               type="number"
               min={1}
@@ -219,7 +224,7 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
         </div>
 
         {/* Selected line preview */}
-        {selectedLine && (
+        {selectedLine && canReferenceLine && (
           <div className="bg-gray-50 rounded-md px-3 py-2 text-xs font-mono text-gray-600 border border-gray-200">
             <div className="flex items-center gap-1 text-gray-400 mb-1">
               <Hash className="w-3 h-3" />
@@ -278,6 +283,7 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
 }
 
 function CommentItem({ comment }: { comment: TaskComment }) {
+  const referencedFileName = comment.fileVersion?.file?.name;
   // Parse mentions in content
   const renderContent = (content: string) => {
     const parts = content.split(/(@\S+)/g);
@@ -309,7 +315,7 @@ function CommentItem({ comment }: { comment: TaskComment }) {
             <span className="text-xs text-gray-500">
               引用{" "}
               {comment.fileVersion
-                ? `文件版本 v${comment.fileVersion.versionNumber}`
+                ? `${referencedFileName ? `${referencedFileName} ` : ""}v${comment.fileVersion.versionNumber}`
                 : "文件版本"}
             </span>
           </div>

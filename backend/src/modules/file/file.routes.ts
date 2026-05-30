@@ -173,6 +173,21 @@ router.post(
 );
 
 router.get(
+  "/files/:fileId/versions/:versionId/download",
+  authenticate,
+  validateParams(versionIdParamSchema),
+  validateQuery(downloadLinkQuerySchema),
+  controller.getVersionDownloadLink
+);
+
+router.post(
+  "/files/:fileId/versions/:versionId/download",
+  authenticate,
+  validateParams(versionIdParamSchema),
+  controller.getVersionDownloadLink
+);
+
+router.get(
   "/files/:fileId/download",
   authenticate,
   validateParams(fileIdParamSchema),
@@ -211,6 +226,21 @@ router.post(
   authenticate,
   validateParams(versionIdParamSchema),
   controller.approveVersion
+);
+
+router.get(
+  "/:fileId/versions/:versionId/download",
+  authenticate,
+  validateParams(versionIdParamSchema),
+  validateQuery(downloadLinkQuerySchema),
+  controller.getVersionDownloadLink
+);
+
+router.post(
+  "/:fileId/versions/:versionId/download",
+  authenticate,
+  validateParams(versionIdParamSchema),
+  controller.getVersionDownloadLink
 );
 
 router.get(

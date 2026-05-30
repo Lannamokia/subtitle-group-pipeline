@@ -245,6 +245,89 @@ describe("File Management Tests", () => {
       expectSuccess(acceptedWebm, 201);
     });
 
+    it("should append repeated task uploads as file versions with canonical task names", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: user.id,
+        assignee_id: user.id,
+        role: "translation",
+        title: "12",
+        status: "assigned",
+      });
+
+      await prisma.projectMember.create({
+        data: {
+          project_id: project.id,
+          user_id: user.id,
+          role: "translation",
+        },
+      });
+
+      const first = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "my-local-draft.ass",
+          file_type: "subtitle",
+          mime_type: "application/x-ass",
+          size_bytes: 1024,
+          storage_path: "/uploads/my-local-draft.ass",
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "translation",
+        },
+        token
+      );
+      expectSuccess(first, 201);
+      expect(first.body.data.name).toBe("翻译_12.ass");
+
+      const second = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "renamed-on-my-machine.ass",
+          file_type: "subtitle",
+          mime_type: "application/x-ass",
+          size_bytes: 2048,
+          storage_path: "/uploads/renamed-on-my-machine.ass",
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "translation",
+          change_summary: "Second pass",
+        },
+        token
+      );
+      expectSuccess(second, 201);
+      expect(second.body.data.id).toBe(first.body.data.id);
+      expect(second.body.data.latest_version.version_number).toBe(2);
+
+      const files = await prisma.fileEntity.findMany({
+        where: { project_id: project.id, file_type: "subtitle", is_deleted: false },
+        include: { versions: { orderBy: { version_number: "asc" } } },
+      });
+      const taskFiles = files.filter((file) => file.metadata?.includes(task.id));
+      expect(taskFiles).toHaveLength(1);
+      expect(taskFiles[0].name).toBe("翻译_12.ass");
+      expect(taskFiles[0].original_name).toBe("翻译_12.ass");
+      expect(taskFiles[0].versions).toHaveLength(2);
+
+      const list = await get(
+        app,
+        `/api/v1/files?project_id=${project.id}&task_id=${task.id}&role=translation`,
+        token
+      );
+      expectSuccess(list, 200);
+      expect(list.body.data.files).toHaveLength(1);
+      expect(list.body.data.files[0].version_count).toBe(2);
+      expect(list.body.data.files[0].has_multiple_versions).toBe(true);
+    });
+
     it("should fall back to the default role policy when a project policy is an empty shell", async () => {
       const { user, token } = await createTestUser();
       const project = await createTestProject({ owner_id: user.id });
@@ -1268,6 +1351,41 @@ describe("File Management Tests", () => {
       expect(res.body.data.version_count).toBeGreaterThanOrEqual(2);
       expect(res.body.data.has_multiple_versions).toBe(true);
       expect(res.body.data.uploader.id).toBe(user.id);
+    });
+
+    it("should create download links for a specific historical file version", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+      });
+      const version = await prisma.fileVersion.create({
+        data: {
+          file_id: file.id,
+          version_number: 2,
+          storage_path: "/uploads/history-v2.ass",
+          size_bytes: 2048,
+          checksum: "history-v2",
+          is_current: true,
+          is_latest: true,
+          is_latest_approved: false,
+        },
+      });
+
+      const res = await post(
+        app,
+        `/api/v1/files/${file.id}/versions/${version.id}/download`,
+        {},
+        token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.url).toContain(`/api/v1/download/fv_${version.id}_`);
+      const link = await prisma.downloadLink.findFirst({
+        where: { file_id: file.id, token: { startsWith: `fv_${version.id}_` } },
+      });
+      expect(link).toBeDefined();
     });
 
     it("should allow a project supervisor to soft-delete another member file", async () => {

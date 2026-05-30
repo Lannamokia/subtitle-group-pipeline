@@ -207,6 +207,13 @@ export interface FileVersion {
   fileId: string;
   versionNumber: number;
   uploader?: User;
+  file?: {
+    id: string;
+    name: string;
+    originalName?: string;
+    type?: FileType;
+    projectId?: string;
+  };
   size: number;
   hash?: string;
   storagePath: string;

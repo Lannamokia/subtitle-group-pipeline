@@ -451,10 +451,114 @@ function parseMetadata(metadata: string | null | undefined): Record<string, unkn
     : {};
 }
 
-function metadataStringForUpload(data: UploadFileInput): string | null | undefined {
-  const metadata = parseMetadata(data.metadata);
+const TASK_ROLE_FILE_LABELS: Record<TaskRole, string> = {
+  source: "片源",
+  timing: "时轴",
+  translation: "翻译",
+  post_production: "后期",
+  encoding: "压制",
+  release: "发布",
+  supervisor: "监制",
+};
+
+const DEFAULT_EXTENSION_BY_FILE_TYPE: Record<FileType, string> = {
+  video: ".mp4",
+  subtitle: ".ass",
+  font: ".ttf",
+  project_package: ".zip",
+  other: ".bin",
+};
+
+interface TaskUploadContext {
+  taskId?: string;
+  unitId?: string;
+  role?: TaskRole;
+  taskTitle?: string;
+}
+
+function isTaskRole(value: unknown): value is TaskRole {
+  return typeof value === "string" && Object.values(TaskRole).includes(value as TaskRole);
+}
+
+function getUploadExtension(filename: string, fileType: FileType): string {
+  const ext = path.extname(filename).toLowerCase();
+  return ext || DEFAULT_EXTENSION_BY_FILE_TYPE[fileType];
+}
+
+function normalizeFilenameSegment(value: string | null | undefined, fallback: string): string {
+  const sanitized = sanitizeFilename((value || fallback).trim());
+  const withoutExt = sanitized.replace(/\.[^.]+$/, "");
+  return withoutExt.replace(/\s+/g, "_") || fallback;
+}
+
+function buildDisplayFilename(data: UploadFileInput, context: TaskUploadContext): string {
+  if (!context.taskId || !context.role) {
+    return sanitizeFilename(data.name);
+  }
+
+  const roleLabel = TASK_ROLE_FILE_LABELS[context.role] || context.role;
+  const taskName = normalizeFilenameSegment(context.taskTitle, "任务");
+  const ext = getUploadExtension(data.name, data.file_type);
+  return sanitizeFilename(`${roleLabel}_${taskName}${ext}`);
+}
+
+async function resolveTaskUploadContext(
+  projectId: string,
+  data: UploadFileInput
+): Promise<TaskUploadContext> {
   const taskId = data.task_id || data.taskId;
-  const unitId = data.unit_id || data.unitId;
+  const providedUnitId = data.unit_id || data.unitId;
+
+  if (!taskId) {
+    return {
+      unitId: providedUnitId,
+      role: data.role,
+    };
+  }
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      project_id: true,
+      unit_id: true,
+      title: true,
+      role: true,
+    },
+  });
+
+  if (!task) {
+    throw new AppError("Task not found", "NOT_FOUND", 404);
+  }
+
+  if (task.project_id !== projectId) {
+    throw new AppError("Task does not belong to this project", "VALIDATION_ERROR", 400);
+  }
+
+  if (data.role && data.role !== task.role) {
+    throw new AppError("Upload role does not match task role", "VALIDATION_ERROR", 400);
+  }
+
+  if (providedUnitId && task.unit_id && providedUnitId !== task.unit_id) {
+    throw new AppError("Upload unit does not match task unit", "VALIDATION_ERROR", 400);
+  }
+
+  return {
+    taskId: task.id,
+    unitId: providedUnitId || task.unit_id || undefined,
+    role: task.role,
+    taskTitle: task.title,
+  };
+}
+
+function metadataStringForUpload(
+  data: UploadFileInput,
+  context: TaskUploadContext = {}
+): string | null | undefined {
+  const metadata = parseMetadata(data.metadata);
+  const taskId = context.taskId || data.task_id || data.taskId;
+  const unitId = context.unitId || data.unit_id || data.unitId;
+  const role = context.role || data.role;
 
   if (taskId) {
     metadata.task_id = taskId;
@@ -462,8 +566,8 @@ function metadataStringForUpload(data: UploadFileInput): string | null | undefin
   if (unitId) {
     metadata.unit_id = unitId;
   }
-  if (data.role) {
-    metadata.role = data.role;
+  if (role) {
+    metadata.role = role;
   }
 
   return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : data.metadata;
@@ -617,6 +721,149 @@ export function sanitizeFilename(filename: string): string {
   return basename.replace(/[<>:"|?*\x00-\x1f]/g, "_").trim();
 }
 
+async function findTaskFileBucket(
+  projectId: string,
+  fileType: FileType,
+  context: TaskUploadContext
+) {
+  if (!context.taskId || !context.role) {
+    return null;
+  }
+
+  const candidates = await prisma.fileEntity.findMany({
+    where: {
+      project_id: projectId,
+      file_type: fileType,
+      is_deleted: false,
+    },
+    include: {
+      versions: {
+        orderBy: { version_number: "desc" },
+        take: 1,
+      },
+    },
+  });
+
+  return candidates
+    .filter((file) => {
+      const metadata = parseMetadata(file.metadata);
+      const taskId = getMetadataStringValue(metadata, "task_id", "taskId");
+      const role = getMetadataStringValue(metadata, "role", "task_role");
+      return taskId === context.taskId && role === context.role;
+    })
+    .sort((a, b) => {
+      const aDate = a.versions[0]?.created_at ?? a.created_at;
+      const bDate = b.versions[0]?.created_at ?? b.created_at;
+      return bDate.getTime() - aDate.getTime();
+    })[0] || null;
+}
+
+async function appendFileVersion(
+  fileId: string,
+  uploaderId: string,
+  data: ReplaceFileInput,
+  options: {
+    displayName?: string;
+    metadata?: string | null;
+    tags?: string | null;
+    storageBackendId?: string | null;
+    taskId?: string;
+  } = {}
+) {
+  const file = await prisma.fileEntity.findUnique({
+    where: { id: fileId },
+    include: {
+      versions: {
+        orderBy: { version_number: "desc" },
+        take: 1,
+      },
+    },
+  });
+
+  if (!file) {
+    throw new AppError("File not found", "NOT_FOUND", 404);
+  }
+
+  if (file.is_deleted) {
+    throw new AppError("Cannot replace a deleted file", "BAD_REQUEST", 400);
+  }
+
+  const latestVersion = file.versions[0];
+  const nextVersionNumber = (latestVersion?.version_number || 0) + 1;
+  const displayName = options.displayName || file.name;
+  const metadata = options.metadata ?? data.metadata ?? file.metadata;
+  const tags = options.tags ?? data.tags ?? file.tags;
+  const storageBackendId = options.storageBackendId ?? data.storage_backend_id ?? file.storage_backend_id;
+
+  await prisma.fileVersion.updateMany({
+    where: { file_id: fileId },
+    data: { is_latest: false },
+  });
+
+  const version = await prisma.fileVersion.create({
+    data: {
+      file_id: fileId,
+      version_number: nextVersionNumber,
+      storage_path: data.storage_path,
+      size_bytes: data.size_bytes,
+      checksum: data.checksum,
+      change_summary: data.change_summary || `Version ${nextVersionNumber}`,
+      is_current: true,
+      is_latest: true,
+      is_latest_approved: false,
+    },
+  });
+
+  const updatedFile = await prisma.fileEntity.update({
+    where: { id: fileId },
+    data: {
+      name: displayName,
+      original_name: displayName,
+      mime_type: data.mime_type,
+      size_bytes: data.size_bytes,
+      storage_path: data.storage_path,
+      storage_backend_id: storageBackendId,
+      checksum: data.checksum,
+      metadata,
+      tags,
+    },
+    include: {
+      uploader: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+        },
+      },
+    },
+  });
+
+  await resolveCurrentVersion(fileId);
+  const currentVersion = await prisma.fileVersion.findFirst({
+    where: { file_id: fileId, is_current: true },
+  });
+
+  await timelineService.createTimelineEvent({
+    project_id: file.project_id,
+    event_type: TimelineEventType.file_uploaded,
+    title: "文件已上传新版本",
+    description: `文件「${updatedFile.name}」已上传新版本`,
+    actor_id: uploaderId,
+    metadata: {
+      file_id: fileId,
+      version_id: version.id,
+      version_number: version.version_number,
+      task_id: options.taskId,
+    },
+  });
+
+  return {
+    ...updatedFile,
+    current_version: currentVersion || version,
+    latest_version: version,
+  };
+}
+
 // ============ File Upload ============
 
 export async function uploadFile(
@@ -641,6 +888,8 @@ export async function uploadFile(
     throw new AppError("Uploader not found", "NOT_FOUND", 404);
   }
 
+  const taskContext = await resolveTaskUploadContext(data.project_id, data);
+
   const uploadValidation = await validateUpload(
     {
       originalname: data.name,
@@ -651,7 +900,7 @@ export async function uploadFile(
     uploader.role,
     {
       userId: uploaderId,
-      taskRole: data.role,
+      taskRole: taskContext.role,
       fileType: data.file_type,
     }
   );
@@ -663,17 +912,31 @@ export async function uploadFile(
   // Determine storage backend
   const storageBackendId = data.storage_backend_id || project.storage_backend_id;
 
-  // Sanitize filename
-  const sanitizedName = sanitizeFilename(data.name);
-  const metadata = metadataStringForUpload(data);
+  const displayName = buildDisplayFilename(data, taskContext);
+  const metadata = metadataStringForUpload(data, taskContext);
+  const existingTaskFile = await findTaskFileBucket(
+    data.project_id,
+    data.file_type,
+    taskContext
+  );
+
+  if (existingTaskFile) {
+    return appendFileVersion(existingTaskFile.id, uploaderId, data, {
+      displayName,
+      metadata,
+      tags: data.tags,
+      storageBackendId,
+      taskId: taskContext.taskId,
+    });
+  }
 
   // Create file entity
   const file = await prisma.fileEntity.create({
     data: {
       project_id: data.project_id,
       uploader_id: uploaderId,
-      name: sanitizedName,
-      original_name: data.name,
+      name: displayName,
+      original_name: taskContext.taskId ? displayName : data.name,
       file_type: data.file_type,
       mime_type: data.mime_type,
       size_bytes: data.size_bytes,
@@ -719,7 +982,7 @@ export async function uploadFile(
       file_id: file.id,
       version_id: version.id,
       file_type: file.file_type,
-      task_id: data.task_id || data.taskId,
+      task_id: taskContext.taskId,
     },
   });
 
@@ -790,80 +1053,55 @@ export async function replaceFile(
     throw new AppError(validation.error || "Invalid upload", "VALIDATION_ERROR", 400);
   }
 
-  const latestVersion = file.versions[0];
-  const nextVersionNumber = (latestVersion?.version_number || 0) + 1;
-
   // Determine storage backend
   const storageBackendId = data.storage_backend_id || file.storage_backend_id;
 
-  // Sanitize name if provided
-  const sanitizedName = data.name ? sanitizeFilename(data.name) : file.name;
-
-  // Mark all previous versions as not latest
-  await prisma.fileVersion.updateMany({
-    where: { file_id: fileId },
-    data: { is_latest: false },
-  });
-
-  // Create new version
-  const version = await prisma.fileVersion.create({
-    data: {
-      file_id: fileId,
-      version_number: nextVersionNumber,
-      storage_path: data.storage_path,
-      size_bytes: data.size_bytes,
-      checksum: data.checksum,
-      change_summary: data.change_summary || `Version ${nextVersionNumber}`,
-      is_current: true,
-      is_latest: true,
-      is_latest_approved: false,
-    },
-  });
-
-  // Update file entity
-  const updatedFile = await prisma.fileEntity.update({
-    where: { id: fileId },
-    data: {
-      name: sanitizedName,
-      size_bytes: data.size_bytes,
-      storage_path: data.storage_path,
-      storage_backend_id: storageBackendId,
-      checksum: data.checksum,
-      metadata: data.metadata,
-      tags: data.tags,
-    },
-    include: {
-      uploader: {
-        select: {
-          id: true,
-          username: true,
-          nickname: true,
-        },
-      },
-    },
-  });
-
-  // Auto-resolve current_version: latest_approved if exists, else latest
-  await resolveCurrentVersion(fileId);
-
-  await timelineService.createTimelineEvent({
-    project_id: file.project_id,
-    event_type: TimelineEventType.file_uploaded,
-    title: "文件已上传新版本",
-    description: `文件「${updatedFile.name}」已上传新版本`,
-    actor_id: uploaderId,
-    metadata: {
-      file_id: fileId,
-      version_id: version.id,
-      version_number: version.version_number,
-    },
-  });
-
-  return {
-    ...updatedFile,
-    current_version: version,
-    latest_version: version,
+  const taskContext: TaskUploadContext = {
+    taskId: getMetadataStringValue(metadata, "task_id", "taskId"),
+    unitId: getMetadataStringValue(metadata, "unit_id", "unitId"),
+    role: isTaskRole(metadataRole) ? metadataRole : undefined,
   };
+  if (taskContext.taskId) {
+    const task = await prisma.task.findUnique({
+      where: { id: taskContext.taskId },
+      select: { title: true, role: true },
+    });
+    if (task) {
+      taskContext.taskTitle = task.title;
+      taskContext.role = taskContext.role || task.role;
+    }
+  }
+
+  const requestedName = data.name || file.name;
+  const displayName = taskContext.taskId && taskContext.role
+    ? buildDisplayFilename(
+        {
+          project_id: file.project_id,
+          name: requestedName,
+          file_type: file.file_type,
+          mime_type: data.mime_type,
+          size_bytes: data.size_bytes,
+          storage_path: data.storage_path,
+          storage_backend_id: storageBackendId,
+          checksum: data.checksum,
+          metadata: data.metadata,
+          tags: data.tags,
+          task_id: taskContext.taskId,
+          unit_id: taskContext.unitId,
+          role: taskContext.role,
+          change_summary: data.change_summary,
+        },
+        taskContext
+      )
+    : sanitizeFilename(requestedName);
+
+  return appendFileVersion(fileId, uploaderId, data, {
+    displayName,
+    metadata: data.metadata ?? file.metadata,
+    tags: data.tags ?? file.tags,
+    storageBackendId,
+    taskId: taskContext.taskId,
+  });
 }
 
 // ============ Version Auto-Resolution ============
@@ -1329,8 +1567,14 @@ export async function deleteFile(fileId: string, deletedBy: string) {
 
 // ============ Download Link ============
 
-function generateToken(): string {
-  return crypto.randomBytes(32).toString("hex");
+function generateToken(versionId?: string): string {
+  const random = crypto.randomBytes(32).toString("hex");
+  return versionId ? `fv_${versionId}_${random}` : random;
+}
+
+export function getVersionIdFromDownloadToken(token: string): string | undefined {
+  const match = token.match(/^fv_([0-9a-fA-F-]{36})_[0-9a-f]+$/);
+  return match?.[1];
 }
 
 function getMinimumTtl(fileType: string, requestedTtl: number): number {
@@ -1390,7 +1634,8 @@ export async function getDownloadLink(
   fileId: string,
   userId: string,
   userRole: UserRole,
-  requestedTtl: number = 300
+  requestedTtl: number = 300,
+  versionId?: string
 ): Promise<{ downloadUrl: string; url: string; expiresAt: Date }> {
   const file = await prisma.fileEntity.findUnique({
     where: { id: fileId },
@@ -1401,7 +1646,7 @@ export async function getDownloadLink(
         },
       },
       versions: {
-        where: { is_current: true },
+        where: versionId ? { id: versionId } : { is_current: true },
         take: 1,
       },
     },
@@ -1447,10 +1692,13 @@ export async function getDownloadLink(
     }
   }
 
-  // Get current version
-  const currentVersion = file.versions[0];
-  if (!currentVersion) {
-    throw new AppError("No current version available", "NOT_FOUND", 404);
+  const targetVersion = file.versions[0];
+  if (!targetVersion) {
+    throw new AppError(
+      versionId ? "File version not found" : "No current version available",
+      "NOT_FOUND",
+      404
+    );
   }
 
   // Calculate TTL
@@ -1460,28 +1708,30 @@ export async function getDownloadLink(
   const nextSecond = Math.ceil(now.getTime() / 1000) * 1000;
   const expiresAt = new Date(nextSecond + ttlSeconds * 1000);
 
-  // Check for existing non-expired link for same user+file
-  const existingLink = await prisma.downloadLink.findFirst({
-    where: {
-      file_id: fileId,
-      created_by: userId,
-      is_active: true,
-      expires_at: { gt: new Date(now.getTime() + 30 * 1000) }, // expires more than 30s from now
-    },
-    orderBy: { created_at: "desc" },
-  });
+  if (!versionId) {
+    // Check for existing non-expired link for same user+file.
+    const existingLink = await prisma.downloadLink.findFirst({
+      where: {
+        file_id: fileId,
+        created_by: userId,
+        is_active: true,
+        expires_at: { gt: new Date(now.getTime() + 30 * 1000) },
+        token: { not: { startsWith: "fv_" } },
+      },
+      orderBy: { created_at: "desc" },
+    });
 
-  if (existingLink) {
-    // Reuse existing link
-    const reuseThreshold = file.file_type === "video" ? 60 * 1000 : 30 * 1000;
-    const timeUntilExpiry = existingLink.expires_at.getTime() - now.getTime();
+    if (existingLink) {
+      const reuseThreshold = file.file_type === "video" ? 60 * 1000 : 30 * 1000;
+      const timeUntilExpiry = existingLink.expires_at.getTime() - now.getTime();
 
-    if (timeUntilExpiry > reuseThreshold) {
-      return {
-        downloadUrl: `${env.API_PREFIX}/download/${existingLink.token}`,
-        url: `${env.API_PREFIX}/download/${existingLink.token}`,
-        expiresAt: existingLink.expires_at,
-      };
+      if (timeUntilExpiry > reuseThreshold) {
+        return {
+          downloadUrl: `${env.API_PREFIX}/download/${existingLink.token}`,
+          url: `${env.API_PREFIX}/download/${existingLink.token}`,
+          expiresAt: existingLink.expires_at,
+        };
+      }
     }
   }
 
@@ -1495,7 +1745,7 @@ export async function getDownloadLink(
   const storageBackendId = file.storage_backend_id || backend?.id;
 
   let downloadUrl: string;
-  const token = generateToken();
+  const token = generateToken(versionId);
 
   if (backend?.backend_type === "s3" || backend?.backend_type === "s3_compatible") {
     // For S3, generate presigned URL
@@ -1504,7 +1754,7 @@ export async function getDownloadLink(
     const config = getS3Config(backend.config);
     const s3Adapter = new S3Adapter(config);
     downloadUrl = await s3Adapter.getPresignedUrl(
-      currentVersion.storage_path,
+      targetVersion.storage_path,
       ttlSeconds
     );
 

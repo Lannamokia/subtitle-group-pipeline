@@ -78,6 +78,8 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
           size="sm"
           className="h-8 w-8 p-0"
           onClick={onDownload}
+          title="下载当前版本"
+          aria-label="下载当前版本"
         >
           <Download className="w-4 h-4" />
         </Button>
@@ -87,6 +89,8 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
             size="sm"
             className="h-8 w-8 p-0"
             onClick={onViewHistory}
+            title="版本历史"
+            aria-label="版本历史"
           >
             <History className="w-4 h-4" />
           </Button>

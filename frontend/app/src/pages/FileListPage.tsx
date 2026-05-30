@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { api, fileApi, getErrorMessage, projectApi } from "@/lib/api";
+import { fileApi, getErrorMessage, projectApi } from "@/lib/api";
 import { cn, getFileTypeLabel } from "@/lib/utils";
 import { getPolicyUploadProfile } from "@/lib/taskWorkflow";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -282,10 +282,19 @@ export function FileListPage() {
 
   const handleDownload = async (fileId: string) => {
     try {
-      const res = await api.post(`/files/${fileId}/download`);
-      window.open(res.data.data?.url ?? res.data.data?.downloadUrl, "_blank");
+      const url = await fileApi.downloadFile(fileId);
+      if (url) window.open(url, "_blank");
     } catch (error) {
       toast.error("获取下载链接失败: " + getErrorMessage(error));
+    }
+  };
+
+  const handleDownloadVersion = async (fileId: string, versionId: string) => {
+    try {
+      const url = await fileApi.downloadVersion(fileId, versionId);
+      if (url) window.open(url, "_blank");
+    } catch (error) {
+      toast.error("获取历史版本失败: " + getErrorMessage(error));
     }
   };
 
@@ -746,8 +755,8 @@ export function FileListPage() {
                         {version.changeSummary || "无变更说明"} · {new Date(version.createdAt).toLocaleString("zh-CN")}
                       </p>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => handleDownload(selectedFile.id)}>
-                          下载
+                        <Button size="sm" variant="outline" onClick={() => handleDownloadVersion(selectedFile.id, version.id)}>
+                          下载此版本
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => handleApproveVersion(version.id)}>
                           通过此版本

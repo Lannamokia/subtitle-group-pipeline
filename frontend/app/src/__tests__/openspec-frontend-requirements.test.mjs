@@ -110,6 +110,8 @@ assertIncludes("file bucket history and explicit replace", files.fileList, [
   "replaceTargetId",
   "tagFilter",
   "handleApproveVersion",
+  "downloadVersion",
+  "下载此版本",
 ]);
 assertIncludes("multi-version marker and context history", files.fileItem, [
   "file.versionCount > 1",
@@ -230,6 +232,7 @@ assertIncludes("task comments with file reference", files.comments, [
   "fileVersionId",
   "lineNumber",
   "ASS行号",
+  "fileType",
 ]);
 
 assertMatches("routes expose required pages", files.app, [

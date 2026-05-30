@@ -354,7 +354,7 @@ export function normalizeFile(raw: AnyRecord): FileEntity {
     latestApprovedVersionId: raw.latestApprovedVersionId ?? raw.latest_approved_version_id ?? raw.versions?.find?.((v: AnyRecord) => v.is_latest_approved)?.id,
     versionCount: raw.versionCount ?? raw.version_count ?? raw.versions?.length ?? 1,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
-    updatedAt: raw.updatedAt ?? raw.updated_at ?? raw.created_at ?? "",
+    updatedAt: raw.updatedAt ?? raw.updated_at ?? raw.latest_update_at ?? raw.created_at ?? "",
   };
 }
 
@@ -364,6 +364,15 @@ export function normalizeFileVersion(raw: AnyRecord): FileVersion {
     fileId: raw.fileId ?? raw.file_id,
     versionNumber: raw.versionNumber ?? raw.version_number ?? 1,
     uploader: raw.uploader ? normalizeUser(raw.uploader) : undefined,
+    file: raw.file
+      ? {
+          id: raw.file.id,
+          name: raw.file.name ?? raw.file.original_name ?? "未命名文件",
+          originalName: raw.file.originalName ?? raw.file.original_name,
+          type: raw.file.type ?? raw.file.file_type,
+          projectId: raw.file.projectId ?? raw.file.project_id,
+        }
+      : undefined,
     size: raw.size ?? raw.size_bytes ?? 0,
     hash: raw.hash ?? raw.checksum,
     storagePath: raw.storagePath ?? raw.storage_path ?? "",
@@ -1347,6 +1356,16 @@ export const fileApi = {
   approveVersion: (fileId: string, versionId: string) =>
     api.post<ApiResponse<unknown>>(`/files/${fileId}/versions/${versionId}/approve`).then((response) =>
       normalizeFileVersion(response.data.data as AnyRecord)
+    ),
+
+  downloadFile: (fileId: string) =>
+    api.post<ApiResponse<{ url?: string; downloadUrl?: string }>>(`/files/${fileId}/download`).then((response) =>
+      response.data.data?.url ?? response.data.data?.downloadUrl ?? ""
+    ),
+
+  downloadVersion: (fileId: string, versionId: string) =>
+    api.post<ApiResponse<{ url?: string; downloadUrl?: string }>>(`/files/${fileId}/versions/${versionId}/download`).then((response) =>
+      response.data.data?.url ?? response.data.data?.downloadUrl ?? ""
     ),
 
   getLinks: (params?: { projectId?: string }) =>
