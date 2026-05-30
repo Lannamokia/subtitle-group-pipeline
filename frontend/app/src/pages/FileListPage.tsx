@@ -30,12 +30,15 @@ import type { FileEntity, FileType, FileVersion, LinkAsset, Project } from "@/ty
 import {
   Search,
   FileArchive,
+  FolderKanban,
   Upload,
   Loader2,
   Filter,
   Link2,
   Trash2,
   ExternalLink,
+  ArrowLeft,
+  Users,
 } from "lucide-react";
 
 const FILE_TYPE_OPTIONS: { value: FileType | "all"; label: string }[] = [
@@ -49,12 +52,24 @@ const FILE_TYPE_OPTIONS: { value: FileType | "all"; label: string }[] = [
 
 type ApiEnvelope<T> = { data: T };
 
+const PROJECT_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿",
+  active: "进行中",
+  paused: "已暂停",
+  completed: "已完成",
+  archived: "已归档",
+  cancelled: "已取消",
+  deleted: "已删除",
+};
+
 export function FileListPage() {
   const [files, setFiles] = useState<FileEntity[]>([]);
   const [links, setLinks] = useState<LinkAsset[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
-  const [loading, setLoading] = useState(true);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [projectSearch, setProjectSearch] = useState("");
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<FileType | "all">("all");
@@ -74,29 +89,38 @@ export function FileListPage() {
   const [addingLink, setAddingLink] = useState(false);
 
   const fetchProjects = useCallback(async () => {
+    setProjectsLoading(true);
     try {
       const res = await projectApi.getProjects({ include_archived: true, pageSize: 100 });
       setProjects(res.items);
     } catch {
       setProjects([]);
+    } finally {
+      setProjectsLoading(false);
     }
   }, []);
 
   const fetchFiles = useCallback(async () => {
-    setLoading(true);
+    if (!selectedProjectId) {
+      setFiles([]);
+      setLinks([]);
+      return;
+    }
+
+    setFilesLoading(true);
     try {
-      const params = selectedProjectId === "all" ? undefined : { projectId: selectedProjectId };
-      const res = await fileApi.getFiles({ ...params, search: search || undefined, type: typeFilter === "all" ? undefined : typeFilter, tag: tagFilter || undefined });
+      const res = await fileApi.getFiles({
+        projectId: selectedProjectId,
+        search: search || undefined,
+        type: typeFilter === "all" ? undefined : typeFilter,
+        tag: tagFilter || undefined,
+      });
       setFiles(res.items);
-      if (selectedProjectId !== "all") {
-        setLinks(await fileApi.getLinks({ projectId: selectedProjectId }));
-      } else {
-        setLinks([]);
-      }
+      setLinks(await fileApi.getLinks({ projectId: selectedProjectId }));
     } catch (error) {
       toast.error("获取文件列表失败: " + getErrorMessage(error));
     } finally {
-      setLoading(false);
+      setFilesLoading(false);
     }
   }, [search, selectedProjectId, tagFilter, typeFilter]);
 
@@ -127,9 +151,36 @@ export function FileListPage() {
     return true;
   });
 
+  const filteredProjects = projects.filter((project) => {
+    if (!projectSearch.trim()) return true;
+    return project.name.toLowerCase().includes(projectSearch.trim().toLowerCase());
+  });
+
+  const selectedProject = selectedProjectId
+    ? projects.find((project) => project.id === selectedProjectId)
+    : null;
+
+  const enterProjectFiles = (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setSearch("");
+    setTagFilter("");
+    setTypeFilter("all");
+    setSelectedFile(null);
+  };
+
+  const leaveProjectFiles = () => {
+    setSelectedProjectId(null);
+    setFiles([]);
+    setLinks([]);
+    setSearch("");
+    setTagFilter("");
+    setTypeFilter("all");
+    setSelectedFile(null);
+  };
+
   const handleUpload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
-    if (selectedProjectId === "all") {
+    if (!selectedProjectId) {
       toast.error("请先选择项目");
       return;
     }
@@ -177,7 +228,7 @@ export function FileListPage() {
       toast.error("请填写名称和链接");
       return;
     }
-    if (selectedProjectId === "all") {
+    if (!selectedProjectId) {
       toast.error("请先选择项目");
       return;
     }
@@ -224,71 +275,139 @@ export function FileListPage() {
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-display text-gray-800">文件</h1>
-          <p className="text-sm text-gray-500 mt-1">共 {filteredFiles.length} 个文件</p>
+          {selectedProject ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mb-2 h-8 px-0 text-gray-500 hover:text-gray-800"
+              onClick={leaveProjectFiles}
+            >
+              <ArrowLeft className="w-4 h-4 mr-1.5" />
+              返回项目列表
+            </Button>
+          ) : null}
+          <h1 className="text-display text-gray-800">
+            {selectedProject ? selectedProject.name : "文件"}
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {selectedProject
+              ? `项目文件空间 · 共 ${filteredFiles.length} 个文件`
+              : "选择项目后查看和管理该项目文件"}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setLinkDialogOpen(true)}>
-            <Link2 className="w-4 h-4 mr-1.5" />
-            添加链接
-          </Button>
-          <Button size="sm" onClick={() => setUploadOpen(true)}>
-            <Upload className="w-4 h-4 mr-1.5" />
-            上传文件
-          </Button>
-        </div>
+        {selectedProject && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setLinkDialogOpen(true)}>
+              <Link2 className="w-4 h-4 mr-1.5" />
+              添加链接
+            </Button>
+            <Button size="sm" onClick={() => setUploadOpen(true)}>
+              <Upload className="w-4 h-4 mr-1.5" />
+              上传文件
+            </Button>
+          </div>
+        )}
       </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-          <SelectTrigger className="w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部项目</SelectItem>
-            {projects.map((project) => (
-              <SelectItem key={project.id} value={project.id}>
-                {project.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            placeholder="搜索文件..."
-            className="pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <Input
-          placeholder="标签过滤..."
-          className="w-40"
-          value={tagFilter}
-          onChange={(e) => setTagFilter(e.target.value)}
-        />
-        <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as FileType | "all")}>
-          <SelectTrigger className="w-40">
-            <Filter className="w-3.5 h-3.5 mr-1" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {FILE_TYPE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {!selectedProject ? (
+        <>
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              placeholder="搜索项目..."
+              className="pl-9"
+              value={projectSearch}
+              onChange={(e) => setProjectSearch(e.target.value)}
+            />
+          </div>
 
-      {loading ? (
+          {projectsLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+            </div>
+          ) : filteredProjects.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filteredProjects.map((project) => (
+                <button
+                  key={project.id}
+                  type="button"
+                  className="rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-primary-200 hover:bg-primary-50/40"
+                  onClick={() => enterProjectFiles(project.id)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban className="w-4 h-4 text-primary-500 shrink-0" />
+                        <h2 className="text-sm font-semibold text-gray-800 truncate">
+                          {project.name}
+                        </h2>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        {PROJECT_STATUS_LABEL[project.status] ?? project.status}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500">
+                      S{project.season}
+                    </span>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+                    <span className="flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5" />
+                      {project.members.length} 成员
+                    </span>
+                    <span>{project.episodes} 单元</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center py-16 text-center">
+                <FolderKanban className="w-10 h-10 text-gray-300" />
+                <p className="text-sm text-gray-500 mt-3">暂无项目</p>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                placeholder="搜索文件..."
+                className="pl-9"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <Input
+              placeholder="标签过滤..."
+              className="w-40"
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+            />
+            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as FileType | "all")}>
+              <SelectTrigger className="w-40">
+                <Filter className="w-3.5 h-3.5 mr-1" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FILE_TYPE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {filesLoading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
         </div>
-      ) : (
-        <>
+          ) : (
+            <>
           <Card>
             <CardHeader className="py-4">
               <CardTitle className="text-h3">文件列表</CardTitle>
@@ -360,6 +479,8 @@ export function FileListPage() {
                 </div>
               </CardContent>
             </Card>
+          )}
+            </>
           )}
         </>
       )}
