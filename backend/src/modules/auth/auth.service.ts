@@ -923,6 +923,46 @@ export async function updateUserStatus(userId: string, data: UpdateUserStatusInp
   return serializeManagedUser(updated);
 }
 
+export async function approveUserVerification(userId: string, actorId?: string) {
+  const [user, actor] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    actorId ? prisma.user.findUnique({ where: { id: actorId } }) : null,
+  ]);
+
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  if (!actor) {
+    throw new AppError("Actor not found", "NOT_FOUND", 404);
+  }
+
+  if (user.status !== "pending_verification") {
+    throw new AppError("User is not pending verification", "VALIDATION_ERROR", 400);
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.verificationChallenge.updateMany({
+      where: {
+        used_by: userId,
+        used_at: null,
+      },
+      data: {
+        used_by: null,
+        used_at: new Date(),
+      },
+    });
+
+    return tx.user.update({
+      where: { id: userId },
+      data: { status: "active" },
+      select: userSelect,
+    });
+  });
+
+  return serializeManagedUser(updated);
+}
+
 export async function resetUserPassword(userId: string, data: ResetUserPasswordInput) {
   const user = await prisma.user.findUnique({
     where: { id: userId },

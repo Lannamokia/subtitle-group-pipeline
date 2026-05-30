@@ -333,6 +333,19 @@ export async function updateUserStatus(
   }
 }
 
+export async function approveUserVerification(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.approveUserVerification(String(req.params.id), req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function deleteMember(
   req: AuthenticatedRequest,
   res: Response,

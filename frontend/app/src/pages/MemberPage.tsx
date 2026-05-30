@@ -175,6 +175,18 @@ export function MemberPage() {
     }
   };
 
+  const handleApproveVerification = async (user: User) => {
+    setBusyUserId(user.id);
+    try {
+      updateUserInList(await memberApi.approveVerification(user.id));
+      toast.success("账号已通过验证");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
   const handleResetPassword = async () => {
     if (!passwordTarget) return;
     setIsResettingPassword(true);
@@ -275,14 +287,25 @@ export function MemberPage() {
                     >
                       {statusLabels[user.status]}
                     </Badge>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busyUserId === user.id}
-                      onClick={() => handleStatusToggle(user)}
-                    >
-                      {user.status === "disabled" ? "启用" : "禁用"}
-                    </Button>
+                    {user.status === "pending_verification" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyUserId === user.id}
+                        onClick={() => handleApproveVerification(user)}
+                      >
+                        通过验证
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyUserId === user.id}
+                        onClick={() => handleStatusToggle(user)}
+                      >
+                        {user.status === "disabled" ? "启用" : "禁用"}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="ghost"

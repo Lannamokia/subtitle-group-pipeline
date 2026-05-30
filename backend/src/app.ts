@@ -157,6 +157,12 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
     validateBody(updateUserStatusSchema),
     authController.updateUserStatus
   );
+  app.post(
+    `${apiPrefix}/members/:id/verify`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    authController.approveUserVerification
+  );
   app.put(
     `${apiPrefix}/members/:id/password`,
     authenticate,

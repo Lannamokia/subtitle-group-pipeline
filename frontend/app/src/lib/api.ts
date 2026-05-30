@@ -1191,6 +1191,11 @@ export const memberApi = {
       normalizeUser(response.data.data as AnyRecord)
     ),
 
+  approveVerification: (id: string) =>
+    api.post<ApiResponse<unknown>>(`/members/${id}/verify`).then((response) =>
+      normalizeUser(response.data.data as AnyRecord)
+    ),
+
   resetPassword: (id: string, password: string) =>
     api.put<ApiResponse<void>>(`/members/${id}/password`, { password }).then(extractData),
 
