@@ -1167,33 +1167,77 @@ describe("Project & Workflow Tests", () => {
       expect(updatedDownstream!.status).toBe("claimable");
     });
 
-    it("should prevent deleting tasks that already contain active work", async () => {
+    it("should allow supervisors to delete active tasks and reset downstream tasks", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
       const { user: worker } = await createTestUser();
       const project = await createTestProject({ owner_id: owner.id });
       const unit = await createTestUnit({ project_id: project.id });
-      const task = await createTestTask({
+      const upstream = await createTestTask({
         project_id: project.id,
         unit_id: unit.id,
         role: "translation",
-        status: "claimable",
+        status: "in_progress",
+        assignee_id: worker.id,
         creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "completed",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+        completed_at: new Date(),
+      });
+
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
       });
 
       await prisma.translationClaim.create({
         data: {
-          task_id: task.id,
+          task_id: upstream.id,
           unit_id: unit.id,
           user_id: worker.id,
           segment_start: 0,
           segment_end: 120,
         },
       });
+      await prisma.comment.create({
+        data: {
+          user_id: worker.id,
+          task_id: upstream.id,
+          content: "Work notes before deletion",
+        },
+      });
+      const review = await prisma.review.create({
+        data: {
+          project_id: project.id,
+          task_id: upstream.id,
+          reviewer_id: owner.id,
+          requester_id: worker.id,
+          status: "pending",
+        },
+      });
 
-      const deleteRes = await del(app, `/api/v1/tasks/${task.id}`, ownerToken);
+      const deleteRes = await del(app, `/api/v1/tasks/${upstream.id}`, ownerToken);
 
-      expectError(deleteRes, 400, "BAD_REQUEST");
-      expect(await prisma.task.findUnique({ where: { id: task.id } })).not.toBeNull();
+      expectSuccess(deleteRes, 200);
+
+      const deletedTask = await prisma.task.findUnique({ where: { id: upstream.id } });
+      const resetDownstream = await prisma.task.findUnique({ where: { id: downstream.id } });
+      const detachedReview = await prisma.review.findUnique({ where: { id: review.id } });
+
+      expect(deletedTask).toBeNull();
+      expect(await prisma.translationClaim.count({ where: { task_id: upstream.id } })).toBe(0);
+      expect(await prisma.comment.count({ where: { task_id: upstream.id } })).toBe(0);
+      expect(detachedReview!.task_id).toBeNull();
+      expect(resetDownstream!.status).toBe("in_progress");
+      expect(resetDownstream!.completed_at).toBeNull();
     });
 
     it("should prevent non-supervisors from deleting project tasks", async () => {
@@ -1270,6 +1314,56 @@ describe("Project & Workflow Tests", () => {
       );
 
       expectError(returnRes, 403, "FORBIDDEN");
+    });
+
+    it("should allow supervisors to force return in-progress tasks and cascade downstream reset", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "in_progress",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "completed",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+        completed_at: new Date(),
+      });
+
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const returnRes = await post(
+        app,
+        `/api/v1/tasks/${upstream.id}/return`,
+        {},
+        ownerToken
+      );
+
+      expectSuccess(returnRes, 200);
+
+      const returnedTask = await prisma.task.findUnique({ where: { id: upstream.id } });
+      const resetDownstream = await prisma.task.findUnique({ where: { id: downstream.id } });
+
+      expect(returnedTask!.status).toBe("claimable");
+      expect(returnedTask!.assignee_id).toBeNull();
+      expect(resetDownstream!.status).toBe("in_progress");
+      expect(resetDownstream!.completed_at).toBeNull();
     });
   });
 
@@ -1860,6 +1954,55 @@ describe("Project & Workflow Tests", () => {
       expect(resetUpstream!.status).toBe("in_progress");
       expect(resetDownstream!.status).toBe("in_progress");
       expect(resetRelease!.status).toBe("pending_publish");
+    });
+
+    it("should allow supervisors to reset in-progress tasks and active downstream tasks", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "in_progress",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "review_rejected",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const resetRes = await post(
+        app,
+        `/api/v1/tasks/${upstream.id}/reset`,
+        { reason: "Restart active work" },
+        ownerToken
+      );
+
+      expectSuccess(resetRes, 200);
+
+      const resetUpstream = await prisma.task.findUnique({ where: { id: upstream.id } });
+      const resetDownstream = await prisma.task.findUnique({ where: { id: downstream.id } });
+
+      expect(resetUpstream!.status).toBe("in_progress");
+      expect(resetUpstream!.started_at).not.toBeNull();
+      expect(resetDownstream!.status).toBe("in_progress");
+      expect(resetDownstream!.submitted_at).toBeNull();
     });
 
     it("should prevent non-supervisors from manually resetting project tasks", async () => {

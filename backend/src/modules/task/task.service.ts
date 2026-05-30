@@ -34,7 +34,27 @@ const ROLE_PIPELINE: TaskRole[] = [
   "release",
 ];
 
-const TASK_DELETE_BLOCKED_STATUSES: TaskStatus[] = [
+const TASK_RETURNABLE_STATUSES: TaskStatus[] = [
+  "assigned",
+  "in_progress",
+  "review_rejected",
+  "overdue",
+];
+
+const TASK_MANUAL_RESET_STATUSES: TaskStatus[] = [
+  "assigned",
+  "in_progress",
+  "submitted",
+  "review_approved",
+  "review_rejected",
+  "completed",
+  "overdue",
+  "frozen",
+];
+
+const TASK_DOWNSTREAM_RESET_STATUSES: TaskStatus[] = [
+  "claimable",
+  "assigned",
   "in_progress",
   "submitted",
   "review_approved",
@@ -462,7 +482,7 @@ async function discardReleaseArtifacts(
 }
 
 /**
- * Cascade reset downstream completed/submitted tasks when a task is reset
+ * Cascade reset downstream tasks whose work is invalidated by upstream changes.
  */
 async function cascadeResetDownstream(
   taskId: string,
@@ -471,12 +491,12 @@ async function cascadeResetDownstream(
   const downstream = await getDownstreamTasks(taskId);
 
   for (const downTask of downstream) {
-    if (
-      downTask.status === "completed" ||
-      downTask.status === "submitted" ||
-      downTask.status === "review_approved"
-    ) {
+    if (TASK_DOWNSTREAM_RESET_STATUSES.includes(downTask.status)) {
       const isReleaseReset = downTask.role === "release";
+      const shouldWaitForUpstream =
+        isReleaseReset ||
+        ((downTask.status === "claimable" || downTask.status === "frozen") && !downTask.assignee_id);
+      const nextStatus: TaskStatus = shouldWaitForUpstream ? "pending_publish" : "in_progress";
       if (isReleaseReset) {
         await discardReleaseArtifacts(downTask, actorId);
       }
@@ -484,9 +504,12 @@ async function cascadeResetDownstream(
       await prisma.task.update({
         where: { id: downTask.id },
         data: {
-          status: isReleaseReset ? "pending_publish" : "in_progress",
+          status: nextStatus,
+          started_at: nextStatus === "in_progress" ? downTask.started_at : null,
           completed_at: null,
           submitted_at: null,
+          cancelled_at: null,
+          frozen_at: null,
         },
       });
 
@@ -914,29 +937,11 @@ export async function deleteTask(taskId: string, actorId?: string) {
     throw new AppError("Only project supervisors or admins can delete tasks", "FORBIDDEN", 403);
   }
 
-  const hasActiveWork =
-    TASK_DELETE_BLOCKED_STATUSES.includes(existing.status) ||
-    Boolean(
-      existing.started_at ||
-      existing.submitted_at ||
-      existing.completed_at ||
-      existing.cancelled_at ||
-      existing.frozen_at
-    ) ||
-    existing._count.claims > 0 ||
-    existing._count.submissions > 0 ||
-    existing._count.reviews > 0 ||
-    existing._count.comments > 0;
-
-  if (hasActiveWork) {
-    throw new AppError(
-      "Cannot delete task because it already contains active work",
-      "BAD_REQUEST",
-      400
-    );
-  }
-
   const dependentTaskIds = existing.dependents.map((dependent) => dependent.task_id);
+
+  if (dependentTaskIds.length > 0) {
+    await cascadeResetDownstream(taskId, actorId);
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.notification.updateMany({
@@ -1259,7 +1264,7 @@ export async function returnTask(
     throw new AppError("Cannot return task in archived/deleted project", "BAD_REQUEST", 400);
   }
 
-  if (task.status !== "assigned" && task.status !== "in_progress") {
+  if (!TASK_RETURNABLE_STATUSES.includes(task.status)) {
     throw new AppError(
       `Task cannot be returned. Current status: ${task.status}`,
       "BAD_REQUEST",
@@ -1267,9 +1272,16 @@ export async function returnTask(
     );
   }
 
-  // Only the assignee can return the task (no approval needed)
-  if (task.assignee_id !== userId) {
-    throw new AppError("Only the assigned member can return this task", "FORBIDDEN", 403);
+  const actor = actorId || userId;
+  const isAssignee = task.assignee_id === userId;
+  const canForceReturn = await canManageProjectTasks(task.project_id, actor);
+
+  if (!isAssignee && !canForceReturn) {
+    throw new AppError(
+      "Only the assigned member or project supervisors can return this task",
+      "FORBIDDEN",
+      403
+    );
   }
 
   const updated = await prisma.task.update({
@@ -1278,21 +1290,26 @@ export async function returnTask(
       assignee_id: null,
       status: "claimable",
       started_at: null,
+      submitted_at: null,
+      completed_at: null,
+      frozen_at: null,
     },
   });
+
+  await cascadeResetDownstream(taskId, actor);
 
   await timelineService.createTimelineEvent({
     project_id: task.project_id,
     event_type: TimelineEventType.task_returned,
-    title: "Task returned",
+    title: isAssignee ? "Task returned" : "Task force returned",
     description: `Task "${task.title}" was returned to the pool`,
-    actor_id: userId,
+    actor_id: actor,
     metadata: { task_id: taskId },
   });
 
   await auditService.log({
-    user_id: actorId || userId,
-    action: "task.return",
+    user_id: actor,
+    action: isAssignee ? "task.return" : "task.force_return",
     resource_type: "task",
     resource_id: taskId,
     old_value: task,
@@ -1761,12 +1778,7 @@ export async function resetTask(
     throw new AppError("Only project supervisors can reset tasks", "FORBIDDEN", 403);
   }
 
-  if (
-    task.status !== "submitted" &&
-    task.status !== "review_rejected" &&
-    task.status !== "completed" &&
-    task.status !== "review_approved"
-  ) {
+  if (!TASK_MANUAL_RESET_STATUSES.includes(task.status)) {
     throw new AppError(
       `Task cannot be reset. Current status: ${task.status}`,
       "BAD_REQUEST",
@@ -1776,8 +1788,11 @@ export async function resetTask(
 
   const updateData: Record<string, unknown> = {
     status: "in_progress",
+    started_at: task.started_at || (task.assignee_id ? new Date() : null),
     completed_at: null,
     submitted_at: null,
+    cancelled_at: null,
+    frozen_at: null,
   };
 
   // For release role, discard uploaded artifacts
@@ -1790,7 +1805,7 @@ export async function resetTask(
     data: updateData,
   });
 
-  // Cascade reset downstream completed/submitted tasks
+  // Cascade reset downstream tasks whose inputs are invalidated.
   await cascadeResetDownstream(taskId, actorId);
 
   await timelineService.createTimelineEvent({

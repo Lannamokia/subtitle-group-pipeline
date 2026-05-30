@@ -585,7 +585,23 @@ function TasksTab({
       .map((depId) => taskById.get(depId))
       .filter((dep): dep is Task => Boolean(dep))
       .filter((dep) => !["review_approved", "completed"].includes(dep.status));
-  const resettableStatuses: TaskStatus[] = ["submitted", "review_rejected", "completed", "review_approved"];
+  const returnableStatuses: TaskStatus[] = ["assigned", "in_progress", "review_rejected", "overdue"];
+  const resettableStatuses: TaskStatus[] = [
+    "assigned",
+    "in_progress",
+    "submitted",
+    "review_rejected",
+    "completed",
+    "review_approved",
+    "overdue",
+    "frozen",
+  ];
+  const selectedTaskAssigneeId = selectedTask?.assigneeId ?? selectedTask?.assignee?.id;
+  const canReturnSelectedTask = Boolean(
+    selectedTask &&
+      returnableStatuses.includes(selectedTask.status) &&
+      (selectedTaskAssigneeId === currentUser?.id || canManageTasks)
+  );
   const selectedTaskDeliveryRule = useMemo(
     () => selectedTask ? getPolicyAwareTaskDeliveryRule(selectedTask.role, project.uploadPolicy) : null,
     [project.uploadPolicy, selectedTask?.id, selectedTask?.role]
@@ -1411,7 +1427,7 @@ function TasksTab({
                         </Button>
                       </>
                     )}
-                    {["assigned", "in_progress", "review_rejected", "overdue"].includes(selectedTask.status) && (
+                    {canReturnSelectedTask && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -1419,7 +1435,7 @@ function TasksTab({
                         disabled={updating}
                       >
                         <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                        重新认领
+                        {selectedTaskAssigneeId === currentUser?.id ? "退回任务" : "退回可认领"}
                       </Button>
                     )}
                     {canManageTasks && resettableStatuses.includes(selectedTask.status) && (
@@ -1465,7 +1481,7 @@ function TasksTab({
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除任务</AlertDialogTitle>
             <AlertDialogDescription>
-              删除后该任务会从任务列表中移除，并清理任务依赖关系。已经存在认领、提交、审核或评论记录的任务不会被删除。
+              删除后该任务会从任务列表中移除，并清理任务依赖关系。若该任务已经开始或已有提交、审核、评论记录，相关记录会随任务删除或解除关联，下游任务会按依赖联动重置。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1500,7 +1516,7 @@ function TasksTab({
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-sm text-gray-600">
                 <p>
-                  任务会回到进行中状态。它后续已经提交或完成的任务会被联动重置；发布任务的旧发布产物会被丢弃。
+                  任务会回到进行中状态。它后续已经开始、提交或完成的任务会被联动重置；发布任务的旧发布产物会被丢弃。
                 </p>
                 <Textarea
                   value={resetReason}
