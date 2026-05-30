@@ -75,6 +75,26 @@ async function syncSchema(databaseUrl: string, provider: "sqlite" | "mysql" | "p
   }
 }
 
+async function generatePrismaClient(databaseUrl: string, provider: "sqlite" | "mysql" | "postgresql") {
+  const env = { ...process.env, DATABASE_URL: databaseUrlForPrismaCli(databaseUrl, provider) };
+  const tempSchemaPath = path.join(SCHEMA_DIR, `.setup-generate-${crypto.randomUUID()}.prisma`);
+  try {
+    fs.writeFileSync(tempSchemaPath, buildPrismaSchema(provider));
+    await runPrismaCommand(["generate", "--schema", tempSchemaPath], env);
+  } finally {
+    fs.rmSync(tempSchemaPath, { force: true });
+  }
+}
+
+function scheduleServerRestart() {
+  const delayMs = Math.max(500, Number(process.env.SETUP_RESTART_DELAY_MS ?? 1500));
+  const timer = setTimeout(() => {
+    console.log("Setup completed. Restarting server to load the selected database provider...");
+    process.exit(0);
+  }, delayMs);
+  timer.unref();
+}
+
 async function applySqliteMigrations(databaseUrl: string) {
   const sqlitePath = sqliteFilePath(databaseUrl);
   if (!sqlitePath) {
@@ -340,11 +360,14 @@ export async function completeSetup(input: CompleteSetupInput) {
     process.env.DATABASE_URL = databaseUrl;
     process.env.JWT_SECRET = input.security.jwt_secret;
     env.JWT_SECRET = input.security.jwt_secret;
+    await generatePrismaClient(databaseUrl, selectedProvider);
+    scheduleServerRestart();
 
     return {
       initialized: true,
-      restartRequired: true,
-      message: "Database initialized. Restart the server so Prisma Client loads the selected database provider.",
+      restartRequired: false,
+      restarting: true,
+      message: "初始化完成，服务正在自动重启以加载所选数据库类型。",
       admin: { id: adminId, username: input.admin.username, role: "super_admin" },
       storage: { id: storageId, name: input.storage.name, backend_type: input.storage.backend_type, is_default: true },
     };

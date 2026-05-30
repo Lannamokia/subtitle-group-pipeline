@@ -25,6 +25,10 @@ function generateJwtSecret() {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function SetupPage() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
@@ -72,6 +76,23 @@ export function SetupPage() {
     });
   };
 
+  const waitForSetupReady = async () => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await sleep(1500);
+      try {
+        const status = await setupApi.getStatus();
+        if (status.initialized && status.databaseReady) {
+          toast.success("服务已重启，请登录");
+          navigate("/login", { replace: true });
+          return;
+        }
+      } catch {
+        // The backend may be between shutdown and restart.
+      }
+    }
+    setCompleteMessage("初始化完成，但暂时未检测到服务恢复，请稍后刷新页面。");
+  };
+
   const handleSubmit = async () => {
     if (!databaseUrl.trim()) {
       toast.error("请填写数据库连接");
@@ -116,9 +137,11 @@ export function SetupPage() {
           quota_bytes: storage.quotaGb ? Number(storage.quotaGb) * 1024 * 1024 * 1024 : null,
         },
       });
-      if ((result as { restartRequired?: boolean; message?: string })?.restartRequired) {
-        setCompleteMessage((result as { message?: string }).message || "初始化完成，请重启服务后登录。");
-        toast.success("初始化完成，请重启服务");
+      const setupResult = result as { restartRequired?: boolean; restarting?: boolean; message?: string };
+      if (setupResult.restarting || setupResult.restartRequired) {
+        setCompleteMessage(setupResult.message || "初始化完成，服务正在自动重启，请稍候。");
+        toast.success("初始化完成，服务正在自动重启");
+        void waitForSetupReady();
         return;
       }
       toast.success("初始化完成，请登录");
