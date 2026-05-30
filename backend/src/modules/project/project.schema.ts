@@ -7,6 +7,7 @@ export const createProjectSchema = z.object({
   project_type: z.nativeEnum(ProjectType).default(ProjectType.anime),
   template_id: z.string().uuid().optional().nullable(),
   storage_backend_id: z.string().uuid().optional().nullable(),
+  qq_group_id: z.string().trim().min(1, "Project QQ group is required").max(50),
 });
 
 export const createProjectFromTemplateSchema = z.object({
@@ -14,6 +15,7 @@ export const createProjectFromTemplateSchema = z.object({
   description: z.string().max(5000).optional().nullable(),
   template_id: z.string().uuid("Template ID is required"),
   storage_backend_id: z.string().uuid("Storage backend ID is required"),
+  qq_group_id: z.string().trim().min(1, "Project QQ group is required").max(50),
   season_count: z.number().int().min(1).default(1),
   units_per_season: z.number().int().min(1).default(12),
   episode_length: z.number().int().min(1).optional().nullable(), // in seconds
@@ -34,6 +36,7 @@ export const updateProjectSchema = z.object({
   delivery_checklist: z.array(deliveryItemSchema).optional(),
   download_link_ttl_seconds: z.number().int().min(90).optional().nullable(),
   wiki_approval_required: z.boolean().optional().nullable(),
+  qq_group_id: z.string().trim().min(1).max(50).optional().nullable(),
 });
 
 export const projectQuerySchema = z.object({

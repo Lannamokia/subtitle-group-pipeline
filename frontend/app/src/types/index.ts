@@ -63,6 +63,7 @@ export interface Project {
   tags: string[];
   supervisorId: string;
   supervisor: User;
+  qqGroupId?: string;
   members: ProjectMember[];
   progress: number;
   archivedAt?: string;

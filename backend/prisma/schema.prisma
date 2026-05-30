@@ -356,6 +356,7 @@ model Project {
   owner_id          String
   template_id       String?
   storage_backend_id String?
+  qq_group_id      String?
   current_season    Int           @default(1)
   workflow_config   String?       // JSON snapshot of template roles and workflow defaults
   upload_policy_config String?    // JSON snapshot of template upload policy

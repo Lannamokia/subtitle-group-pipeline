@@ -16,7 +16,7 @@ describe("User Profile & Storage Tests", () => {
   let app: Application;
 
   beforeAll(() => {
-    app = createApp();
+    app = createApp({ databaseReady: true });
   });
 
   beforeEach(async () => {
@@ -532,6 +532,7 @@ describe("User Profile & Storage Tests", () => {
         {
           name: "Project With Backend",
           storage_backend_id: backend.id,
+          qq_group_id: "123456789",
         },
         token
       );

@@ -53,6 +53,7 @@ const UNASSIGNED_SELECT_VALUE = "__unassigned__";
 
 const projectFormSchema = z.object({
   name: z.string().min(1, "项目名称不能为空").max(100),
+  qqGroupId: z.string().trim().min(1, "项目 QQ 群号不能为空").max(50, "项目 QQ 群号过长"),
   type: z.enum(["anime", "movie", "collection"]),
   season: z.number().min(1).max(99),
   episodes: z.number().min(1).max(999),
@@ -87,6 +88,7 @@ function fromBackendProjectType(type: ProjectTemplate["type"]): ProjectFormValue
 
 const defaultValues: ProjectFormValues = {
   name: "",
+  qqGroupId: "",
   type: "anime",
   season: 1,
   episodes: 12,
@@ -203,7 +205,7 @@ export function ProjectCreatePage() {
 
   const handleNext = async () => {
     if (currentStep === 2) {
-      const valid = await form.trigger(["name", "type", "season", "episodes"]);
+      const valid = await form.trigger(["name", "qqGroupId", "type", "season", "episodes"]);
       if (!valid) return;
     }
     if (currentStep === 3) {
@@ -228,6 +230,7 @@ export function ProjectCreatePage() {
       const payload = values.templateId
         ? {
             name: values.name,
+            qq_group_id: values.qqGroupId.trim(),
             template_id: values.templateId,
             storage_backend_id: values.storageBackendId,
             season_count: values.season,
@@ -235,6 +238,7 @@ export function ProjectCreatePage() {
           }
         : {
             name: values.name,
+            qq_group_id: values.qqGroupId.trim(),
             project_type: toBackendProjectType(values.type),
             storage_backend_id: values.storageBackendId,
           };
@@ -270,7 +274,7 @@ export function ProjectCreatePage() {
       case 1:
         return !!selectedTemplate;
       case 2:
-        return !!form.watch("name");
+        return !!form.watch("name") && !!form.watch("qqGroupId")?.trim();
       case 3:
         return !!form.watch("storageBackendId");
       case 4:
@@ -419,6 +423,20 @@ export function ProjectCreatePage() {
                       <FormLabel>项目名称 *</FormLabel>
                       <FormControl>
                         <Input placeholder="输入项目名称" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="qqGroupId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>项目 QQ 群号 *</FormLabel>
+                      <FormControl>
+                        <Input placeholder="填写该项目独立 QQ 群号" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -665,6 +683,7 @@ export function ProjectCreatePage() {
                 <div className="space-y-4">
                   <ReviewSection title="基本信息">
                     <ReviewItem label="项目名称" value={form.watch("name")} />
+                    <ReviewItem label="项目 QQ 群号" value={form.watch("qqGroupId")} />
                     <ReviewItem
                       label="项目类型"
                       value={

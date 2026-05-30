@@ -478,6 +478,7 @@ function toProjectPayload(data: Partial<Project>) {
     name: data.name,
     status: data.status,
     current_season: data.season,
+    qq_group_id: data.qqGroupId,
     delivery_checklist: data.deliveryChecklist,
     download_link_ttl_seconds: data.downloadLinkTtlSeconds,
     wiki_approval_required: data.wikiApprovalRequired,
@@ -591,6 +592,7 @@ export function normalizeProject(raw: AnyRecord): Project {
     tags: Array.isArray(raw.tags) ? raw.tags : [],
     supervisorId: raw.supervisorId ?? raw.owner_id,
     supervisor: raw.supervisor ? normalizeUser(raw.supervisor) : raw.owner ? normalizeUser(raw.owner) : normalizeUser({ id: raw.owner_id, username: "Unknown", role: "supervisor", status: "active" }),
+    qqGroupId: raw.qqGroupId ?? raw.qq_group_id,
     members: Array.isArray(raw.members)
       ? raw.members.map((member: AnyRecord) => ({
           user: normalizeUser(member.user ?? member),

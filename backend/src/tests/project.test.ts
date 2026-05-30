@@ -45,6 +45,7 @@ describe("Project & Workflow Tests", () => {
           name: "Templated Project",
           template_id: template.id,
           storage_backend_id: backend.id,
+          qq_group_id: "123456789",
           season_count: 1,
           units_per_season: 2,
         },
@@ -60,7 +61,29 @@ describe("Project & Workflow Tests", () => {
 
       expect(project!.template_id).toBe(template.id);
       expect(project!.storage_backend_id).toBe(backend.id);
+      expect(project!.qq_group_id).toBe("123456789");
       expect(JSON.parse(project!.delivery_checklist!)).toEqual(checklist);
+    });
+
+    it("should require a project QQ group when creating from a template", async () => {
+      const { token } = await createTestUser();
+      const template = await createTestTemplate();
+      const backend = await createTestStorageBackend();
+
+      const res = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Missing Project Group",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          season_count: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+
+      expectError(res, 400, "VALIDATION_ERROR");
     });
 
     it("should inherit product config from template", async () => {
@@ -82,6 +105,7 @@ describe("Project & Workflow Tests", () => {
           name: "Product Config Project",
           template_id: template.id,
           storage_backend_id: backend.id,
+          qq_group_id: "123456789",
           season_count: 1,
           units_per_season: 1,
         },
@@ -124,6 +148,7 @@ describe("Project & Workflow Tests", () => {
           name: "Inactive Backend Project",
           template_id: template.id,
           storage_backend_id: inactiveBackend.id,
+          qq_group_id: "123456789",
           season_count: 1,
           units_per_season: 1,
         },
@@ -157,6 +182,7 @@ describe("Project & Workflow Tests", () => {
           name: "Snapshot Project",
           template_id: template.id,
           storage_backend_id: backend.id,
+          qq_group_id: "123456789",
           season_count: 1,
           units_per_season: 1,
         },
@@ -205,6 +231,7 @@ describe("Project & Workflow Tests", () => {
           name: "Multi-Unit Project",
           template_id: template.id,
           storage_backend_id: backend.id,
+          qq_group_id: "123456789",
           season_count: 1,
           units_per_season: 3,
         },
@@ -252,6 +279,7 @@ describe("Project & Workflow Tests", () => {
           name: "Dependency Project",
           template_id: template.id,
           storage_backend_id: backend.id,
+          qq_group_id: "123456789",
           season_count: 1,
           units_per_season: 1,
         },

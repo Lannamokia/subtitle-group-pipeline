@@ -107,6 +107,7 @@ export interface TestProjectData {
   owner_id: string;
   template_id?: string;
   storage_backend_id?: string;
+  qq_group_id?: string | null;
   status?: "draft" | "active" | "paused" | "completed" | "archived" | "cancelled" | "deleted";
   is_archived?: boolean;
   archived_at?: Date;
@@ -123,6 +124,7 @@ export async function createTestProject(data: TestProjectData) {
       owner_id: data.owner_id,
       template_id: data.template_id || null,
       storage_backend_id: data.storage_backend_id || null,
+      qq_group_id: data.qq_group_id ?? "123456789",
       status: data.status || "draft",
       is_archived: data.is_archived ?? false,
       archived_at: data.archived_at || null,

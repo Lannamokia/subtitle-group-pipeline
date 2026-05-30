@@ -101,6 +101,7 @@ export async function createProject(
       owner_id: ownerId,
       template_id: data.template_id,
       storage_backend_id: data.storage_backend_id,
+      qq_group_id: data.qq_group_id,
       status: "draft",
     },
     include: {
@@ -190,6 +191,7 @@ export async function createProjectFromTemplate(
       owner_id: ownerId,
       template_id: template.id,
       storage_backend_id: data.storage_backend_id,
+      qq_group_id: data.qq_group_id,
       workflow_config: template.roles,
       upload_policy_config: template.upload_policy,
       notification_policy: template.notification_policy,
@@ -509,6 +511,7 @@ export async function updateProject(
     description: data.description,
     status: data.status,
     current_season: data.current_season,
+    qq_group_id: data.qq_group_id,
   };
   if (data.delivery_checklist !== undefined) {
     updateData.delivery_checklist = JSON.stringify(data.delivery_checklist);

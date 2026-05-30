@@ -16,7 +16,7 @@ describe("Security Tests", () => {
   let app: Application;
 
   beforeAll(() => {
-    app = createApp();
+    app = createApp({ databaseReady: true });
   });
 
   beforeEach(async () => {
@@ -48,7 +48,7 @@ describe("Security Tests", () => {
         const res = await post(
           app,
           "/api/v1/projects",
-          { name: payload, description: "Test" },
+          { name: payload, description: "Test", qq_group_id: "123456789" },
           token
         );
 
@@ -185,6 +185,7 @@ describe("Security Tests", () => {
         {
           name: "XSS Project",
           description: xssPayloads.eventHandler,
+          qq_group_id: "123456789",
         },
         token
       );
@@ -356,6 +357,7 @@ describe("Security Tests", () => {
         {
           name: longString.substring(0, 250),
           description: longString,
+          qq_group_id: "123456789",
         },
         token
       );
@@ -431,7 +433,7 @@ describe("Security Tests", () => {
       const res = await post(
         app,
         "/api/v1/projects",
-        { name: "test\x00project" },
+        { name: "test\x00project", qq_group_id: "123456789" },
         token
       );
 
@@ -456,6 +458,7 @@ describe("Security Tests", () => {
         {
           name: "Number Test",
           current_season: 999999999,
+          qq_group_id: "123456789",
         },
         token
       );

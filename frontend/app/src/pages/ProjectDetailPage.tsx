@@ -1968,6 +1968,7 @@ function ActivityTab({ events }: { events: TimelineEvent[] }) {
 function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => void }) {
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const [name, setName] = useState(project.name);
+  const [qqGroupId, setQqGroupId] = useState(project.qqGroupId ?? "");
   const [deliveryChecklist, setDeliveryChecklist] = useState(project.deliveryChecklist ?? []);
   const [downloadLinkTtlSeconds, setDownloadLinkTtlSeconds] = useState(project.downloadLinkTtlSeconds ?? 300);
   const [wikiApprovalRequired, setWikiApprovalRequired] = useState(project.wikiApprovalRequired ?? false);
@@ -1979,6 +1980,7 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
     try {
       await projectApi.updateProject(project.id, {
         name,
+        qqGroupId: qqGroupId.trim(),
         deliveryChecklist,
         downloadLinkTtlSeconds,
         wikiApprovalRequired,
@@ -2019,6 +2021,15 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
               onChange={(e) => setName(e.target.value)}
               disabled={!isSupervisor}
             />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">项目 QQ 群号</label>
+            <Input
+              value={qqGroupId}
+              onChange={(e) => setQqGroupId(e.target.value)}
+              disabled={!isSupervisor}
+            />
+            <p className="text-xs text-gray-500">需要 QQ at 提醒的项目通知会发送到这个项目群。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">交付清单</label>

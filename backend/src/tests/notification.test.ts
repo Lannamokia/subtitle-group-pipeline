@@ -22,7 +22,7 @@ describe("Notification Tests", () => {
   let app: Application;
 
   beforeAll(() => {
-    app = createApp();
+    app = createApp({ databaseReady: true });
   });
 
   beforeEach(async () => {
@@ -484,6 +484,42 @@ Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Version A`;
       expect(delivery).toBeDefined();
       expect(delivery!.status).toBe("sent");
       expect(delivery!.external_id).toContain("mock-qq");
+    });
+
+    it("should use the project's QQ group for QQ notifications with project context", async () => {
+      const { user } = await createTestUser({ qq_number: "987654321" });
+      const { user: owner } = await createTestUser();
+      const project = await createTestProject({
+        owner_id: owner.id,
+        qq_group_id: "246813579",
+      });
+      await prisma.notificationPreference.create({
+        data: {
+          user_id: user.id,
+          qq_enabled: true,
+          in_site_enabled: true,
+          email_enabled: false,
+          task_assigned: true,
+        },
+      });
+
+      const notification = await notificationService.createNotification(user.id, "task_assigned", {
+        projectId: project.id,
+        projectName: project.name,
+        taskName: "Timing 01",
+      });
+
+      const qqDelivery = await prisma.notificationDelivery.findFirst({
+        where: {
+          notification_id: notification.id,
+          channel: "qq",
+        },
+        orderBy: { created_at: "desc" },
+      });
+
+      expect(qqDelivery).toBeDefined();
+      expect(qqDelivery!.status).toBe("sent");
+      expect(qqDelivery!.external_id).toContain("mock-qq");
     });
   });
 

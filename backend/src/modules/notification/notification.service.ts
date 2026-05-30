@@ -220,15 +220,23 @@ async function deliverToChannels(
   content: string,
   context: NotificationContext
 ) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      email: true,
-      qq_number: true,
-      notification_preferences: true,
-    },
-  });
+  const [user, project] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        qq_number: true,
+        notification_preferences: true,
+      },
+    }),
+    context.projectId
+      ? prisma.project.findUnique({
+          where: { id: context.projectId },
+          select: { qq_group_id: true },
+        })
+      : Promise.resolve(null),
+  ]);
 
   if (!user) return;
 
@@ -261,7 +269,11 @@ async function deliverToChannels(
         payload: {
           subject: title,
           body: content,
-          groupId: context.groupId || (typeof context.extra?.qq_group_id === "string" ? context.extra.qq_group_id : undefined),
+          groupId:
+            context.groupId ||
+            (typeof context.extra?.qq_group_id === "string" ? context.extra.qq_group_id : undefined) ||
+            project?.qq_group_id ||
+            undefined,
           notificationType: type,
         },
       });
