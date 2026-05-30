@@ -622,7 +622,14 @@ export function normalizeProject(raw: AnyRecord): Project {
 // Helper for error messages
 export function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
-    return error.response?.data?.error?.message || error.response?.data?.message || error.message || '请求失败';
+    const message = error.response?.data?.error?.message || error.response?.data?.message || error.message || '请求失败';
+    const code = error.response?.data?.error?.code;
+    if (code === 'DUPLICATE_ERROR') {
+      if (message.includes('Username')) return '用户名已被使用，请换一个用户名';
+      if (message.includes('QQ')) return 'QQ号已被其他账号使用，请检查后重新填写';
+      if (message.includes('Email')) return '邮箱已被注册，请换一个邮箱';
+    }
+    return message;
   }
   return '未知错误';
 }

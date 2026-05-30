@@ -91,6 +91,42 @@ describe("Auth & Registration Tests", () => {
       expectSuccess(res, 201);
       expect(res.body.data.user.status).toBe("active");
     });
+
+    it("should reject registration with a duplicate username", async () => {
+      await prisma.registrationPolicy.create({
+        data: { mode: "open", auto_approve: true },
+      });
+
+      await createTestUser({ username: "duplicate_name" });
+
+      const res = await post(app, "/api/v1/auth/register", {
+        username: "duplicate_name",
+        password: "Password123!",
+        nickname: "Duplicate User",
+        qq_number: "100200300",
+      });
+
+      expectError(res, 409, "DUPLICATE_ERROR");
+      expect(res.body.error.message).toContain("Username");
+    });
+
+    it("should reject registration with a duplicate QQ number", async () => {
+      await prisma.registrationPolicy.create({
+        data: { mode: "open", auto_approve: true },
+      });
+
+      await createTestUser({ qq_number: "99887766" });
+
+      const res = await post(app, "/api/v1/auth/register", {
+        username: unique("duplicateqq"),
+        password: "Password123!",
+        nickname: "Duplicate QQ",
+        qq_number: "99887766",
+      });
+
+      expectError(res, 409, "DUPLICATE_ERROR");
+      expect(res.body.error.message).toContain("QQ");
+    });
   });
 
   describe("Verification Codes", () => {
@@ -838,6 +874,28 @@ describe("Auth & Registration Tests", () => {
         password: "NewPass123!",
       });
       expectSuccess(loginRes, 200);
+    });
+
+    it("should reject managed account creation with a duplicate QQ number", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+      await createTestUser({ qq_number: "1122334455" });
+
+      const res = await post(
+        app,
+        "/api/v1/members",
+        {
+          username: "managed_duplicate_qq",
+          password: "Password123!",
+          nickname: "Managed Duplicate QQ",
+          qq_number: "1122334455",
+          role: "member",
+          status: "active",
+        },
+        admin.token
+      );
+
+      expectError(res, 409, "DUPLICATE_ERROR");
+      expect(res.body.error.message).toContain("QQ");
     });
 
     it("should allow admins to delete regular accounts but protect super admins", async () => {

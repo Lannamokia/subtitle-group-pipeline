@@ -156,6 +156,43 @@ async function createInitialTagApplications(userId: string, tagIds: string[]) {
   }
 }
 
+async function assertUniqueAccountIdentifiers(data: {
+  username: string;
+  email?: string | null;
+  qqNumber?: string | null;
+}) {
+  const [existingUsername, existingEmail, existingQQ] = await Promise.all([
+    prisma.user.findUnique({
+      where: { username: data.username },
+      select: { id: true },
+    }),
+    data.email
+      ? prisma.user.findUnique({
+          where: { email: data.email },
+          select: { id: true },
+        })
+      : Promise.resolve(null),
+    data.qqNumber
+      ? prisma.user.findFirst({
+          where: { qq_number: data.qqNumber },
+          select: { id: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (existingUsername) {
+    throw new AppError("Username already taken", "DUPLICATE_ERROR", 409);
+  }
+
+  if (existingEmail) {
+    throw new AppError("Email already registered", "DUPLICATE_ERROR", 409);
+  }
+
+  if (existingQQ) {
+    throw new AppError("QQ number already registered", "DUPLICATE_ERROR", 409);
+  }
+}
+
 export async function registerUser(data: RegisterInput) {
   // Get current registration policy
   const policy = await getLatestRegistrationPolicy();
@@ -170,27 +207,13 @@ export async function registerUser(data: RegisterInput) {
     );
   }
 
-  // Check for duplicate username
-  const existingUser = await prisma.user.findUnique({
-    where: { username: data.username },
-  });
-
-  if (existingUser) {
-    throw new AppError("Username already taken", "DUPLICATE_ERROR", 409);
-  }
-
-  // Check for duplicate email
-  if (data.email) {
-    const existingEmail = await prisma.user.findUnique({
-      where: { email: data.email },
-    });
-    if (existingEmail) {
-      throw new AppError("Email already registered", "DUPLICATE_ERROR", 409);
-    }
-  }
-
   const passwordHash = await hashPassword(data.password);
   const qqNumber = getRegisterQQNumber(data);
+  await assertUniqueAccountIdentifiers({
+    username: data.username,
+    email: data.email,
+    qqNumber,
+  });
   const tagIds = await validateRegistrationTagIds(data.tags);
 
   if (mode === "qq_verification") {
@@ -857,21 +880,12 @@ export async function createMember(actorId: string, data: CreateMemberInput) {
     throw new AppError("Supervisors can only create member accounts", "FORBIDDEN", 403);
   }
 
-  const existingUser = await prisma.user.findUnique({
-    where: { username: data.username },
+  const qqNumber = getMemberQQNumber(data);
+  await assertUniqueAccountIdentifiers({
+    username: data.username,
+    email: data.email,
+    qqNumber,
   });
-  if (existingUser) {
-    throw new AppError("Username already taken", "DUPLICATE_ERROR", 409);
-  }
-
-  if (data.email) {
-    const existingEmail = await prisma.user.findUnique({
-      where: { email: data.email },
-    });
-    if (existingEmail) {
-      throw new AppError("Email already registered", "DUPLICATE_ERROR", 409);
-    }
-  }
 
   const uniqueTagIds = [...new Set(data.tagIds ?? [])];
   if (uniqueTagIds.length > 0) {
@@ -885,7 +899,6 @@ export async function createMember(actorId: string, data: CreateMemberInput) {
   }
 
   const passwordHash = await hashPassword(data.password);
-  const qqNumber = getMemberQQNumber(data);
 
   const user = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
