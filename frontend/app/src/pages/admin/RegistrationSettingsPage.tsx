@@ -6,8 +6,6 @@ import { authApi, roleTagApi, getErrorMessage } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -78,6 +76,33 @@ const tagSchema = z.object({
 });
 
 type TagFormData = z.infer<typeof tagSchema>;
+
+const registrationModeOptions = [
+  {
+    value: "disabled" as const,
+    label: "禁止注册",
+    description: "关闭注册入口，仅管理员可创建账号",
+    icon: Lock,
+    activeClass: "border-red-200 bg-red-50/30",
+    iconClass: "text-red-500",
+  },
+  {
+    value: "open" as const,
+    label: "开放注册",
+    description: "任何人都可以直接注册并立即使用",
+    icon: Users,
+    activeClass: "border-green-200 bg-green-50/30",
+    iconClass: "text-green-500",
+  },
+  {
+    value: "qq_verification" as const,
+    label: "QQ群验证注册",
+    description: "注册后需要在指定QQ群发送验证指令激活账号",
+    icon: Shield,
+    activeClass: "border-primary-200 bg-primary-50/50",
+    iconClass: "text-primary-500",
+  },
+];
 
 export function RegistrationSettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
@@ -281,75 +306,43 @@ export function RegistrationSettingsPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormControl>
-                          <RadioGroup
-                            value={field.value}
-                            onValueChange={(value) =>
-                              setRegistrationMode(value as SettingsFormData["mode"])
-                            }
-                            className="space-y-4"
-                          >
-                            <div
-                              className={`flex items-start space-x-3 rounded-lg border p-3 md:p-4 cursor-pointer hover:bg-gray-50 ${
-                                mode === "disabled" ? "border-red-200 bg-red-50/30" : "border-gray-200"
-                              }`}
-                              onClick={() => setRegistrationMode("disabled")}
-                            >
-                              <RadioGroupItem value="disabled" id="disabled" className="mt-1" />
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <Lock className="w-4 h-4 text-red-500" />
-                                  <Label htmlFor="disabled" className="text-sm font-medium cursor-pointer">
-                                    禁止注册
-                                  </Label>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  关闭注册入口，仅管理员可创建账号
-                                </p>
-                              </div>
-                            </div>
-
-                            <div
-                              className={`flex items-start space-x-3 rounded-lg border p-3 md:p-4 cursor-pointer hover:bg-gray-50 ${
-                                mode === "open" ? "border-green-200 bg-green-50/30" : "border-gray-200"
-                              }`}
-                              onClick={() => setRegistrationMode("open")}
-                            >
-                              <RadioGroupItem value="open" id="open" className="mt-1" />
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <Users className="w-4 h-4 text-green-500" />
-                                  <Label htmlFor="open" className="text-sm font-medium cursor-pointer">
-                                    开放注册
-                                  </Label>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  任何人都可以直接注册并立即使用
-                                </p>
-                              </div>
-                            </div>
-
-                            <div
-                              className={`flex items-start space-x-3 rounded-lg border p-3 md:p-4 cursor-pointer ${
-                                mode === "qq_verification"
-                                  ? "border-primary-200 bg-primary-50/50"
-                                  : "border-gray-200 hover:bg-gray-50"
-                              }`}
-                              onClick={() => setRegistrationMode("qq_verification")}
-                            >
-                              <RadioGroupItem value="qq_verification" id="qq_verification" className="mt-1" />
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <Shield className="w-4 h-4 text-primary-500" />
-                                  <Label htmlFor="qq_verification" className="text-sm font-medium cursor-pointer">
-                                    QQ群验证注册
-                                  </Label>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  注册后需要在指定QQ群发送验证指令激活账号
-                                </p>
-                              </div>
-                            </div>
-                          </RadioGroup>
+                          <div className="space-y-4" role="radiogroup" aria-label="注册模式">
+                            {registrationModeOptions.map((option) => {
+                              const Icon = option.icon;
+                              const selected = field.value === option.value;
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={selected}
+                                  onClick={() => setRegistrationMode(option.value)}
+                                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors md:p-4 ${
+                                    selected
+                                      ? option.activeClass
+                                      : "border-gray-200 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  <span
+                                    className={`mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                                      selected ? "border-primary-500" : "border-gray-300"
+                                    }`}
+                                  >
+                                    {selected && <span className="h-2 w-2 rounded-full bg-primary-500" />}
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="flex items-center gap-2 text-sm font-medium text-gray-800">
+                                      <Icon className={`h-4 w-4 ${option.iconClass}`} />
+                                      {option.label}
+                                    </span>
+                                    <span className="mt-1 block text-xs text-gray-500">
+                                      {option.description}
+                                    </span>
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -379,7 +372,16 @@ export function RegistrationSettingsPage() {
                         <FormItem>
                           <FormLabel>验证码长度</FormLabel>
                           <FormControl>
-                            <Input type="number" min={4} max={12} {...field} />
+                            <Input
+                              type="number"
+                              min={4}
+                              max={12}
+                              value={field.value}
+                              onChange={(event) => field.onChange(event.target.valueAsNumber)}
+                              onBlur={field.onBlur}
+                              name={field.name}
+                              ref={field.ref}
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
