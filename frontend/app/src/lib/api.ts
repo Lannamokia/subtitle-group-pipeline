@@ -425,11 +425,13 @@ export function normalizeAnnouncement(raw: AnyRecord): Announcement {
     id: raw.id,
     type: raw.type ?? "global",
     projectId: raw.projectId ?? raw.project_id,
+    projectName: raw.projectName ?? raw.project?.name,
     title: raw.title ?? "",
     content: raw.content ?? "",
     createdBy: raw.createdBy ? normalizeUser(raw.createdBy) : raw.creator ? normalizeUser(raw.creator) : normalizeUser({ id: raw.created_by, username: "Unknown", role: "member", status: "active" }),
     createdAt: raw.createdAt ?? raw.created_at ?? "",
     expiresAt: raw.expiresAt ?? raw.expires_at,
+    isPinned: raw.isPinned ?? raw.is_pinned ?? false,
   };
 }
 
@@ -1067,11 +1069,13 @@ export const wikiApi = {
 // ========== Announcement API ==========
 
 export const announcementApi = {
-  getAnnouncements: (params?: { type?: string; projectId?: string }) =>
+  getAnnouncements: (params?: { type?: string; projectId?: string; page?: number; pageSize?: number }) =>
     api.get<ApiResponse<{ announcements: Announcement[] }>>(`/announcements`, {
       params: {
         type: params?.type,
         project_id: params?.projectId,
+        page: params?.page,
+        pageSize: params?.pageSize,
       },
     }).then((response) =>
       response.data.data.announcements.map((announcement) => normalizeAnnouncement(announcement as AnyRecord))

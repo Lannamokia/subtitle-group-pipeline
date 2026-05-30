@@ -80,7 +80,11 @@ export function DashboardPage() {
   // Get latest global and project announcements
   const globalAnnouncements = announcements.filter((a) => a.type === "global");
   const projectAnnouncements = announcements.filter((a) => a.type === "project");
-  const latestGlobalAnnouncement = globalAnnouncements[0];
+  const latestGlobalAnnouncement = [...globalAnnouncements].sort((a, b) => {
+    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  })[0];
+  const hiddenGlobalAnnouncementCount = Math.max(globalAnnouncements.length - 1, 0);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -108,19 +112,31 @@ export function DashboardPage() {
       {latestGlobalAnnouncement && (
         <div
           className="bg-primary-50 border border-primary-200 rounded-lg px-4 py-3 cursor-pointer hover:bg-primary-100/50 transition-colors"
-          onClick={() => navigate("/notifications")}
+          onClick={() => navigate(`/announcements#announcement-${latestGlobalAnnouncement.id}`)}
         >
-          <div className="flex items-center gap-2">
-            <Megaphone className="w-4 h-4 text-primary-500 shrink-0" />
+          <div className="flex items-start gap-3">
+            <Megaphone className="w-4 h-4 text-primary-500 shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
-              <span className="text-sm font-medium text-gray-800">
-                {latestGlobalAnnouncement.title}
-              </span>
-              <span className="text-sm text-gray-600 ml-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-gray-900">
+                  {latestGlobalAnnouncement.title}
+                </span>
+                {latestGlobalAnnouncement.isPinned && (
+                  <Badge variant="outline" className="text-[10px] bg-white/70">
+                    置顶
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs sm:text-sm text-gray-600 mt-1 line-clamp-2">
                 {latestGlobalAnnouncement.content}
-              </span>
+              </p>
+              {hiddenGlobalAnnouncementCount > 0 && (
+                <p className="text-xs text-primary-600 mt-1 font-medium">
+                  还有 {hiddenGlobalAnnouncementCount} 条公告待查看，点击进入公告页
+                </p>
+              )}
             </div>
-            <ArrowRight className="w-4 h-4 text-primary-400 shrink-0" />
+            <ArrowRight className="w-4 h-4 text-primary-400 shrink-0 mt-0.5" />
           </div>
         </div>
       )}

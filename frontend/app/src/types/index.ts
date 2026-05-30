@@ -422,11 +422,13 @@ export interface Announcement {
   id: string;
   type: 'global' | 'project';
   projectId?: string;
+  projectName?: string;
   title: string;
   content: string;
   createdBy: User;
   createdAt: string;
   expiresAt?: string;
+  isPinned?: boolean;
 }
 
 // ========== Admin Types ==========

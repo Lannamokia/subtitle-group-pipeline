@@ -9,6 +9,7 @@ import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
 import { DedupPage } from "@/pages/DedupPage";
 import { FileListPage } from "@/pages/FileListPage";
 import { NotificationPage } from "@/pages/NotificationPage";
+import { AnnouncementPage } from "@/pages/AnnouncementPage";
 import { MemberPage } from "@/pages/MemberPage";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { SkillProfilePage } from "@/pages/SkillProfilePage";
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/projects/:projectId/wiki" element={<WikiPage />} />
         <Route path="/files" element={<FileListPage />} />
         <Route path="/notifications" element={<NotificationPage />} />
+        <Route path="/announcements" element={<AnnouncementPage />} />
         <Route path="/notifications/settings" element={<Navigate to="/admin/settings?section=notifications" replace />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/skill-profile" element={<SkillProfilePage />} />
