@@ -1,6 +1,6 @@
 import { env } from "../../../config/env";
 
-const NONEBOT_HTTP_API = process.env.NONEBOT_HTTP_API || "http://localhost:8080";
+const NONEBOT_HTTP_API = process.env.NONEBOT_HTTP_API || "http://localhost:8095";
 const MAX_RETRIES = 3;
 
 export interface QQMessagePayload {
@@ -53,6 +53,7 @@ async function sendNoneBotRequest(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...(env.QQ_BRIDGE_TOKEN ? { Authorization: `Bearer ${env.QQ_BRIDGE_TOKEN}` } : {}),
       },
       body: JSON.stringify(payload),
     });

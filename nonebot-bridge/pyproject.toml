@@ -1,0 +1,13 @@
+[project]
+name = "subtitle-group-nonebot-bridge"
+version = "0.1.0"
+description = "Minimal NoneBot bridge for QQ verification and notifications."
+requires-python = ">=3.10"
+dependencies = [
+  "nonebot2[fastapi,httpx]>=2.4.0",
+  "nonebot-adapter-onebot>=2.4.0",
+]
+
+[tool.nonebot]
+plugins = ["plugins.qq_bridge"]
+adapters = [{ name = "OneBot V11", module_name = "nonebot.adapters.onebot.v11" }]

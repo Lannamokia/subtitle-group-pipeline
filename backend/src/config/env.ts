@@ -25,6 +25,7 @@ const envSchema = z.object({
 
   // NoneBot QQ (optional)
   NONEBOT_HTTP_API: z.string().optional(),
+  QQ_BRIDGE_TOKEN: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

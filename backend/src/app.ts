@@ -20,6 +20,7 @@ import wikiRoutes from "./modules/wiki/wiki.routes";
 import storageRoutes from "./modules/storage/storage.routes";
 import announcementRoutes from "./modules/announcement/announcement.routes";
 import timelineRoutes from "./modules/timeline/timeline.routes";
+import qqRoutes from "./modules/qq/qq.routes";
 import { downloadByToken } from "./modules/file/file.controller";
 import * as fileController from "./modules/file/file.controller";
 import { createLinkSchema } from "./modules/file/file.schema";
@@ -84,6 +85,10 @@ export function createApp(): Application {
       const result = await verifyByQQ({
         code: match[1],
         qq_group: group_id === undefined || group_id === null ? undefined : String(group_id),
+        qq_number:
+          req.body?.user_id === undefined || req.body?.user_id === null
+            ? undefined
+            : String(req.body.user_id),
       });
       res.json({ success: true, data: result });
     } catch (error) {
@@ -104,6 +109,7 @@ export function createApp(): Application {
   app.use(`${apiPrefix}/storage`, storageRoutes);
   app.use(`${apiPrefix}/announcements`, announcementRoutes);
   app.use(`${apiPrefix}/timeline`, timelineRoutes);
+  app.use(`${apiPrefix}/qq`, qqRoutes);
 
   // Compatibility aliases for frontend callers that use root-level member URLs.
   app.get(`${apiPrefix}/members`, authenticate, authController.getAllUsers);

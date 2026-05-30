@@ -234,6 +234,29 @@ describe("Auth & Registration Tests", () => {
       expect(updatedUser!.status).toBe("active");
     });
 
+    it("should accept verification through the QQ bridge endpoint", async () => {
+      await prisma.registrationPolicy.create({
+        data: { mode: "qq_verification", qq_group_number: "123456789" },
+      });
+
+      const registerRes = await post(app, "/api/v1/auth/register", {
+        username: unique("bridge_verify"),
+        password: "Password123!",
+        nickname: "Bridge Verify",
+        qq_number: "123123123",
+      });
+
+      const verifyRes = await post(app, "/api/v1/qq/verify", {
+        message: `/verify ${registerRes.body.data.copyReady}`,
+        group_id: "123456789",
+        user_id: "123123123",
+      });
+
+      expectSuccess(verifyRes, 200);
+      expect(verifyRes.body.data.success).toBe(true);
+      expect(verifyRes.body.data.user.status).toBe("active");
+    });
+
     it("should clean up verification association on success", async () => {
       await prisma.registrationPolicy.create({
         data: { mode: "qq_verification", qq_group_number: "123456789" },
