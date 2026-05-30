@@ -15,6 +15,7 @@ export interface User {
   role: UserRole;
   status: UserStatus;
   tags?: RoleTag[];
+  roleTags?: RoleTagDefinition[];
   token?: string;
   refreshToken?: string;
   createdAt: string;

@@ -125,6 +125,32 @@ export async function requestPasswordReset(
   }
 }
 
+export async function getRegistrationPolicy(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.getRegistrationPolicy();
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateRegistrationPolicy(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.updateRegistrationPolicy(req.body, req.user?.id);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getRoleTags(
   _req: Request,
   res: Response,
@@ -255,6 +281,19 @@ export async function getAllUsers(
   }
 }
 
+export async function createMember(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.createMember(req.user!.id, req.body);
+    successResponse(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function updateUserRole(
   req: AuthenticatedRequest,
   res: Response,
@@ -262,6 +301,19 @@ export async function updateUserRole(
 ): Promise<void> {
   try {
     const result = await authService.updateUserRole(String(req.params.id), req.body);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function resetUserPassword(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await authService.resetUserPassword(String(req.params.id), req.body);
     successResponse(res, result);
   } catch (error) {
     next(error);

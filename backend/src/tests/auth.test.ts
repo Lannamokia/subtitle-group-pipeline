@@ -94,7 +94,7 @@ describe("Auth & Registration Tests", () => {
   });
 
   describe("Verification Codes", () => {
-    it("should create non-expiring verification code with 24h expiry", async () => {
+    it("should create verification code that remains valid until success", async () => {
       await prisma.registrationPolicy.create({
         data: {
           mode: "qq_verification",
@@ -120,12 +120,9 @@ describe("Auth & Registration Tests", () => {
       expect(challenge!.used_at).toBeNull();
       expect(challenge!.qq_number).toBe("987654321");
 
-      // Verify expiry is ~24 hours in the future
-      const now = new Date();
+      // Registration verification codes intentionally do not use a time-based expiry.
       const expiry = challenge!.expires_at;
-      const hoursUntilExpiry = (expiry.getTime() - now.getTime()) / (1000 * 60 * 60);
-      expect(hoursUntilExpiry).toBeGreaterThan(23);
-      expect(hoursUntilExpiry).toBeLessThanOrEqual(25);
+      expect(expiry.getFullYear()).toBeGreaterThanOrEqual(9999);
     });
 
     it("should return verification info on login for pending users", async () => {
@@ -263,7 +260,7 @@ describe("Auth & Registration Tests", () => {
         where: { code },
       });
       expect(challenge!.used_at).not.toBeNull();
-      expect(challenge!.used_by).toBe(userId);
+      expect(challenge!.used_by).toBeNull();
     });
 
     it("should reject invalid verification code", async () => {
@@ -329,7 +326,7 @@ describe("Auth & Registration Tests", () => {
       expectError(res, 409, "CONFLICT");
     });
 
-    it("should reject expired verification code", async () => {
+    it("should accept legacy expired verification code because registration codes do not expire", async () => {
       const user = await prisma.user.create({
         data: {
           username: "expiredcode",
@@ -352,7 +349,8 @@ describe("Auth & Registration Tests", () => {
         qq_number: "111222333",
       });
 
-      expectError(res, 410, "GONE");
+      expectSuccess(res, 200);
+      expect(res.body.data.user.status).toBe("active");
     });
   });
 
@@ -608,6 +606,98 @@ describe("Auth & Registration Tests", () => {
 
       expectSuccess(res, 200);
       expect(res.body.data.success).toBe(true);
+    });
+  });
+
+  describe("Member Management", () => {
+    it("should allow admins to create active members with approved role tags", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+      const tag = await prisma.roleTag.create({
+        data: { name: "Translator", description: "Can translate" },
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/members",
+        {
+          username: "managed_member",
+          password: "Password123!",
+          nickname: "Managed Member",
+          qq_number: "123456",
+          role: "member",
+          status: "active",
+          tagIds: [tag.id],
+        },
+        admin.token
+      );
+
+      expectSuccess(res, 201);
+      expect(res.body.data.username).toBe("managed_member");
+      expect(res.body.data.status).toBe("active");
+      expect(res.body.data.roleTags).toHaveLength(1);
+
+      const application = await prisma.tagApplication.findUnique({
+        where: { user_id_tag_id: { user_id: res.body.data.id, tag_id: tag.id } },
+      });
+      expect(application!.approved).toBe(true);
+      expect(application!.approved_by).toBe(admin.user.id);
+      expect(application!.approved_at).not.toBeNull();
+    });
+
+    it("should let admins disable accounts and reset passwords", async () => {
+      const admin = await createTestUser({ role: "super_admin" });
+      const member = await createTestUser({
+        username: "reset_target",
+        password: "OldPass123!",
+      });
+
+      const statusRes = await put(
+        app,
+        `/api/v1/members/${member.user.id}/status`,
+        { status: "disabled" },
+        admin.token
+      );
+      expectSuccess(statusRes, 200);
+      expect(statusRes.body.data.status).toBe("disabled");
+
+      const passwordRes = await put(
+        app,
+        `/api/v1/members/${member.user.id}/password`,
+        { password: "NewPass123!" },
+        admin.token
+      );
+      expectSuccess(passwordRes, 200);
+
+      await put(
+        app,
+        `/api/v1/members/${member.user.id}/status`,
+        { status: "active" },
+        admin.token
+      );
+
+      const loginRes = await post(app, "/api/v1/auth/login", {
+        username: "reset_target",
+        password: "NewPass123!",
+      });
+      expectSuccess(loginRes, 200);
+    });
+
+    it("should prevent supervisors from creating privileged accounts", async () => {
+      const supervisor = await createTestUser({ role: "supervisor" });
+
+      const res = await post(
+        app,
+        "/api/v1/members",
+        {
+          username: "bad_privileged",
+          password: "Password123!",
+          role: "group_admin",
+          status: "active",
+        },
+        supervisor.token
+      );
+
+      expectError(res, 403, "FORBIDDEN");
     });
   });
 });

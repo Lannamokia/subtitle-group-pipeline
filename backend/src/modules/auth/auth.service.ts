@@ -9,13 +9,18 @@ import type {
   UpdateProfileInput,
   VerifyQQInput,
   RefreshTokenInput,
+  UpdateRegistrationPolicyInput,
   CreateRoleTagInput,
   UpdateRoleTagInput,
   CreateTagApplicationInput,
   ReviewTagApplicationInput,
   UpdateUserRoleInput,
   UpdateUserStatusInput,
+  CreateMemberInput,
+  ResetUserPasswordInput,
 } from "./auth.schema";
+
+const NON_EXPIRING_VERIFICATION_EXPIRES_AT = new Date("9999-12-31T23:59:59.999Z");
 
 function generateVerificationCode(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -26,13 +31,126 @@ function generateVerificationCode(): string {
   return result;
 }
 
-export async function registerUser(data: RegisterInput) {
-  // Get current registration policy
+function getRegisterQQNumber(data: RegisterInput): string | null | undefined {
+  return data.qq_number ?? data.qq;
+}
+
+function getMemberQQNumber(data: CreateMemberInput): string | null | undefined {
+  return data.qq_number ?? data.qq;
+}
+
+function buildPendingVerificationResponse(
+  user: unknown,
+  qqGroup: string | null | undefined,
+  code: string
+) {
+  const verifyCommand = `/verify ${code}`;
+
+  const response: Record<string, unknown> = {
+    status: "pending_verification" as const,
+    requiresVerification: true,
+    qqGroup: qqGroup || null,
+    verifyCommand,
+    copyReady: code,
+    verification: {
+      qqGroup: qqGroup || "",
+      command: verifyCommand,
+    },
+  };
+
+  if (user) {
+    response.user = user;
+  }
+
+  return response;
+}
+
+function serializeRegistrationPolicy(policy: {
+  mode: string;
+  require_qq: boolean;
+  qq_group_number: string | null;
+  welcome_message: string | null;
+  auto_approve: boolean;
+  updated_at: Date;
+}) {
+  return {
+    mode: policy.mode,
+    require_qq: policy.require_qq,
+    qq_group_number: policy.qq_group_number,
+    qqGroup: policy.qq_group_number || "",
+    welcome_message: policy.welcome_message,
+    auto_approve: policy.auto_approve,
+    codeLength: 8,
+    roleTagEnabled: true,
+    updated_at: policy.updated_at,
+  };
+}
+
+async function getLatestRegistrationPolicy() {
   const policy = await prisma.registrationPolicy.findFirst({
     orderBy: { created_at: "desc" },
   });
 
-  const mode = policy?.mode ?? "open";
+  if (policy) {
+    return policy;
+  }
+
+  return prisma.registrationPolicy.create({
+    data: {
+      mode: "open",
+      require_qq: false,
+      auto_approve: true,
+    },
+  });
+}
+
+async function createVerificationChallenge(userId: string, qqNumber?: string | null) {
+  const code = generateVerificationCode();
+
+  await prisma.verificationChallenge.create({
+    data: {
+      code,
+      qq_number: qqNumber || "",
+      expires_at: NON_EXPIRING_VERIFICATION_EXPIRES_AT,
+      used_by: userId,
+    },
+  });
+
+  return code;
+}
+
+async function createInitialTagApplications(userId: string, tags: RegisterInput["tags"]) {
+  if (!tags || tags.length === 0) {
+    return;
+  }
+
+  for (const role of [...new Set(tags)]) {
+    const tag = await prisma.roleTag.upsert({
+      where: { name: role },
+      update: {},
+      create: {
+        name: role,
+        description: `Registration intent for ${role}`,
+      },
+    });
+
+    await prisma.tagApplication.upsert({
+      where: { user_id_tag_id: { user_id: userId, tag_id: tag.id } },
+      update: {},
+      create: {
+        user_id: userId,
+        tag_id: tag.id,
+        reason: "Selected during registration",
+      },
+    });
+  }
+}
+
+export async function registerUser(data: RegisterInput) {
+  // Get current registration policy
+  const policy = await getLatestRegistrationPolicy();
+
+  const mode = policy.mode;
 
   if (mode === "disabled") {
     throw new AppError(
@@ -62,6 +180,7 @@ export async function registerUser(data: RegisterInput) {
   }
 
   const passwordHash = await hashPassword(data.password);
+  const qqNumber = getRegisterQQNumber(data);
 
   if (mode === "qq_verification") {
     // Create user with pending verification status
@@ -71,7 +190,7 @@ export async function registerUser(data: RegisterInput) {
         password_hash: passwordHash,
         nickname: data.nickname || data.username,
         email: data.email,
-        qq_number: data.qq_number,
+        qq_number: qqNumber,
         role: "member",
         status: "pending_verification",
       },
@@ -87,30 +206,11 @@ export async function registerUser(data: RegisterInput) {
       },
     });
 
-    // Generate verification challenge
-    const code = generateVerificationCode();
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    await createInitialTagApplications(user.id, data.tags);
 
-    await prisma.verificationChallenge.create({
-      data: {
-        code,
-        qq_number: data.qq_number || "",
-        expires_at: expiresAt,
-        used_by: user.id,
-      },
-    });
+    const code = await createVerificationChallenge(user.id, qqNumber);
 
-    const verifyCommand = policy?.qq_group_number
-      ? `/verify ${code}`
-      : `/verify ${code}`;
-
-    return {
-      user,
-      requiresVerification: true,
-      qqGroup: policy?.qq_group_number || null,
-      verifyCommand,
-      copyReady: code,
-    };
+    return buildPendingVerificationResponse(user, policy.qq_group_number, code);
   }
 
   // open mode: create active user
@@ -120,7 +220,7 @@ export async function registerUser(data: RegisterInput) {
       password_hash: passwordHash,
       nickname: data.nickname || data.username,
       email: data.email,
-      qq_number: data.qq_number,
+      qq_number: qqNumber,
       role: "member",
       status: "active",
     },
@@ -135,6 +235,8 @@ export async function registerUser(data: RegisterInput) {
     },
   });
 
+  await createInitialTagApplications(user.id, data.tags);
+
   const token = signToken({
     userId: user.id,
     username: user.username,
@@ -147,7 +249,7 @@ export async function registerUser(data: RegisterInput) {
     role: user.role,
   });
 
-  return { user, token, refreshToken };
+  return { status: "active" as const, user, token, refreshToken };
 }
 
 export async function loginUser(data: LoginInput) {
@@ -166,44 +268,24 @@ export async function loginUser(data: LoginInput) {
 
   // Handle pending verification - return special response, NOT a session
   if (user.status === "pending_verification") {
-    const policy = await prisma.registrationPolicy.findFirst({
-      orderBy: { created_at: "desc" },
-    });
+    const policy = await getLatestRegistrationPolicy();
 
     const challenge = await prisma.verificationChallenge.findFirst({
       where: {
         used_by: user.id,
         used_at: null,
-        expires_at: { gt: new Date() },
       },
       orderBy: { created_at: "desc" },
     });
 
-    const code = challenge?.code ?? generateVerificationCode();
+    let code = challenge?.code;
 
     // If no active challenge, create a new one
-    if (!challenge) {
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      await prisma.verificationChallenge.create({
-        data: {
-          code,
-          qq_number: user.qq_number || "",
-          expires_at: expiresAt,
-          used_by: user.id,
-        },
-      });
+    if (!code) {
+      code = await createVerificationChallenge(user.id, user.qq_number);
     }
 
-    const verifyCommand = policy?.qq_group_number
-      ? `/verify ${code}`
-      : `/verify ${code}`;
-
-    return {
-      requiresVerification: true,
-      qqGroup: policy?.qq_group_number || null,
-      verifyCommand,
-      copyReady: code,
-    };
+    return buildPendingVerificationResponse(null, policy.qq_group_number, code);
   }
 
   // Handle disabled account
@@ -256,23 +338,15 @@ export async function verifyByQQ(data: VerifyQQInput) {
     throw new AppError("Verification code already used", "CONFLICT", 409);
   }
 
-  if (challenge.expires_at < new Date()) {
-    throw new AppError("Verification code expired", "GONE", 410);
-  }
-
   // Validate QQ group matches configured group (if configured)
-  const policy = await prisma.registrationPolicy.findFirst({
-    orderBy: { created_at: "desc" },
-  });
+  const policy = await getLatestRegistrationPolicy();
 
-  if (policy?.qq_group_number && data.qq_group) {
-    if (data.qq_group !== policy.qq_group_number) {
-      throw new AppError(
-        "QQ group number does not match configured group",
-        "FORBIDDEN",
-        403
-      );
-    }
+  if (policy.qq_group_number && data.qq_group !== policy.qq_group_number) {
+    throw new AppError(
+      "QQ group number does not match configured group",
+      "FORBIDDEN",
+      403
+    );
   }
 
   // Find the user associated with this challenge
@@ -312,6 +386,7 @@ export async function verifyByQQ(data: VerifyQQInput) {
     where: { id: challenge.id },
     data: {
       used_at: new Date(),
+      used_by: null,
     },
   });
 
@@ -330,10 +405,36 @@ export async function verifyByQQ(data: VerifyQQInput) {
 
   return {
     success: true,
+    status: "active" as const,
     user: activatedUser,
     token,
     refreshToken,
   };
+}
+
+export async function getRegistrationPolicy() {
+  const policy = await getLatestRegistrationPolicy();
+  return serializeRegistrationPolicy(policy);
+}
+
+export async function updateRegistrationPolicy(
+  data: UpdateRegistrationPolicyInput,
+  actorId?: string
+) {
+  const qqGroup = data.qq_group_number ?? data.qqGroup ?? null;
+
+  const policy = await prisma.registrationPolicy.create({
+    data: {
+      mode: data.mode,
+      require_qq: data.require_qq ?? data.mode === "qq_verification",
+      qq_group_number: qqGroup || null,
+      welcome_message: data.welcome_message ?? null,
+      auto_approve: data.auto_approve ?? data.mode !== "qq_verification",
+      updated_by: actorId,
+    },
+  });
+
+  return serializeRegistrationPolicy(policy);
 }
 
 export async function refreshToken(data: RefreshTokenInput) {
@@ -618,7 +719,7 @@ export async function getMyTagApplications(userId: string) {
 
 export async function getPendingTagApplications() {
   return prisma.tagApplication.findMany({
-    where: { approved: false },
+    where: { approved: false, approved_by: null },
     include: {
       tag: true,
       user: { select: { id: true, username: true, nickname: true } },
@@ -648,20 +749,126 @@ export async function reviewTagApplication(adminId: string, data: ReviewTagAppli
   });
 }
 
-export async function getAllUsers() {
-  return prisma.user.findMany({
+const userSelect = {
+  id: true,
+  username: true,
+  nickname: true,
+  avatar_url: true,
+  role: true,
+  status: true,
+  qq_number: true,
+  created_at: true,
+  tag_applications: {
+    where: { approved: true },
     select: {
-      id: true,
-      username: true,
-      nickname: true,
-      avatar_url: true,
-      role: true,
-      status: true,
-      qq_number: true,
-      created_at: true,
+      tag: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          color: true,
+          created_at: true,
+        },
+      },
     },
+    orderBy: { created_at: "asc" as const },
+  },
+};
+
+function serializeManagedUser<T extends { tag_applications?: Array<{ tag: unknown }> }>(user: T) {
+  const { tag_applications, ...rest } = user;
+  return {
+    ...rest,
+    roleTags: tag_applications?.map((application) => application.tag) ?? [],
+  };
+}
+
+export async function createMember(actorId: string, data: CreateMemberInput) {
+  const actor = await prisma.user.findUnique({
+    where: { id: actorId },
+    select: { id: true, role: true },
+  });
+
+  if (!actor) {
+    throw new AppError("Actor not found", "NOT_FOUND", 404);
+  }
+
+  if (actor.role === "supervisor" && data.role !== "member") {
+    throw new AppError("Supervisors can only create member accounts", "FORBIDDEN", 403);
+  }
+
+  const existingUser = await prisma.user.findUnique({
+    where: { username: data.username },
+  });
+  if (existingUser) {
+    throw new AppError("Username already taken", "DUPLICATE_ERROR", 409);
+  }
+
+  if (data.email) {
+    const existingEmail = await prisma.user.findUnique({
+      where: { email: data.email },
+    });
+    if (existingEmail) {
+      throw new AppError("Email already registered", "DUPLICATE_ERROR", 409);
+    }
+  }
+
+  const uniqueTagIds = [...new Set(data.tagIds ?? [])];
+  if (uniqueTagIds.length > 0) {
+    const tags = await prisma.roleTag.findMany({
+      where: { id: { in: uniqueTagIds } },
+      select: { id: true },
+    });
+    if (tags.length !== uniqueTagIds.length) {
+      throw new AppError("One or more role tags do not exist", "VALIDATION_ERROR", 400);
+    }
+  }
+
+  const passwordHash = await hashPassword(data.password);
+  const qqNumber = getMemberQQNumber(data);
+
+  const user = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        username: data.username,
+        password_hash: passwordHash,
+        nickname: data.nickname || data.username,
+        email: data.email,
+        qq_number: qqNumber,
+        role: data.role,
+        status: data.status,
+      },
+      select: userSelect,
+    });
+
+    for (const tagId of uniqueTagIds) {
+      await tx.tagApplication.create({
+        data: {
+          user_id: created.id,
+          tag_id: tagId,
+          reason: "Directly assigned by administrator",
+          approved: true,
+          approved_by: actorId,
+          approved_at: new Date(),
+        },
+      });
+    }
+
+    return tx.user.findUniqueOrThrow({
+      where: { id: created.id },
+      select: userSelect,
+    });
+  });
+
+  return serializeManagedUser(user);
+}
+
+export async function getAllUsers() {
+  const users = await prisma.user.findMany({
+    select: userSelect,
     orderBy: { created_at: "desc" },
   });
+  return users.map(serializeManagedUser);
 }
 
 export async function updateUserRole(userId: string, data: UpdateUserRoleInput) {
@@ -671,18 +878,12 @@ export async function updateUserRole(userId: string, data: UpdateUserRoleInput) 
   if (!user) {
     throw new AppError("User not found", "NOT_FOUND", 404);
   }
-  return prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: { role: data.role },
-    select: {
-      id: true,
-      username: true,
-      nickname: true,
-      avatar_url: true,
-      role: true,
-      status: true,
-    },
+    select: userSelect,
   });
+  return serializeManagedUser(updated);
 }
 
 export async function updateUserStatus(userId: string, data: UpdateUserStatusInput) {
@@ -692,16 +893,27 @@ export async function updateUserStatus(userId: string, data: UpdateUserStatusInp
   if (!user) {
     throw new AppError("User not found", "NOT_FOUND", 404);
   }
-  return prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: { status: data.status },
-    select: {
-      id: true,
-      username: true,
-      nickname: true,
-      avatar_url: true,
-      role: true,
-      status: true,
-    },
+    select: userSelect,
   });
+  return serializeManagedUser(updated);
+}
+
+export async function resetUserPassword(userId: string, data: ResetUserPasswordInput) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+  if (!user) {
+    throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  const newHash = await hashPassword(data.password);
+  await prisma.user.update({
+    where: { id: userId },
+    data: { password_hash: newHash },
+  });
+
+  return { success: true };
 }

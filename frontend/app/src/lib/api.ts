@@ -120,6 +120,11 @@ export function normalizeUser(raw: AnyRecord): User {
     avatar: raw.avatar ?? raw.avatar_url,
     role: raw.role,
     status: raw.status,
+    roleTags: Array.isArray(raw.roleTags)
+      ? raw.roleTags.map((tag: AnyRecord) => normalizeRoleTag(tag))
+      : Array.isArray(raw.role_tags)
+        ? raw.role_tags.map((tag: AnyRecord) => normalizeRoleTag(tag))
+        : undefined,
     token: raw.token,
     refreshToken: raw.refreshToken,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
@@ -1068,9 +1073,35 @@ export const memberApi = {
       pageSize: params?.pageSize ?? response.data.data.items.length,
     })),
 
+  createMember: (data: {
+    username: string;
+    password: string;
+    nickname?: string;
+    qq?: string;
+    role: string;
+    status: "active" | "disabled";
+    tagIds?: string[];
+  }) =>
+    api.post<ApiResponse<unknown>>('/members', {
+      username: data.username,
+      password: data.password,
+      nickname: data.nickname || undefined,
+      qq_number: data.qq || undefined,
+      role: data.role,
+      status: data.status,
+      tagIds: data.tagIds,
+    }).then((response) => normalizeUser(response.data.data as AnyRecord)),
+
   updateMemberRole: (id: string, role: string) =>
-    api.put<ApiResponse<User>>(`/members/${id}/role`, { role }).then(extractData),
+    api.put<ApiResponse<unknown>>(`/members/${id}/role`, { role }).then((response) =>
+      normalizeUser(response.data.data as AnyRecord)
+    ),
 
   updateMemberStatus: (id: string, status: string) =>
-    api.put<ApiResponse<User>>(`/members/${id}/status`, { status }).then(extractData),
+    api.put<ApiResponse<unknown>>(`/members/${id}/status`, { status }).then((response) =>
+      normalizeUser(response.data.data as AnyRecord)
+    ),
+
+  resetPassword: (id: string, password: string) =>
+    api.put<ApiResponse<void>>(`/members/${id}/password`, { password }).then(extractData),
 };

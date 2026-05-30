@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+const taskRoleSchema = z.enum([
+  "source",
+  "timing",
+  "translation",
+  "post_production",
+  "encoding",
+  "release",
+  "supervisor",
+]);
+
 export const registerSchema = z.object({
   username: z
     .string()
@@ -16,6 +26,8 @@ export const registerSchema = z.object({
   nickname: z.string().max(50).optional(),
   email: z.string().email("Invalid email address").optional().nullable(),
   qq_number: z.string().max(20).optional().nullable(),
+  qq: z.string().max(20).optional().nullable(),
+  tags: z.array(taskRoleSchema).optional().default([]),
 });
 
 export const loginSchema = z.object({
@@ -46,6 +58,17 @@ export const verifyQQSchema = z.object({
   code: z.string().min(1, "Verification code is required"),
   qq_number: z.string().optional(),
   qq_group: z.string().optional(),
+});
+
+export const updateRegistrationPolicySchema = z.object({
+  mode: z.enum(["disabled", "open", "qq_verification"]),
+  require_qq: z.boolean().optional(),
+  qq_group_number: z.string().max(50).optional().nullable(),
+  qqGroup: z.string().max(50).optional().nullable(),
+  welcome_message: z.string().max(1000).optional().nullable(),
+  auto_approve: z.boolean().optional(),
+  codeLength: z.number().int().optional(),
+  roleTagEnabled: z.boolean().optional(),
 });
 
 export const requestPasswordResetSchema = z.object({
@@ -83,12 +106,42 @@ export const updateUserStatusSchema = z.object({
   status: z.enum(["active", "disabled", "pending_verification"]),
 });
 
+export const createMemberSchema = z.object({
+  username: z
+    .string()
+    .min(3, "Username must be at least 3 characters")
+    .max(30, "Username must be at most 30 characters")
+    .regex(
+      /^[a-zA-Z0-9_\-]+$/,
+      "Username can only contain letters, numbers, underscores, and hyphens"
+    ),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(128, "Password must be at most 128 characters"),
+  nickname: z.string().max(50).optional().nullable(),
+  email: z.string().email("Invalid email address").optional().nullable(),
+  qq_number: z.string().max(20).optional().nullable(),
+  qq: z.string().max(20).optional().nullable(),
+  role: z.enum(["super_admin", "group_admin", "supervisor", "member"]).default("member"),
+  status: z.enum(["active", "disabled"]).default("active"),
+  tagIds: z.array(z.string().uuid("Invalid tag ID")).optional().default([]),
+});
+
+export const resetUserPasswordSchema = z.object({
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(128, "Password must be at most 128 characters"),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type VerifyQQInput = z.infer<typeof verifyQQSchema>;
+export type UpdateRegistrationPolicyInput = z.infer<typeof updateRegistrationPolicySchema>;
 export type RequestPasswordResetInput = z.infer<typeof requestPasswordResetSchema>;
 export type CreateRoleTagInput = z.infer<typeof createRoleTagSchema>;
 export type UpdateRoleTagInput = z.infer<typeof updateRoleTagSchema>;
@@ -96,3 +149,5 @@ export type CreateTagApplicationInput = z.infer<typeof createTagApplicationSchem
 export type ReviewTagApplicationInput = z.infer<typeof reviewTagApplicationSchema>;
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;
+export type CreateMemberInput = z.infer<typeof createMemberSchema>;
+export type ResetUserPasswordInput = z.infer<typeof resetUserPasswordSchema>;

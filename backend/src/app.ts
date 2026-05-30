@@ -4,6 +4,9 @@ import helmet from "helmet";
 import morgan from "morgan";
 import { env } from "./config/env";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { authenticate, requireRole } from "./middleware/auth";
+import { validateBody, validateQuery, validateParams } from "./middleware/validate";
+import { z } from "zod";
 
 // Route imports
 import authRoutes from "./modules/auth/auth.routes";
@@ -18,6 +21,15 @@ import storageRoutes from "./modules/storage/storage.routes";
 import announcementRoutes from "./modules/announcement/announcement.routes";
 import timelineRoutes from "./modules/timeline/timeline.routes";
 import { downloadByToken } from "./modules/file/file.controller";
+import * as fileController from "./modules/file/file.controller";
+import { createLinkSchema } from "./modules/file/file.schema";
+import * as authController from "./modules/auth/auth.controller";
+import {
+  updateUserRoleSchema,
+  updateUserStatusSchema,
+  createMemberSchema,
+  resetUserPasswordSchema,
+} from "./modules/auth/auth.schema";
 
 export function createApp(): Application {
   const app = express();
@@ -69,7 +81,10 @@ export function createApp(): Application {
         return;
       }
       const { verifyByQQ } = await import("./modules/auth/auth.service");
-      const result = await verifyByQQ({ code: match[1], qq_group: group_id });
+      const result = await verifyByQQ({
+        code: match[1],
+        qq_group: group_id === undefined || group_id === null ? undefined : String(group_id),
+      });
       res.json({ success: true, data: result });
     } catch (error) {
       next(error);
@@ -89,6 +104,59 @@ export function createApp(): Application {
   app.use(`${apiPrefix}/storage`, storageRoutes);
   app.use(`${apiPrefix}/announcements`, announcementRoutes);
   app.use(`${apiPrefix}/timeline`, timelineRoutes);
+
+  // Compatibility aliases for frontend callers that use root-level member URLs.
+  app.get(`${apiPrefix}/members`, authenticate, authController.getAllUsers);
+  app.get(`${apiPrefix}/users`, authenticate, authController.getAllUsers);
+  app.post(
+    `${apiPrefix}/members`,
+    authenticate,
+    requireRole("super_admin", "group_admin", "supervisor"),
+    validateBody(createMemberSchema),
+    authController.createMember
+  );
+  app.put(
+    `${apiPrefix}/members/:id/role`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    validateBody(updateUserRoleSchema),
+    authController.updateUserRole
+  );
+  app.put(
+    `${apiPrefix}/members/:id/status`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    validateBody(updateUserStatusSchema),
+    authController.updateUserStatus
+  );
+  app.put(
+    `${apiPrefix}/members/:id/password`,
+    authenticate,
+    requireRole("super_admin", "group_admin"),
+    validateBody(resetUserPasswordSchema),
+    authController.resetUserPassword
+  );
+  app.get(
+    `${apiPrefix}/links`,
+    authenticate,
+    validateQuery(z.object({
+      project_id: z.string().uuid().optional(),
+      projectId: z.string().uuid().optional(),
+    })),
+    fileController.getLinks
+  );
+  app.post(
+    `${apiPrefix}/links`,
+    authenticate,
+    validateBody(createLinkSchema),
+    fileController.createLink
+  );
+  app.delete(
+    `${apiPrefix}/links/:linkId`,
+    authenticate,
+    validateParams(z.object({ linkId: z.string().uuid("Invalid link ID") })),
+    fileController.deleteLink
+  );
 
   // 404 handler
   app.use(notFoundHandler);

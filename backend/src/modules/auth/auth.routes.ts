@@ -9,6 +9,7 @@ import {
   changePasswordSchema,
   updateProfileSchema,
   verifyQQSchema,
+  updateRegistrationPolicySchema,
   requestPasswordResetSchema,
   createRoleTagSchema,
   updateRoleTagSchema,
@@ -16,6 +17,8 @@ import {
   reviewTagApplicationSchema,
   updateUserRoleSchema,
   updateUserStatusSchema,
+  createMemberSchema,
+  resetUserPasswordSchema,
 } from "./auth.schema";
 
 const router = Router();
@@ -116,6 +119,14 @@ router.put("/profile", authenticate, validateBody(updateProfileSchema), controll
 router.post("/change-password", authenticate, validateBody(changePasswordSchema), controller.changePassword);
 router.post("/verify-qq", validateBody(verifyQQSchema), controller.verifyQQ);
 router.post("/request-password-reset", rateLimitMiddleware, validateBody(requestPasswordResetSchema), controller.requestPasswordReset);
+router.get("/registration-policy", controller.getRegistrationPolicy);
+router.put(
+  "/registration-policy",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateBody(updateRegistrationPolicySchema),
+  controller.updateRegistrationPolicy
+);
 
 // Role tags
 router.get("/role-tags", authenticate, controller.getRoleTags);
@@ -131,7 +142,9 @@ router.post("/tag-applications/review", authenticate, requireRole("super_admin",
 // Member management routes (compatibility for /members and /users)
 router.get("/members", authenticate, controller.getAllUsers);
 router.get("/users", authenticate, controller.getAllUsers);
+router.post("/members", authenticate, requireRole("super_admin", "group_admin", "supervisor"), validateBody(createMemberSchema), controller.createMember);
 router.put("/members/:id/role", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserRoleSchema), controller.updateUserRole);
 router.put("/members/:id/status", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateUserStatusSchema), controller.updateUserStatus);
+router.put("/members/:id/password", authenticate, requireRole("super_admin", "group_admin"), validateBody(resetUserPasswordSchema), controller.resetUserPassword);
 
 export default router;
