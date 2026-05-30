@@ -32,6 +32,7 @@ import type {
   DataRetentionSettings,
   SystemBrandingSettings,
   SmtpSettings,
+  QqBridgeSettings,
   GlobalHealthStatus,
   ApiResponse,
   PaginatedResponse,
@@ -493,6 +494,15 @@ export function normalizeSmtpSettings(raw: AnyRecord): SmtpSettings {
   };
 }
 
+export function normalizeQqBridgeSettings(raw: AnyRecord): QqBridgeSettings {
+  return {
+    enabled: Boolean(raw.enabled),
+    endpoint: raw.endpoint ?? null,
+    secretConfigured: Boolean(raw.secretConfigured ?? raw.secret_configured),
+    updatedAt: raw.updatedAt ?? raw.updated_at ?? null,
+  };
+}
+
 export function normalizeGlobalHealth(raw: AnyRecord): GlobalHealthStatus {
   const database = (raw.database ?? {}) as AnyRecord;
   const qqBridge = (raw.qqBridge ?? raw.qq_bridge ?? {}) as AnyRecord;
@@ -908,6 +918,20 @@ export const systemApi = {
       reject_unauthorized: data.rejectUnauthorized,
     }).then((response) =>
       normalizeSmtpSettings(response.data.data as AnyRecord)
+    ),
+
+  getQqBridgeSettings: () =>
+    api.get<ApiResponse<unknown>>('/system/qq-bridge').then((response) =>
+      normalizeQqBridgeSettings(response.data.data as AnyRecord)
+    ),
+
+  updateQqBridgeSettings: (data: QqBridgeSettings) =>
+    api.put<ApiResponse<unknown>>('/system/qq-bridge', {
+      enabled: data.enabled,
+      endpoint: data.endpoint || null,
+      secret: data.secret || null,
+    }).then((response) =>
+      normalizeQqBridgeSettings(response.data.data as AnyRecord)
     ),
 
   getGlobalHealth: () =>

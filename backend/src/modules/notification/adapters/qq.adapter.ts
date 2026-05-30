@@ -1,6 +1,5 @@
 import { env } from "../../../config/env";
 
-const NONEBOT_HTTP_API = process.env.NONEBOT_HTTP_API || "http://localhost:8095";
 const MAX_RETRIES = 3;
 
 export interface QQMessagePayload {
@@ -20,8 +19,22 @@ export interface QQResult {
   error?: string;
 }
 
-export function getQQBridgeEndpoint(): string {
-  return NONEBOT_HTTP_API;
+async function getRuntimeSettings() {
+  const systemService = await import("../../system/system.service");
+  return systemService.getQqBridgeRuntimeSettings();
+}
+
+export async function getQQBridgeEndpoint(): Promise<string | null> {
+  const settings = await getRuntimeSettings();
+  return settings.enabled ? settings.endpoint : null;
+}
+
+async function getConfiguredBridge() {
+  const settings = await getRuntimeSettings();
+  if (!settings.enabled || !settings.endpoint) {
+    return null;
+  }
+  return settings;
 }
 
 function formatAtMention(qqNumber: string): string {
@@ -29,16 +42,17 @@ function formatAtMention(qqNumber: string): string {
 }
 
 export async function checkQQBridgeHealth(): Promise<QQResult> {
-  if ((env.NODE_ENV === "development" || env.NODE_ENV === "test") && !process.env.NONEBOT_HTTP_API) {
-    return { success: true, messageId: "mock-qq-bridge" };
+  const bridge = await getConfiguredBridge();
+  if (!bridge) {
+    return { success: false, error: "QQ bridge is not configured" };
   }
 
   try {
-    const response = await fetch(`${NONEBOT_HTTP_API}/get_status`, {
+    const response = await fetch(`${bridge.endpoint}/get_status`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(env.QQ_BRIDGE_TOKEN ? { Authorization: `Bearer ${env.QQ_BRIDGE_TOKEN}` } : {}),
+        ...(bridge.secret ? { Authorization: `Bearer ${bridge.secret}` } : {}),
       },
       body: JSON.stringify({}),
       signal: AbortSignal.timeout(3000),
@@ -81,12 +95,20 @@ async function sendNoneBotRequest(
   payload: Record<string, unknown>,
   retryCount = 0
 ): Promise<QQResult> {
+  const bridge = await getConfiguredBridge();
+  if (!bridge) {
+    if (env.NODE_ENV === "development" || env.NODE_ENV === "test") {
+      return { success: true, messageId: `mock-qq-${Date.now()}` };
+    }
+    return { success: false, error: "QQ bridge is not configured" };
+  }
+
   try {
-    const response = await fetch(`${NONEBOT_HTTP_API}${endpoint}`, {
+    const response = await fetch(`${bridge.endpoint}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(env.QQ_BRIDGE_TOKEN ? { Authorization: `Bearer ${env.QQ_BRIDGE_TOKEN}` } : {}),
+        ...(bridge.secret ? { Authorization: `Bearer ${bridge.secret}` } : {}),
       },
       body: JSON.stringify(payload),
     });
@@ -116,14 +138,6 @@ async function sendNoneBotRequest(
 }
 
 export async function sendGroupMessage(payload: QQMessagePayload): Promise<QQResult> {
-  if ((env.NODE_ENV === "development" || env.NODE_ENV === "test") && !process.env.NONEBOT_HTTP_API) {
-    console.log(
-      `[QQAdapter] Would send group message to ${payload.groupId}: ${payload.content}` +
-        (payload.atUsers?.length ? ` (at: ${payload.atUsers.join(", ")})` : "")
-    );
-    return { success: true, messageId: `mock-qq-${Date.now()}` };
-  }
-
   return sendNoneBotRequest("/send_group_msg", {
     group_id: payload.groupId,
     message: buildGroupMessageContent(payload),
@@ -144,11 +158,6 @@ export async function sendAtMention(
 }
 
 export async function sendPrivateMessage(payload: QQPrivatePayload): Promise<QQResult> {
-  if ((env.NODE_ENV === "development" || env.NODE_ENV === "test") && !process.env.NONEBOT_HTTP_API) {
-    console.log(`[QQAdapter] Would send private message to ${payload.userId}: ${payload.content}`);
-    return { success: true, messageId: `mock-qq-private-${Date.now()}` };
-  }
-
   return sendNoneBotRequest("/send_private_msg", {
     user_id: payload.userId,
     message: escapeCQCode(payload.content),

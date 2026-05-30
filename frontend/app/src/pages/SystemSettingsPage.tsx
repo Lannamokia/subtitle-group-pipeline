@@ -5,11 +5,11 @@ import { useAuthStore } from "@/stores/authStore";
 import { Badge } from "@/components/ui/badge";
 import {
   Bell,
+  Bot,
   Brush,
   Database,
   HardDrive,
   Layers,
-  Mail,
   Megaphone,
   MonitorCheck,
   Settings,
@@ -97,9 +97,9 @@ const SETTINGS_SECTIONS: SettingsCardConfig[] = [
   },
   {
     id: "smtp",
-    title: "邮件服务",
-    description: "SMTP 主机、发件邮箱和加密选项",
-    icon: Mail,
+    title: "通知渠道",
+    description: "SMTP 邮件、QQ 桥接器和交互密钥",
+    icon: Bot,
     adminOnly: true,
   },
   {

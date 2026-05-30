@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { GlobalHealthStatus } from "@/types";
 
-function StatusBadge({ healthy }: { healthy: boolean }) {
+function StatusBadge({ healthy, unavailableLabel = "异常" }: { healthy: boolean; unavailableLabel?: string }) {
   return healthy ? (
     <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
       <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
@@ -16,9 +16,21 @@ function StatusBadge({ healthy }: { healthy: boolean }) {
   ) : (
     <Badge variant="destructive">
       <XCircle className="mr-1 h-3.5 w-3.5" />
-      异常
+      {unavailableLabel}
     </Badge>
   );
+}
+
+function QQBridgeStatusBadge({ configured, connected }: { configured: boolean; connected: boolean }) {
+  if (!configured) {
+    return (
+      <Badge variant="outline" className="text-gray-600">
+        未配置
+      </Badge>
+    );
+  }
+
+  return <StatusBadge healthy={connected} unavailableLabel="未连接" />;
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -113,13 +125,19 @@ export function GlobalHealthPage() {
                     <Bot className="h-5 w-5 text-gray-400" />
                     QQ 机器人桥接器
                   </CardTitle>
-                  <StatusBadge healthy={health.qqBridge.connected} />
+                  <QQBridgeStatusBadge
+                    configured={health.qqBridge.configured}
+                    connected={health.qqBridge.connected}
+                  />
                 </div>
                 <CardDescription>NoneBot HTTP 桥接器访问状态。</CardDescription>
               </CardHeader>
               <CardContent>
-                <InfoRow label="配置状态" value={health.qqBridge.configured ? "已配置" : "未配置，当前为本地模拟"} />
-                <InfoRow label="连接状态" value={health.qqBridge.connected ? "可连接" : "不可连接"} />
+                <InfoRow label="配置状态" value={health.qqBridge.configured ? "已配置" : "未配置"} />
+                <InfoRow
+                  label="连接状态"
+                  value={!health.qqBridge.configured ? "未配置" : health.qqBridge.connected ? "已连接" : "未连接"}
+                />
                 <InfoRow label="桥接地址" value={health.qqBridge.endpoint ?? "-"} />
                 <InfoRow label="访问令牌" value={health.qqBridge.tokenConfigured ? "已配置" : "未配置"} />
                 {health.qqBridge.error && <InfoRow label="错误信息" value={health.qqBridge.error} />}

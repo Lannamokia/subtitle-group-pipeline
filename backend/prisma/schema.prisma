@@ -1028,6 +1028,15 @@ model SmtpSettings {
   updated_at       DateTime @updatedAt
 }
 
+model QqBridgeSettings {
+  id               String   @id @default(uuid())
+  enabled          Boolean  @default(false)
+  endpoint         String?
+  secret           String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+}
+
 // ==================== RECYCLE BIN ====================
 
 model RecycleBinRecord {

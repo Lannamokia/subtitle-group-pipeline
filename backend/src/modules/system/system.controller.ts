@@ -98,6 +98,30 @@ export async function updateSmtpSettings(
   }
 }
 
+export async function getQqBridgeSettings(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    successResponse(res, await systemService.getQqBridgeSettings());
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateQqBridgeSettings(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    successResponse(res, await systemService.updateQqBridgeSettings(req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getGlobalHealth(
   _req: Request,
   res: Response,

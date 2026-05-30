@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { AppError } from "../../utils/response";
 import * as storageService from "../storage/storage.service";
 import { checkQQBridgeHealth, getQQBridgeEndpoint } from "../notification/adapters/qq.adapter";
-import type { SmtpSettingsInput, UpdateBrandingInput } from "./system.schema";
+import type { QqBridgeSettingsInput, SmtpSettingsInput, UpdateBrandingInput } from "./system.schema";
 
 const DEFAULT_APP_NAME = "SubtitleSync";
 const LOGO_MAX_SIZE = 2 * 1024 * 1024;
@@ -40,6 +40,13 @@ export interface SmtpSettings {
   updated_at: Date | null;
 }
 
+export interface QqBridgeSettings {
+  enabled: boolean;
+  endpoint: string | null;
+  secret_configured: boolean;
+  updated_at: Date | null;
+}
+
 interface SmtpSettingsRecord {
   id: string;
   enabled: boolean;
@@ -53,6 +60,15 @@ interface SmtpSettingsRecord {
   reject_unauthorized: boolean;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface QqBridgeRuntimeSettings {
+  id?: string;
+  enabled: boolean;
+  endpoint: string | null;
+  secret: string | null;
+  created_at?: Date;
+  updated_at?: Date | null;
 }
 
 export interface GlobalHealthStatus {
@@ -246,6 +262,20 @@ function serializeSmtpSettings(record: SmtpSettingsRecord | null): SmtpSettings 
   };
 }
 
+function serializeQqBridgeSettings(record: QqBridgeRuntimeSettings | null): QqBridgeSettings {
+  const envEndpoint = env.NONEBOT_HTTP_API ?? null;
+  const envSecret = env.QQ_BRIDGE_TOKEN ?? null;
+  const endpoint = record?.endpoint ?? envEndpoint;
+  const secret = record?.secret ?? envSecret;
+
+  return {
+    enabled: record?.enabled ?? Boolean(envEndpoint),
+    endpoint,
+    secret_configured: Boolean(secret),
+    updated_at: record?.updated_at ?? null,
+  };
+}
+
 async function getSmtpSettingsRecord(): Promise<SmtpSettingsRecord | null> {
   const records = await prisma.$queryRaw<SmtpSettingsRecord[]>`
     SELECT id, enabled, host, port, secure, username, password, from_address, from_name, reject_unauthorized, created_at, updated_at
@@ -279,23 +309,31 @@ export async function updateSmtpSettings(data: SmtpSettingsInput): Promise<SmtpS
   const enabled = data.enabled ?? false;
   const secure = data.secure ?? data.port === 465;
   const rejectUnauthorized = data.reject_unauthorized ?? true;
+  const host = data.host?.trim() ?? "";
   const username = data.username?.trim() || null;
+  const fromAddress = data.from_address?.trim() ?? "";
   const fromName = data.from_name?.trim() || null;
 
+  if (enabled && !host) {
+    throw new AppError("SMTP host is required when email sending is enabled", "VALIDATION_ERROR", 400);
+  }
   if (enabled && !password) {
     throw new AppError("SMTP password is required when email sending is enabled", "VALIDATION_ERROR", 400);
+  }
+  if (enabled && !fromAddress) {
+    throw new AppError("SMTP sender address is required when email sending is enabled", "VALIDATION_ERROR", 400);
   }
 
   if (existing) {
     await prisma.$executeRaw`
       UPDATE SmtpSettings
       SET enabled = ${enabled},
-          host = ${data.host},
+          host = ${host},
           port = ${data.port},
           secure = ${secure},
           username = ${username},
           password = ${password},
-          from_address = ${data.from_address},
+          from_address = ${fromAddress},
           from_name = ${fromName},
           reject_unauthorized = ${rejectUnauthorized},
           updated_at = CURRENT_TIMESTAMP
@@ -305,11 +343,79 @@ export async function updateSmtpSettings(data: SmtpSettingsInput): Promise<SmtpS
     const id = crypto.randomUUID();
     await prisma.$executeRaw`
       INSERT INTO SmtpSettings (id, enabled, host, port, secure, username, password, from_address, from_name, reject_unauthorized, created_at, updated_at)
-      VALUES (${id}, ${enabled}, ${data.host}, ${data.port}, ${secure}, ${username}, ${password}, ${data.from_address}, ${fromName}, ${rejectUnauthorized}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES (${id}, ${enabled}, ${host}, ${data.port}, ${secure}, ${username}, ${password}, ${fromAddress}, ${fromName}, ${rejectUnauthorized}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `;
   }
 
   return getSmtpSettings();
+}
+
+async function getQqBridgeSettingsRecord(): Promise<QqBridgeRuntimeSettings | null> {
+  const records = await prisma.$queryRaw<QqBridgeRuntimeSettings[]>`
+    SELECT id, enabled, endpoint, secret, created_at, updated_at
+    FROM QqBridgeSettings
+    ORDER BY created_at ASC
+    LIMIT 1
+  `;
+
+  const record = records[0];
+  if (!record) return null;
+
+  return {
+    ...record,
+    enabled: Boolean(record.enabled),
+    endpoint: record.endpoint || null,
+    secret: record.secret || null,
+    updated_at: record.updated_at ?? null,
+  };
+}
+
+export async function getQqBridgeSettings(): Promise<QqBridgeSettings> {
+  return serializeQqBridgeSettings(await getQqBridgeSettingsRecord().catch(() => null));
+}
+
+export async function getQqBridgeRuntimeSettings(): Promise<QqBridgeRuntimeSettings> {
+  const record = await getQqBridgeSettingsRecord().catch(() => null);
+  return {
+    enabled: record?.enabled ?? Boolean(env.NONEBOT_HTTP_API),
+    endpoint: record?.endpoint ?? env.NONEBOT_HTTP_API ?? null,
+    secret: record?.secret ?? env.QQ_BRIDGE_TOKEN ?? null,
+    updated_at: record?.updated_at ?? null,
+  };
+}
+
+export async function updateQqBridgeSettings(data: QqBridgeSettingsInput): Promise<QqBridgeSettings> {
+  const existing = await getQqBridgeSettingsRecord().catch(() => null);
+  const enabled = data.enabled ?? false;
+  const endpoint = data.endpoint?.trim() || null;
+  const fallbackSecret = existing?.secret ?? env.QQ_BRIDGE_TOKEN ?? null;
+  const secret = data.secret === PASSWORD_MASK ? fallbackSecret : data.secret?.trim() || fallbackSecret;
+
+  if (enabled && !endpoint) {
+    throw new AppError("NoneBot endpoint is required when QQ bridge is enabled", "VALIDATION_ERROR", 400);
+  }
+  if (enabled && !secret) {
+    throw new AppError("QQ bridge secret is required when QQ bridge is enabled", "VALIDATION_ERROR", 400);
+  }
+
+  if (existing) {
+    await prisma.$executeRaw`
+      UPDATE QqBridgeSettings
+      SET enabled = ${enabled},
+          endpoint = ${endpoint},
+          secret = ${secret},
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${existing.id}
+    `;
+  } else {
+    const id = crypto.randomUUID();
+    await prisma.$executeRaw`
+      INSERT INTO QqBridgeSettings (id, enabled, endpoint, secret, created_at, updated_at)
+      VALUES (${id}, ${enabled}, ${endpoint}, ${secret}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `;
+  }
+
+  return getQqBridgeSettings();
 }
 
 export async function getGlobalHealthStatus(): Promise<GlobalHealthStatus> {
@@ -329,18 +435,21 @@ export async function getGlobalHealthStatus(): Promise<GlobalHealthStatus> {
     database.error = error instanceof Error ? error.message : String(error);
   }
 
-  const qqConfigured = Boolean(process.env.NONEBOT_HTTP_API);
-  const qqHealth = await checkQQBridgeHealth();
+  const qqSettings = await getQqBridgeRuntimeSettings();
+  const qqConfigured = Boolean(qqSettings.enabled && qqSettings.endpoint);
+  const qqHealth = qqConfigured
+    ? await checkQQBridgeHealth()
+    : { success: false, error: "QQ bridge is not configured" };
 
   return {
     checked_at: new Date().toISOString(),
     database,
     qq_bridge: {
       configured: qqConfigured,
-      connected: qqHealth.success,
-      endpoint: qqConfigured ? getQQBridgeEndpoint() : null,
-      token_configured: Boolean(env.QQ_BRIDGE_TOKEN),
-      error: qqHealth.error ?? null,
+      connected: qqConfigured ? qqHealth.success : false,
+      endpoint: qqConfigured ? await getQQBridgeEndpoint() : null,
+      token_configured: Boolean(qqSettings.secret),
+      error: qqConfigured ? qqHealth.error ?? null : null,
     },
   };
 }

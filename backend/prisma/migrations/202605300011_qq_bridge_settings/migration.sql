@@ -1,0 +1,8 @@
+CREATE TABLE "QqBridgeSettings" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "enabled" BOOLEAN NOT NULL DEFAULT false,
+  "endpoint" TEXT,
+  "secret" TEXT,
+  "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

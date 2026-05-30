@@ -1,15 +1,16 @@
 import { Request, Response, NextFunction } from "express";
 import { successResponse } from "../../utils/response";
-import { env } from "../../config/env";
 import * as authService from "../auth/auth.service";
+import * as systemService from "../system/system.service";
 import { sendGroupMessage, sendPrivateMessage } from "../notification/adapters/qq.adapter";
 
-function ensureBridgeToken(req: Request) {
-  if (!env.QQ_BRIDGE_TOKEN) return;
+async function ensureBridgeToken(req: Request) {
+  const settings = await systemService.getQqBridgeRuntimeSettings();
+  if (!settings.secret) return;
 
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (token !== env.QQ_BRIDGE_TOKEN) {
+  if (token !== settings.secret) {
     const error = new Error("Invalid QQ bridge token") as Error & { statusCode?: number; code?: string };
     error.statusCode = 401;
     error.code = "UNAUTHORIZED";
@@ -38,7 +39,7 @@ export async function verifyQQEvent(
   next: NextFunction
 ): Promise<void> {
   try {
-    ensureBridgeToken(req);
+    await ensureBridgeToken(req);
     const body = req.body as Record<string, unknown>;
     const resetCode = extractResetPassCode(body);
     const code = resetCode || extractVerifyCode(body);
@@ -65,7 +66,7 @@ export async function sendGroupQQMessage(
   next: NextFunction
 ): Promise<void> {
   try {
-    ensureBridgeToken(req);
+    await ensureBridgeToken(req);
     const body = req.body as Record<string, unknown>;
     const groupId = String(body.group_id);
     const message = String(body.message ?? "");
@@ -91,7 +92,7 @@ export async function sendPrivateQQMessage(
   next: NextFunction
 ): Promise<void> {
   try {
-    ensureBridgeToken(req);
+    await ensureBridgeToken(req);
     const body = req.body as Record<string, unknown>;
     const userId = String(body.user_id);
     const message = String(body.message ?? "");

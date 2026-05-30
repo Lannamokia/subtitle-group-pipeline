@@ -1014,7 +1014,7 @@ describe("Auth & Registration Tests", () => {
     });
   });
 
-  describe("System SMTP Settings", () => {
+  describe("System Notification Channel Settings", () => {
     it("should let admins save SMTP settings without exposing the password", async () => {
       const admin = await createTestUser({ role: "group_admin" });
 
@@ -1047,12 +1047,64 @@ describe("Auth & Registration Tests", () => {
       expect(getRes.body.data.passwordConfigured).toBe(true);
     });
 
-    it("should require admin permissions for SMTP settings", async () => {
+    it("should let admins save QQ bridge settings without exposing the secret", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      const res = await put(
+        app,
+        "/api/v1/system/qq-bridge",
+        {
+          enabled: true,
+          endpoint: "http://127.0.0.1:8095",
+          secret: "bridge-secret",
+        },
+        admin.token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.enabled).toBe(true);
+      expect(res.body.data.endpoint).toBe("http://127.0.0.1:8095");
+      expect(res.body.data.secret).toBeUndefined();
+      expect(res.body.data.secret_configured).toBe(true);
+
+      const getRes = await get(app, "/api/v1/system/qq-bridge", admin.token);
+      expectSuccess(getRes, 200);
+      expect(getRes.body.data.secret).toBeUndefined();
+      expect(getRes.body.data.secret_configured).toBe(true);
+    });
+
+    it("should allow saving QQ bridge settings while SMTP is disabled and blank", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      const res = await put(
+        app,
+        "/api/v1/system/smtp",
+        {
+          enabled: false,
+          host: "",
+          port: 587,
+          secure: false,
+          username: null,
+          password: null,
+          from_address: "",
+          from_name: null,
+          reject_unauthorized: true,
+        },
+        admin.token
+      );
+
+      expectSuccess(res, 200);
+      expect(res.body.data.enabled).toBe(false);
+    });
+
+    it("should require admin permissions for notification channel settings", async () => {
       const member = await createTestUser();
 
-      const res = await get(app, "/api/v1/system/smtp", member.token);
+      const smtpRes = await get(app, "/api/v1/system/smtp", member.token);
+      const qqRes = await get(app, "/api/v1/system/qq-bridge", member.token);
 
-      expectError(res, 403, "FORBIDDEN");
+      expectError(smtpRes, 403, "FORBIDDEN");
+      expectError(qqRes, 403, "FORBIDDEN");
     });
   });
 
@@ -1066,8 +1118,34 @@ describe("Auth & Registration Tests", () => {
       expect(res.body.data.database.connected).toBe(true);
       expect(res.body.data.database.type).toBe("sqlite");
       expect(res.body.data.database.version).toEqual(expect.any(String));
-      expect(res.body.data.qq_bridge.connected).toBe(true);
+      expect(res.body.data.qq_bridge.configured).toBe(false);
+      expect(res.body.data.qq_bridge.connected).toBe(false);
+      expect(res.body.data.qq_bridge.endpoint).toBeNull();
       expect(res.body.data.qq_bridge.token_configured).toBe(false);
+    });
+
+    it("should report configured QQ bridge as disconnected when the endpoint is unreachable", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      await put(
+        app,
+        "/api/v1/system/qq-bridge",
+        {
+          enabled: true,
+          endpoint: "http://127.0.0.1:9",
+          secret: "bridge-secret",
+        },
+        admin.token
+      );
+
+      const res = await get(app, "/api/v1/system/health", admin.token);
+
+      expectSuccess(res, 200);
+      expect(res.body.data.qq_bridge.configured).toBe(true);
+      expect(res.body.data.qq_bridge.connected).toBe(false);
+      expect(res.body.data.qq_bridge.endpoint).toBe("http://127.0.0.1:9");
+      expect(res.body.data.qq_bridge.token_configured).toBe(true);
+      expect(res.body.data.qq_bridge.error).toEqual(expect.any(String));
     });
 
     it("should require admin permissions for system health", async () => {

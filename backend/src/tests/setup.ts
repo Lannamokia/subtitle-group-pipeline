@@ -430,6 +430,7 @@ const tableNames = [
   "registrationPolicy",
   "storageBackend",
   "dataRetentionSettings",
+  "qqBridgeSettings",
   "smtpSettings",
   "user",
 ];

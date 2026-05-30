@@ -508,6 +508,14 @@ export interface SmtpSettings {
   updatedAt?: string | null;
 }
 
+export interface QqBridgeSettings {
+  enabled: boolean;
+  endpoint?: string | null;
+  secret?: string | null;
+  secretConfigured?: boolean;
+  updatedAt?: string | null;
+}
+
 export interface GlobalHealthStatus {
   checkedAt: string;
   database: {
