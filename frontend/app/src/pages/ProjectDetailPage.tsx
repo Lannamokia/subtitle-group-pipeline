@@ -2407,8 +2407,8 @@ function MembersTab({ project, onUpdate }: { project: Project; onUpdate: () => v
                 <div className="flex items-center gap-3">
                   <UserAvatar user={member.user} size="md" />
                   <div>
-                    <p className="text-sm font-medium text-gray-800">{member.user.username}</p>
-                    <p className="text-xs text-gray-400">QQ: {member.user.qq}</p>
+                    <p className="text-sm font-medium text-gray-800">{member.user.nickname || member.user.username}</p>
+                    <p className="text-xs text-gray-400">QQ: {member.user.qq || "-"}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
