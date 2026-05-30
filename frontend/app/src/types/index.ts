@@ -500,6 +500,23 @@ export interface SmtpSettings {
   updatedAt?: string | null;
 }
 
+export interface GlobalHealthStatus {
+  checkedAt: string;
+  database: {
+    connected: boolean;
+    type: string;
+    version?: string | null;
+    error?: string | null;
+  };
+  qqBridge: {
+    configured: boolean;
+    connected: boolean;
+    endpoint?: string | null;
+    tokenConfigured: boolean;
+    error?: string | null;
+  };
+}
+
 // ========== Role Tag Types ==========
 
 export interface RoleTagDefinition {

@@ -49,5 +49,11 @@ router.put(
   validateBody(smtpSettingsSchema),
   controller.updateSmtpSettings
 );
+router.get(
+  "/health",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  controller.getGlobalHealth
+);
 
 export default router;

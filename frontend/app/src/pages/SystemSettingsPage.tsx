@@ -11,6 +11,7 @@ import {
   Layers,
   Mail,
   Megaphone,
+  MonitorCheck,
   Settings,
   ShieldCheck,
 } from "lucide-react";
@@ -22,6 +23,7 @@ import { RegistrationSettingsPage } from "@/pages/admin/RegistrationSettingsPage
 import { StorageBackendPage } from "@/pages/admin/StorageBackendPage";
 import { BrandingSettingsPage } from "@/pages/admin/BrandingSettingsPage";
 import { SmtpSettingsPage } from "@/pages/admin/SmtpSettingsPage";
+import { GlobalHealthPage } from "@/pages/admin/GlobalHealthPage";
 
 type SettingsSection =
   | "branding"
@@ -31,6 +33,7 @@ type SettingsSection =
   | "templates"
   | "announcements"
   | "smtp"
+  | "health"
   | "notifications";
 
 interface SettingsCardConfig {
@@ -97,6 +100,13 @@ const SETTINGS_SECTIONS: SettingsCardConfig[] = [
     title: "邮件服务",
     description: "SMTP 主机、发件邮箱和加密选项",
     icon: Mail,
+    adminOnly: true,
+  },
+  {
+    id: "health",
+    title: "全局健康检查",
+    description: "数据库和 QQ 桥接器连接状态",
+    icon: MonitorCheck,
     adminOnly: true,
   },
 ];
@@ -192,6 +202,7 @@ export function SystemSettingsPage() {
           {activeSection === "announcements" && <AnnouncementAdminPage />}
           {activeSection === "notifications" && <NotificationSettingsPage />}
           {activeSection === "smtp" && <SmtpSettingsPage />}
+          {activeSection === "health" && <GlobalHealthPage />}
         </div>
       </div>
     </div>

@@ -31,6 +31,7 @@ import type {
   DataRetentionSettings,
   SystemBrandingSettings,
   SmtpSettings,
+  GlobalHealthStatus,
   ApiResponse,
   PaginatedResponse,
 } from '@/types';
@@ -464,6 +465,28 @@ export function normalizeSmtpSettings(raw: AnyRecord): SmtpSettings {
   };
 }
 
+export function normalizeGlobalHealth(raw: AnyRecord): GlobalHealthStatus {
+  const database = (raw.database ?? {}) as AnyRecord;
+  const qqBridge = (raw.qqBridge ?? raw.qq_bridge ?? {}) as AnyRecord;
+
+  return {
+    checkedAt: raw.checkedAt ?? raw.checked_at ?? new Date().toISOString(),
+    database: {
+      connected: Boolean(database.connected),
+      type: String(database.type ?? "unknown"),
+      version: database.version ?? null,
+      error: database.error ?? null,
+    },
+    qqBridge: {
+      configured: Boolean(qqBridge.configured),
+      connected: Boolean(qqBridge.connected),
+      endpoint: qqBridge.endpoint ?? null,
+      tokenConfigured: Boolean(qqBridge.tokenConfigured ?? qqBridge.token_configured),
+      error: qqBridge.error ?? null,
+    },
+  };
+}
+
 export function normalizeTimelineEvent(raw: AnyRecord): TimelineEvent {
   return {
     id: raw.id,
@@ -852,6 +875,11 @@ export const systemApi = {
       reject_unauthorized: data.rejectUnauthorized,
     }).then((response) =>
       normalizeSmtpSettings(response.data.data as AnyRecord)
+    ),
+
+  getGlobalHealth: () =>
+    api.get<ApiResponse<unknown>>('/system/health').then((response) =>
+      normalizeGlobalHealth(response.data.data as AnyRecord)
     ),
 };
 

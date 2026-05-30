@@ -97,3 +97,15 @@ export async function updateSmtpSettings(
     next(error);
   }
 }
+
+export async function getGlobalHealth(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    successResponse(res, await systemService.getGlobalHealthStatus());
+  } catch (error) {
+    next(error);
+  }
+}

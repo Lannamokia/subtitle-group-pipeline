@@ -1052,4 +1052,27 @@ describe("Auth & Registration Tests", () => {
       expectError(res, 403, "FORBIDDEN");
     });
   });
+
+  describe("System Health", () => {
+    it("should let admins inspect database and QQ bridge health", async () => {
+      const admin = await createTestUser({ role: "group_admin" });
+
+      const res = await get(app, "/api/v1/system/health", admin.token);
+
+      expectSuccess(res, 200);
+      expect(res.body.data.database.connected).toBe(true);
+      expect(res.body.data.database.type).toBe("sqlite");
+      expect(res.body.data.database.version).toEqual(expect.any(String));
+      expect(res.body.data.qq_bridge.connected).toBe(true);
+      expect(res.body.data.qq_bridge.token_configured).toBe(false);
+    });
+
+    it("should require admin permissions for system health", async () => {
+      const member = await createTestUser({ role: "member" });
+
+      const res = await get(app, "/api/v1/system/health", member.token);
+
+      expectError(res, 403, "FORBIDDEN");
+    });
+  });
 });

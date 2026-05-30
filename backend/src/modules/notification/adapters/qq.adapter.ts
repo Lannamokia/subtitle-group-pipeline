@@ -20,8 +20,41 @@ export interface QQResult {
   error?: string;
 }
 
+export function getQQBridgeEndpoint(): string {
+  return NONEBOT_HTTP_API;
+}
+
 function formatAtMention(qqNumber: string): string {
   return `[CQ:at,qq=${qqNumber}]`;
+}
+
+export async function checkQQBridgeHealth(): Promise<QQResult> {
+  if ((env.NODE_ENV === "development" || env.NODE_ENV === "test") && !process.env.NONEBOT_HTTP_API) {
+    return { success: true, messageId: "mock-qq-bridge" };
+  }
+
+  try {
+    const response = await fetch(`${NONEBOT_HTTP_API}/get_status`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(env.QQ_BRIDGE_TOKEN ? { Authorization: `Bearer ${env.QQ_BRIDGE_TOKEN}` } : {}),
+      },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(3000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function escapeCQCode(text: string): string {

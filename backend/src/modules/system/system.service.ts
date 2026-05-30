@@ -1,7 +1,9 @@
 import { prisma } from "../../config/database";
+import { env } from "../../config/env";
 import crypto from "crypto";
 import { AppError } from "../../utils/response";
 import * as storageService from "../storage/storage.service";
+import { checkQQBridgeHealth, getQQBridgeEndpoint } from "../notification/adapters/qq.adapter";
 import type { SmtpSettingsInput, UpdateBrandingInput } from "./system.schema";
 
 const DEFAULT_APP_NAME = "SubtitleSync";
@@ -51,6 +53,50 @@ interface SmtpSettingsRecord {
   reject_unauthorized: boolean;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface GlobalHealthStatus {
+  checked_at: string;
+  database: {
+    connected: boolean;
+    type: string;
+    version: string | null;
+    error: string | null;
+  };
+  qq_bridge: {
+    configured: boolean;
+    connected: boolean;
+    endpoint: string | null;
+    token_configured: boolean;
+    error: string | null;
+  };
+}
+
+function getDatabaseType(databaseUrl = env.DATABASE_URL): string {
+  if (databaseUrl.startsWith("file:")) return "sqlite";
+  if (databaseUrl.startsWith("mysql:")) return "mysql";
+  if (databaseUrl.startsWith("postgresql:") || databaseUrl.startsWith("postgres:")) return "postgresql";
+  return "unknown";
+}
+
+async function getDatabaseVersion(databaseType: string): Promise<string | null> {
+  if (databaseType === "sqlite") {
+    const rows = await prisma.$queryRaw<Array<{ version: string }>>`SELECT sqlite_version() AS version`;
+    return rows[0]?.version ?? null;
+  }
+
+  if (databaseType === "mysql") {
+    const rows = await prisma.$queryRaw<Array<{ version: string }>>`SELECT VERSION() AS version`;
+    return rows[0]?.version ?? null;
+  }
+
+  if (databaseType === "postgresql") {
+    const rows = await prisma.$queryRaw<Array<{ version: string }>>`SELECT version() AS version`;
+    return rows[0]?.version ?? null;
+  }
+
+  await prisma.$queryRaw`SELECT 1`;
+  return null;
 }
 
 async function getOrCreateBrandingRecord() {
@@ -264,4 +310,37 @@ export async function updateSmtpSettings(data: SmtpSettingsInput): Promise<SmtpS
   }
 
   return getSmtpSettings();
+}
+
+export async function getGlobalHealthStatus(): Promise<GlobalHealthStatus> {
+  const databaseType = getDatabaseType();
+  const database = {
+    connected: false,
+    type: databaseType,
+    version: null as string | null,
+    error: null as string | null,
+  };
+
+  try {
+    await prisma.$connect();
+    database.version = await getDatabaseVersion(databaseType);
+    database.connected = true;
+  } catch (error) {
+    database.error = error instanceof Error ? error.message : String(error);
+  }
+
+  const qqConfigured = Boolean(process.env.NONEBOT_HTTP_API);
+  const qqHealth = await checkQQBridgeHealth();
+
+  return {
+    checked_at: new Date().toISOString(),
+    database,
+    qq_bridge: {
+      configured: qqConfigured,
+      connected: qqHealth.success,
+      endpoint: qqConfigured ? getQQBridgeEndpoint() : null,
+      token_configured: Boolean(env.QQ_BRIDGE_TOKEN),
+      error: qqHealth.error ?? null,
+    },
+  };
 }
