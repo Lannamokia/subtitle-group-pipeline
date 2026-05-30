@@ -4,6 +4,7 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  HeadBucketCommand,
   ListObjectsV2Command,
   type GetObjectCommandOutput,
   type ListObjectsV2CommandOutput,
@@ -157,6 +158,14 @@ export class S3Adapter {
     } catch {
       return false;
     }
+  }
+
+  async validateConnection(): Promise<void> {
+    await this.send(
+      new HeadBucketCommand({
+        Bucket: this.config.bucket,
+      })
+    );
   }
 
   async getPresignedUrl(key: string, expiresIn: number = 3600): Promise<string> {

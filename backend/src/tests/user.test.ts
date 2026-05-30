@@ -9,6 +9,7 @@ import {
 } from "./setup";
 import { post, get, put, del, expectSuccess, expectError } from "./helpers";
 import * as storageService from "../modules/storage/storage.service";
+import { S3Adapter } from "../modules/storage/adapters/s3.adapter";
 import type { Application } from "express";
 
 describe("User Profile & Storage Tests", () => {
@@ -19,6 +20,7 @@ describe("User Profile & Storage Tests", () => {
   });
 
   beforeEach(async () => {
+    jest.restoreAllMocks();
     await cleanDatabase();
   });
 
@@ -215,6 +217,7 @@ describe("User Profile & Storage Tests", () => {
 
     it("should normalize S3 storage config aliases on create", async () => {
       const { token } = await createTestUser({ role: "super_admin" });
+      jest.spyOn(S3Adapter.prototype, "validateConnection").mockResolvedValue(undefined);
 
       const res = await post(
         app,
@@ -264,6 +267,35 @@ describe("User Profile & Storage Tests", () => {
       expectError(res, 400, "VALIDATION_ERROR");
       expect(res.body.error.message).toContain("accessKeyId");
       expect(res.body.error.message).toContain("secretAccessKey");
+    });
+
+    it("should reject invalid S3 credentials before saving", async () => {
+      const { token } = await createTestUser({ role: "super_admin" });
+      jest
+        .spyOn(S3Adapter.prototype, "validateConnection")
+        .mockRejectedValue(new Error("The security token included in the request is invalid"));
+
+      const res = await post(
+        app,
+        "/api/v1/storage/backends",
+        {
+          name: "Invalid S3 Storage",
+          backend_type: "s3",
+          config: JSON.stringify({
+            endpoint: "https://s3.example.com",
+            bucket: "subtitle-files",
+            region: "us-east-1",
+            accessKey: "access-key",
+            secretKey: "bad-secret",
+          }),
+        },
+        token
+      );
+
+      expectError(res, 400, "VALIDATION_ERROR");
+      expect(res.body.error.message).toContain("S3 config validation failed");
+      const created = await prisma.storageBackend.findFirst({ where: { name: "Invalid S3 Storage" } });
+      expect(created).toBeNull();
     });
 
     it("should enforce quota on storage backend", async () => {
@@ -345,6 +377,7 @@ describe("User Profile & Storage Tests", () => {
 
     it("should preserve S3 secret when update payload leaves it blank", async () => {
       const { token } = await createTestUser({ role: "super_admin" });
+      jest.spyOn(S3Adapter.prototype, "validateConnection").mockResolvedValue(undefined);
       const backend = await createTestStorageBackend({
         backend_type: "s3",
         config: {
@@ -378,6 +411,45 @@ describe("User Profile & Storage Tests", () => {
       expect(config.bucket).toBe("new-bucket");
       expect(config.region).toBe("us-west-2");
       expect(config.accessKeyId).toBe("new-access-key");
+      expect(config.secretAccessKey).toBe("old-secret-key");
+    });
+
+    it("should reject invalid S3 config on update before saving", async () => {
+      const { token } = await createTestUser({ role: "super_admin" });
+      const backend = await createTestStorageBackend({
+        backend_type: "s3",
+        config: {
+          endpoint: "https://s3.example.com",
+          bucket: "old-bucket",
+          region: "us-east-1",
+          accessKeyId: "old-access-key",
+          secretAccessKey: "old-secret-key",
+        },
+      });
+      jest
+        .spyOn(S3Adapter.prototype, "validateConnection")
+        .mockRejectedValue(new Error("SignatureDoesNotMatch"));
+
+      const res = await put(
+        app,
+        `/api/v1/storage/backends/${backend.id}`,
+        {
+          backend_type: "s3",
+          config: JSON.stringify({
+            endpoint: "https://s3.example.com",
+            bucket: "new-bucket",
+            region: "us-west-2",
+            accessKey: "new-access-key",
+            secretKey: "bad-secret",
+          }),
+        },
+        token
+      );
+
+      expectError(res, 400, "VALIDATION_ERROR");
+      const unchanged = await prisma.storageBackend.findUnique({ where: { id: backend.id } });
+      const config = JSON.parse(unchanged!.config);
+      expect(config.bucket).toBe("old-bucket");
       expect(config.secretAccessKey).toBe("old-secret-key");
     });
 

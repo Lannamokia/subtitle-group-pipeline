@@ -127,6 +127,36 @@ export function getS3Config(configString: string): S3Config {
   return JSON.parse(normalizeStorageConfig("s3", configString)) as S3Config;
 }
 
+export async function validateStorageBackendConfig(
+  backendType: StorageBackendType,
+  configString: string
+): Promise<void> {
+  if (backendType !== "s3" && backendType !== "s3_compatible") {
+    return;
+  }
+
+  const config = getS3Config(configString);
+
+  try {
+    await new S3Adapter(config).validateConnection();
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw new AppError(
+        "S3 config validation failed: credentials or bucket settings are invalid",
+        "VALIDATION_ERROR",
+        400
+      );
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new AppError(
+      `S3 config validation failed: ${message}`,
+      "VALIDATION_ERROR",
+      400
+    );
+  }
+}
+
 export function getAdapterForBackend(backendId: string): LocalAdapter | S3Adapter {
   const cached = adapterCache.get(backendId);
   if (cached) {
@@ -300,7 +330,9 @@ export async function getStorageBackends(query: StorageQueryInput) {
 }
 
 export async function createStorageBackend(data: CreateStorageBackendInput) {
-  const config = normalizeStorageConfig(data.backend_type as StorageBackendType, data.config);
+  const backendType = data.backend_type as StorageBackendType;
+  const config = normalizeStorageConfig(backendType, data.config);
+  await validateStorageBackendConfig(backendType, config);
 
   if (data.is_default) {
     await prisma.storageBackend.updateMany({
@@ -335,11 +367,11 @@ export async function updateStorageBackend(
     throw new AppError("Storage backend not found", "NOT_FOUND", 404);
   }
 
-  // Validate config is valid JSON if provided
   let config = data.config;
-  if (data.config) {
+  if (data.config || data.backend_type) {
     const backendType = (data.backend_type ?? backend.backend_type) as StorageBackendType;
-    config = normalizeStorageConfig(backendType, data.config, backend.config);
+    config = normalizeStorageConfig(backendType, data.config ?? backend.config, backend.config);
+    await validateStorageBackendConfig(backendType, config);
   }
 
   if (data.is_default) {

@@ -153,7 +153,7 @@ export function normalizeStorageBackend(raw: AnyRecord): StorageBackend {
     rootPath: raw.rootPath ?? raw.root_path ?? config.rootPath ?? config.root_path,
     region: raw.region ?? config.region,
     accessKey: raw.accessKey ?? raw.access_key ?? config.accessKeyId ?? config.accessKey ?? config.access_key,
-    secretKey: raw.secretKey ?? raw.secret_key ?? config.secretAccessKey ?? config.secretKey ?? config.secret_key,
+    secretKey: raw.secretKey ?? raw.secret_key,
     quotaBytes: raw.quotaBytes ?? raw.quota_bytes ?? 0,
     usedBytes: raw.usedBytes ?? raw.used_bytes ?? 0,
     isDefault: raw.isDefault ?? raw.is_default ?? false,

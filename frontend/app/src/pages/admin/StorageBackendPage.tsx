@@ -69,6 +69,21 @@ const backendSchema = z.object({
   quotaBytes: z.number().min(0, "配额不能为负数"),
   isDefault: z.boolean(),
   isEnabled: z.boolean(),
+}).superRefine((data, ctx) => {
+  if (data.type !== "s3") return;
+
+  const requiredFields: Array<["bucket" | "region" | "accessKey", string]> = [
+    ["bucket", "Bucket不能为空"],
+    ["region", "Region不能为空"],
+    ["accessKey", "Access Key不能为空"],
+  ];
+
+  for (const [field, message] of requiredFields) {
+    if (!String(data[field] ?? "").trim()) {
+      ctx.addIssue({ code: "custom", path: [field], message });
+    }
+  }
+
 });
 
 type BackendFormData = z.infer<typeof backendSchema>;
@@ -158,6 +173,11 @@ export function StorageBackendPage() {
   };
 
   const handleSubmit = async (data: BackendFormData) => {
+    if (data.type === "s3" && !editingBackend && !data.secretKey?.trim()) {
+      form.setError("secretKey", { message: "Secret Key不能为空" });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       if (editingBackend) {
