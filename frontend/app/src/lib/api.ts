@@ -25,6 +25,7 @@ import type {
   Notification,
   NotificationPreference,
   ProjectTemplate,
+  ProductConfig,
   TimelineEvent,
   SubtitleConflict,
   WikiDocument,
@@ -88,6 +89,51 @@ api.interceptors.response.use(
 );
 
 type AnyRecord = Record<string, any>;
+
+const defaultProductOutput = {
+  resolution: "1920x1080",
+  frameRate: "23.976",
+  encoder: "x264",
+  encoderPreset: "slow",
+  videoBitrate: "8000k",
+  targetSize: "1.5GB",
+  audioCodec: "AAC",
+  audioBitrate: "192k",
+  audioChannels: "2.0",
+  extraParams: "",
+};
+
+function parseJsonRecord(value: unknown): AnyRecord {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value as AnyRecord;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeProductConfig(rawConfig: unknown): ProductConfig {
+  const config = parseJsonRecord(rawConfig);
+  const legacy = config as AnyRecord;
+  const base = {
+    ...defaultProductOutput,
+    resolution: legacy.resolution ?? defaultProductOutput.resolution,
+    encoder: legacy.encoder ?? defaultProductOutput.encoder,
+    videoBitrate: legacy.bitrate ?? defaultProductOutput.videoBitrate,
+  };
+  const outputs = parseJsonRecord(config.outputs);
+
+  return {
+    namingRule: String(config.namingRule ?? config.naming_rule ?? "{title}_{ep}_{quality}"),
+    outputs: {
+      muxed: { ...base, ...parseJsonRecord(outputs.muxed) },
+      burned: { ...base, ...parseJsonRecord(outputs.burned) },
+    },
+  };
+}
 
 // Helper to extract data from response
 export function extractData<T>(response: { data: ApiResponse<T> }): T {
@@ -671,6 +717,7 @@ export function normalizeProject(raw: AnyRecord): Project {
     : [];
   const completed = tasks.filter((task) => ["completed", "review_approved"].includes(task.status)).length;
   const taskCount = tasks.length || raw._count?.tasks || 0;
+  const productConfigSource = raw.productConfig ?? raw.product_config ?? raw.template?.product_config;
 
   return {
     id: raw.id,
@@ -704,6 +751,8 @@ export function normalizeProject(raw: AnyRecord): Project {
           }
         })()
       : raw.deliveryChecklist ?? raw.delivery_checklist ?? [],
+    productConfig: productConfigSource ? normalizeProductConfig(productConfigSource) : undefined,
+    releaseTaskType: raw.releaseTaskType ?? raw.release_task_type ?? raw.template?.release_task_type,
     downloadLinkTtlSeconds: raw.downloadLinkTtlSeconds ?? raw.download_link_ttl_seconds,
     wikiApprovalRequired: raw.wikiApprovalRequired ?? raw.wiki_approval_required,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
@@ -1126,6 +1175,12 @@ export const taskApi = {
       normalizeTask(response.data.data as AnyRecord)
     ),
 
+  createDependency: (id: string, dependsOnId: string) =>
+    api.post<ApiResponse<unknown>>(`/tasks/${id}/dependencies`, {
+      depends_on_id: dependsOnId,
+      dependency_type: "finish_to_start",
+    }).then(extractData),
+
   getComments: (taskId: string) =>
     api.get<ApiResponse<unknown[]>>(`/tasks/${taskId}/comments`).then((response) =>
       response.data.data.map((comment) => normalizeTaskComment(comment as AnyRecord))
@@ -1142,7 +1197,7 @@ export const taskApi = {
 // ========== File API ==========
 
 export const fileApi = {
-  getFiles: (params?: { projectId?: string; taskId?: string; type?: string; search?: string; tag?: string }) =>
+  getFiles: (params?: { projectId?: string; taskId?: string; type?: string; search?: string; tag?: string; role?: string }) =>
     api.get<ApiResponse<unknown>>('/files', { params }).then((response) =>
       unwrapPaginated(response, normalizeFile)
     ),
@@ -1152,12 +1207,14 @@ export const fileApi = {
       normalizeFile(response.data.data as AnyRecord)
     ),
 
-  uploadFile: (file: File, data: { projectId: string; taskId?: string; type?: string; tags?: string[]; changeSummary?: string }) => {
+  uploadFile: (file: File, data: { projectId: string; taskId?: string; unitId?: string; type?: string; role?: string; tags?: string[]; changeSummary?: string }) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('projectId', data.projectId);
     if (data.taskId) formData.append('taskId', data.taskId);
+    if (data.unitId) formData.append('unitId', data.unitId);
     if (data.type) formData.append('type', data.type);
+    if (data.role) formData.append('role', data.role);
     if (data.tags?.length) formData.append('tags', JSON.stringify(data.tags));
     if (data.changeSummary) formData.append('change_summary', data.changeSummary);
     return api.post<ApiResponse<unknown>>('/files', formData, {

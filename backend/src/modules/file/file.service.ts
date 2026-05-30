@@ -12,6 +12,7 @@ import type {
 } from "./file.schema";
 import { FileType, TaskRole, UserRole, TimelineEventType } from "@prisma/client";
 import * as timelineService from "../timeline/timeline.service";
+import { DEFAULT_ROLE_UPLOAD_POLICY } from "../../utils/defaultUploadPolicy";
 
 // ============ Upload Policy ============
 
@@ -30,40 +31,10 @@ export async function getUploadPolicy(projectId?: string) {
 
   return (
     policy || {
-      allowed_types: JSON.stringify([
-        "text/plain",
-        "application/x-ass",
-        "video/mp4",
-        "video/x-matroska",
-        "audio/mp3",
-        "audio/flac",
-        "image/png",
-        "image/jpeg",
-        "application/zip",
-        "application/x-rar",
-        "font/ttf",
-        "font/otf",
-        "application/octet-stream",
-      ]),
+      allowed_types: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY),
       max_size_bytes: 104857600, // 100MB
       require_approval: false,
-      extension_whitelist: JSON.stringify([
-        ".ass",
-        ".ssa",
-        ".srt",
-        ".mp4",
-        ".mkv",
-        ".mp3",
-        ".flac",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".zip",
-        ".rar",
-        ".ttf",
-        ".otf",
-        ".txt",
-      ]),
+      extension_whitelist: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY.extensionWhitelist),
     }
   );
 }
@@ -184,6 +155,42 @@ function mergePolicyRules(rules: NormalizedPolicyRule[]): NormalizedPolicyRule {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isRoleMatrix(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return Object.keys(value).some((key) => Object.values(TaskRole).includes(key as TaskRole));
+}
+
+function resolvePolicyMatrix(obj: Record<string, unknown>): Record<string, unknown> | null {
+  if (isRoleMatrix(obj.roles)) {
+    return obj.roles;
+  }
+
+  if (isRoleMatrix(obj.byRole)) {
+    return obj.byRole;
+  }
+
+  if (isRoleMatrix(obj.allowedTypes)) {
+    return obj.allowedTypes;
+  }
+
+  if (isRoleMatrix(obj.allowed_types)) {
+    return obj.allowed_types;
+  }
+
+  if (isRoleMatrix(obj)) {
+    return obj;
+  }
+
+  return null;
+}
+
 function roleRuleFromPolicy(
   policyConfig: unknown,
   role: TaskRole | undefined,
@@ -198,27 +205,27 @@ function roleRuleFromPolicy(
   }
 
   const obj = policyConfig as Record<string, unknown>;
-  const globalRuleKeys = ["allowed_types", "allowedTypes", "mime_types", "mimeTypes", "file_types", "fileTypes", "extensions"];
-  if (globalRuleKeys.some((key) => obj[key] !== undefined)) {
-    return normalizePolicyRule(obj);
-  }
+  const matrix = resolvePolicyMatrix(obj);
 
-  const matrix = (obj.roles && typeof obj.roles === "object"
-    ? obj.roles
-    : obj.byRole && typeof obj.byRole === "object"
-      ? obj.byRole
-      : obj) as Record<string, unknown>;
-
-  if (role && matrix[role]) {
+  if (matrix && role && matrix[role]) {
     return normalizePolicyRule(matrix[role]);
   }
 
-  if (userRole === "supervisor" && matrix.supervisor) {
+  if (matrix && userRole === "supervisor" && matrix.supervisor) {
     return normalizePolicyRule(matrix.supervisor);
   }
 
-  if (userRole === "super_admin" || userRole === "group_admin") {
+  if (matrix && (userRole === "super_admin" || userRole === "group_admin")) {
     return mergePolicyRules(Object.values(matrix).map((rule) => normalizePolicyRule(rule)));
+  }
+
+  if (matrix && !role) {
+    return mergePolicyRules(Object.values(matrix).map((rule) => normalizePolicyRule(rule)));
+  }
+
+  const globalRuleKeys = ["allowed_types", "allowedTypes", "mime_types", "mimeTypes", "file_types", "fileTypes", "extensions"];
+  if (globalRuleKeys.some((key) => obj[key] !== undefined)) {
+    return normalizePolicyRule(obj);
   }
 
   return null;

@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../utils/password";
 import { signToken } from "../utils/jwt";
 import { resetAuthRateLimiters } from "../modules/auth/auth.routes";
+import { DEFAULT_ROLE_UPLOAD_POLICY } from "../utils/defaultUploadPolicy";
 
 const basePrisma = new PrismaClient({
   log: process.env.DEBUG_TESTS === "true" ? ["query", "info", "warn", "error"] : [],
@@ -171,7 +172,7 @@ export async function createTestTemplate(data: TestTemplateData = {}) {
         { role: "encoding", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
         { role: "release", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
       ]),
-      upload_policy: JSON.stringify(data.upload_policy || { allowedTypes: ["*/*"], maxSize: 104857600, requireApproval: false }),
+      upload_policy: JSON.stringify(data.upload_policy || DEFAULT_ROLE_UPLOAD_POLICY),
       notification_policy: JSON.stringify(data.notification_policy || { channels: ["in_site"], events: ["all"] }),
       ass_policy: JSON.stringify(data.ass_policy || { format: "ASS", styleRules: [], timingRules: [] }),
       product_config: JSON.stringify(data.product_config || { resolutions: ["1080p"], codecs: ["h264"], containers: ["mkv"] }),

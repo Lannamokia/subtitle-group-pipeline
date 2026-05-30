@@ -14,6 +14,13 @@ function assertIncludes(name, haystack, needles) {
   }
 }
 
+function assertNotIncludes(name, haystack, needles) {
+  const found = needles.filter((needle) => haystack.includes(needle));
+  if (found.length > 0) {
+    throw new Error(`${name} should not include: ${found.join(", ")}`);
+  }
+}
+
 function assertMatches(name, haystack, patterns) {
   const missing = patterns.filter((pattern) => !pattern.test(haystack));
   if (missing.length > 0) {
@@ -26,6 +33,7 @@ const files = {
   app: await source("App.tsx"),
   login: await source("pages/LoginPage.tsx"),
   projectDetail: await source("pages/ProjectDetailPage.tsx"),
+  taskWorkflow: await source("lib/taskWorkflow.ts"),
   fileList: await source("pages/FileListPage.tsx"),
   fileItem: await source("components/FileListItem.tsx"),
   dedup: await source("pages/DedupPage.tsx"),
@@ -58,6 +66,37 @@ assertIncludes("task workflow surface", files.projectDetail, [
   "taskApi.rejectTask",
   "blockedDependencies",
   "TaskCommentPanel",
+]);
+
+assertIncludes("serial task workflow stepper", files.projectDetail + files.taskWorkflow + files.api, [
+  "TASK_WORKFLOW_STEPS",
+  "TASK_PIPELINE_ROLES",
+  "TASK_DELIVERY_RULES",
+  "workflowSummaries",
+  "highlightedStepIndex",
+  "rounded-full border-2",
+  "right-1/2 top-1/2 h-0.5",
+  "createDependency",
+  "我的岗位操作面板",
+  "串行制作流水线",
+  "提交任务文件",
+  "任务模板",
+  "TASK_TEMPLATE_CUSTOM_VALUE",
+  "getTaskWorkflowStep",
+  "ProductOutputRequirement",
+  "成品配置",
+  "内封成品",
+  "内嵌成品",
+  "productConfig",
+  ".webm",
+  ".vtt",
+  ".ttml",
+]);
+
+assertNotIncludes("task templates stay inside create dialog", files.projectDetail, [
+  "openCreateTaskDialog(step.role",
+  "step.templates.map((template)",
+  "每一步都提供专属任务模板",
 ]);
 
 assertIncludes("file bucket history and explicit replace", files.fileList, [

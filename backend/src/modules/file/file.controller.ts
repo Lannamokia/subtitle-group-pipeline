@@ -12,6 +12,12 @@ import { FileType, TaskRole } from "@prisma/client";
 import type { UserRole } from "@prisma/client";
 import * as storageService from "../storage/storage.service";
 import { replaceFileSchema, uploadFileSchema } from "./file.schema";
+import {
+  FONT_EXTENSIONS,
+  PACKAGE_EXTENSIONS,
+  SUBTITLE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+} from "../../utils/defaultUploadPolicy";
 
 // Helper to prevent path traversal in local download
 function preventPathTraversal(filepath: string): string {
@@ -61,16 +67,16 @@ function inferFileType(file: Express.Multer.File, explicitType?: unknown): FileT
   }
 
   const ext = path.extname(file.originalname).toLowerCase();
-  if (file.mimetype.startsWith("video/") || [".mkv", ".mp4", ".mov", ".avi"].includes(ext)) {
+  if (file.mimetype.startsWith("video/") || VIDEO_EXTENSIONS.includes(ext)) {
     return FileType.video;
   }
-  if ([".ass", ".ssa", ".srt", ".vtt"].includes(ext) || file.mimetype.includes("subtitle")) {
+  if (SUBTITLE_EXTENSIONS.includes(ext) || file.mimetype.includes("subtitle")) {
     return FileType.subtitle;
   }
-  if ([".ttf", ".otf", ".woff", ".woff2"].includes(ext) || file.mimetype.includes("font")) {
+  if (FONT_EXTENSIONS.includes(ext) || file.mimetype.includes("font")) {
     return FileType.font;
   }
-  if ([".zip", ".rar", ".7z", ".tar", ".gz"].includes(ext)) {
+  if (PACKAGE_EXTENSIONS.includes(ext)) {
     return FileType.project_package;
   }
   return FileType.other;

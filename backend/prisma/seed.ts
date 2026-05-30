@@ -1,5 +1,6 @@
 import { PrismaClient, UserRole, RegistrationMode, ProjectType } from "@prisma/client";
 import { hashPassword } from "../src/utils/password";
+import { DEFAULT_ROLE_UPLOAD_POLICY } from "../src/utils/defaultUploadPolicy";
 
 const prisma = new PrismaClient();
 
@@ -120,30 +121,7 @@ async function main(): Promise<void> {
         { role: "encoding", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
         { role: "release", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
       ]),
-      upload_policy: JSON.stringify({
-        allowedTypes: [
-          "text/plain",
-          "application/x-ass",
-          "video/mp4",
-          "video/x-matroska",
-          "audio/mp3",
-          "audio/flac",
-          "image/png",
-          "image/jpeg",
-          "application/zip",
-          "application/x-rar-compressed",
-        ],
-        maxSize: 104857600,
-        requireApproval: false,
-        extensionWhitelist: [
-          ".ass", ".ssa", ".srt", ".txt",
-          ".mp4", ".mkv", ".avi",
-          ".mp3", ".flac", ".aac",
-          ".png", ".jpg", ".jpeg",
-          ".zip", ".rar", ".7z",
-          ".ttf", ".otf", ".woff",
-        ],
-      }),
+      upload_policy: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY),
       notification_policy: JSON.stringify({
         channels: ["in_app"],
         events: [

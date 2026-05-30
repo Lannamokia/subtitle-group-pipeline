@@ -123,6 +123,14 @@ describe("File Management Tests", () => {
         role: "translation",
         status: "assigned",
       });
+      const encodingTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: user.id,
+        assignee_id: user.id,
+        role: "encoding",
+        status: "assigned",
+      });
 
       await prisma.projectMember.create({
         data: {
@@ -136,19 +144,23 @@ describe("File Management Tests", () => {
         data: {
           project_id: project.id,
           allowed_types: JSON.stringify({
-            translation: {
-              file_types: ["subtitle"],
-              mime_types: ["application/x-ass", "text/plain"],
-              extensions: [".ass", ".txt"],
+            roles: {
+              translation: {
+                file_types: ["subtitle"],
+                mime_types: ["application/x-ass", "text/plain", "text/vtt", "application/ttml+xml"],
+                extensions: [".ass", ".txt", ".vtt", ".ttml"],
+              },
+              encoding: {
+                file_types: ["video"],
+                mime_types: ["video/*", "application/x-matroska"],
+                extensions: [".mp4", ".webm", ".m2ts"],
+              },
             },
-            encoding: {
-              file_types: ["video"],
-              mime_types: ["video/mp4"],
-              extensions: [".mp4"],
-            },
+            extensionWhitelist: [".ass", ".txt", ".vtt", ".ttml", ".mp4", ".webm", ".m2ts"],
           }),
           max_size_bytes: 104857600,
           require_approval: false,
+          extension_whitelist: JSON.stringify([".ass", ".txt", ".vtt", ".ttml", ".mp4", ".webm", ".m2ts"]),
         },
       });
 
@@ -193,6 +205,44 @@ describe("File Management Tests", () => {
 
       expectSuccess(accepted, 201);
       expect(accepted.body.data.metadata).toContain(task.id);
+
+      const acceptedVtt = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "translation.vtt",
+          file_type: "subtitle",
+          mime_type: "text/vtt",
+          size_bytes: 1024,
+          storage_path: "/uploads/translation.vtt",
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "translation",
+        },
+        token
+      );
+
+      expectSuccess(acceptedVtt, 201);
+
+      const acceptedWebm = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          name: "encoded.webm",
+          file_type: "video",
+          mime_type: "video/webm",
+          size_bytes: 4096,
+          storage_path: "/uploads/encoded.webm",
+          task_id: encodingTask.id,
+          unit_id: unit.id,
+          role: "encoding",
+        },
+        token
+      );
+
+      expectSuccess(acceptedWebm, 201);
     });
   });
 

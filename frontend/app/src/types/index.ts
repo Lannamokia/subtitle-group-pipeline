@@ -81,6 +81,8 @@ export interface Project {
   archivedAt?: string;
   deletedAt?: string;
   deliveryChecklist?: DeliveryItem[];
+  productConfig?: ProductConfig;
+  releaseTaskType?: string | null;
   downloadLinkTtlSeconds?: number;
   wikiApprovalRequired?: boolean | null;
   createdAt: string;
@@ -296,8 +298,27 @@ export interface TemplateRoleConfig {
   requiredTagIds?: string[];
 }
 
+export interface UploadPolicyRule {
+  file_types?: FileType[];
+  fileTypes?: FileType[];
+  mime_types?: string[];
+  mimeTypes?: string[];
+  extensions?: string[];
+  allowed_types?: string[];
+  allowedTypes?: string[];
+}
+
 export interface UploadPolicy {
-  allowedTypes: Record<TaskRole, FileType[]>;
+  allowedTypes?: Record<TaskRole, FileType[]> | string[];
+  roles?: Partial<Record<TaskRole, UploadPolicyRule>>;
+  byRole?: Partial<Record<TaskRole, UploadPolicyRule>>;
+  maxSize?: number;
+  max_size_bytes?: number;
+  requireApproval?: boolean;
+  require_approval?: boolean;
+  extensionWhitelist?: string[];
+  extension_whitelist?: string[];
+  [key: string]: unknown;
 }
 
 export interface NotificationPolicy {

@@ -14,10 +14,18 @@ import {
   normalizeUser,
   memberApi,
   projectApi,
+  roleTagApi,
   taskApi,
   wikiApi,
 } from "@/lib/api";
-import { cn, getRoleLabel, getRoleColor, formatRelativeTime } from "@/lib/utils";
+import {
+  getDefaultTaskFileType,
+  getTaskDeliveryRule,
+  getTaskWorkflowStep,
+  TASK_PIPELINE_ROLES,
+  TASK_WORKFLOW_STEPS,
+} from "@/lib/taskWorkflow";
+import { cn, getFileTypeLabel, getRoleLabel, getRoleColor, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -79,6 +87,8 @@ import type {
   SubtitleConflict,
   User,
   TaskRole,
+  UserRoleTagStatus,
+  ProductOutputConfig,
   WikiBlock,
   WikiStatus,
 } from "@/types";
@@ -111,6 +121,7 @@ import {
   Trash2,
   FileText,
   ListOrdered,
+  GitBranch,
 } from "lucide-react";
 
 type ProjectTab = "tasks" | "files" | "wiki" | "members" | "settings" | "activity" | "dedup" | "announcements";
@@ -129,13 +140,7 @@ const WIKI_PAGE_TITLES: Record<WikiPageKey, string> = {
 const DEFAULT_WIKI_PAGE_IDS = Object.keys(WIKI_PAGE_TITLES) as WikiPageKey[];
 const UNASSIGNED_SELECT_VALUE = "__unassigned__";
 const UNASSIGNED_UNIT_SELECT_VALUE = "__project__";
-
-const KANBAN_COLUMNS: { id: string; title: string; statuses: TaskStatus[] }[] = [
-  { id: "todo", title: "待处理", statuses: ["pending_publish", "claimable", "assigned"] },
-  { id: "in_progress", title: "进行中", statuses: ["in_progress"] },
-  { id: "review", title: "待审核", statuses: ["submitted"] },
-  { id: "done", title: "已完成", statuses: ["review_approved", "completed"] },
-];
+const TASK_TEMPLATE_CUSTOM_VALUE = "__custom__";
 
 const FILE_TYPE_OPTIONS: { value: FileType | "all"; label: string }[] = [
   { value: "all", label: "全部" },
@@ -373,6 +378,100 @@ function getUnitTitle(unit: ProjectUnit) {
   return unit.title || `第 ${unit.season} 季 第 ${unit.episode} 集`;
 }
 
+function isCompletedTask(task: Task) {
+  return task.status === "completed" || task.status === "review_approved";
+}
+
+function isActiveTask(task: Task) {
+  return ["assigned", "in_progress", "submitted"].includes(task.status);
+}
+
+function isPipelineActiveTask(task: Task) {
+  return ["claimable", "assigned", "in_progress", "submitted", "review_rejected", "overdue"].includes(task.status);
+}
+
+function sortTasksByCreatedAtDesc(a: Task, b: Task) {
+  return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+}
+
+function findPipelinePredecessor(tasks: Task[], unitId: string | null, role: TaskRole) {
+  const roleIndex = TASK_PIPELINE_ROLES.indexOf(role as Exclude<TaskRole, "supervisor">);
+  if (roleIndex <= 0) return null;
+
+  const previousRoles = TASK_PIPELINE_ROLES.slice(0, roleIndex).reverse();
+  for (const previousRole of previousRoles) {
+    const candidate = tasks
+      .filter((task) => task.unitId === unitId && task.role === previousRole)
+      .sort(sortTasksByCreatedAtDesc)[0];
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+const ACTIVE_TASK_STATUSES: TaskStatus[] = ["assigned", "in_progress", "submitted", "review_rejected", "overdue"];
+
+const ROLE_PANEL_HELPERS: Record<Exclude<TaskRole, "supervisor">, string[]> = {
+  source: ["片源完整性检查", "记录分辨率/音轨/时长", "提交原盘或压缩素材包"],
+  timing: ["查看片源与轴点说明", "提交 ASS/SSA/SRT/VTT 等字幕轴", "标记关键断句和重叠风险"],
+  translation: ["筛选可领取翻译任务", "查看术语/Wiki/角色译名", "提交字幕或纯文本翻译稿"],
+  post_production: ["整理字体和特效资源", "提交样式字幕/工程包", "检查屏幕字和排版一致性"],
+  encoding: ["查看成品参数配置", "提交压制成品或日志", "记录码率/编码器/音轨信息"],
+  release: ["整理发布包和校验信息", "提交种子/网盘/说明文件", "确认发布渠道回填"],
+};
+
+function roleSetFromStatuses(statuses: UserRoleTagStatus[]) {
+  return new Set(
+    statuses
+      .filter((item) => item.status === "granted" && item.tag.roleType !== "supervisor")
+      .map((item) => item.tag.roleType as Exclude<TaskRole, "supervisor">)
+  );
+}
+
+function formatShortList(items: string[], max = 8) {
+  if (items.length <= max) return items.join("、");
+  return `${items.slice(0, max).join("、")} 等 ${items.length} 种`;
+}
+
+function ProductOutputRequirement({
+  title,
+  output,
+}: {
+  title: string;
+  output: ProductOutputConfig;
+}) {
+  const items: Array<{ label: string; value: string }> = [
+    { label: "分辨率", value: output.resolution },
+    { label: "帧率", value: output.frameRate },
+    { label: "编码器", value: output.encoder },
+    { label: "编码器预设", value: output.encoderPreset },
+    { label: "码率", value: output.videoBitrate },
+    { label: "成片大小", value: output.targetSize },
+    { label: "音频编码方式", value: output.audioCodec },
+    { label: "音频码率", value: output.audioBitrate },
+    { label: "音频声道数", value: output.audioChannels },
+  ];
+
+  return (
+    <div className="rounded-md bg-white px-3 py-2">
+      <p className="text-xs font-semibold text-gray-700">{title}</p>
+      <div className="mt-2 grid gap-1.5 text-xs sm:grid-cols-2">
+        {items.map((item) => (
+          <div key={item.label} className="flex justify-between gap-2 rounded bg-gray-50 px-2 py-1.5">
+            <span className="text-gray-500">{item.label}</span>
+            <span className="text-right text-gray-700">{item.value || "-"}</span>
+          </div>
+        ))}
+      </div>
+      {output.extraParams && (
+        <div className="mt-2 rounded bg-gray-50 px-2 py-1.5 text-xs">
+          <p className="text-gray-500">额外参数</p>
+          <p className="mt-1 break-all font-mono text-gray-700">{output.extraParams}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EpisodeListView({
   units,
   tasks,
@@ -469,24 +568,35 @@ function TasksTab({
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskUnitId, setNewTaskUnitId] = useState(UNASSIGNED_UNIT_SELECT_VALUE);
   const [newTaskRole, setNewTaskRole] = useState<TaskRole>("translation");
+  const [newTaskTemplateKey, setNewTaskTemplateKey] = useState(TASK_TEMPLATE_CUSTOM_VALUE);
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState("");
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [taskFilter, setTaskFilter] = useState("");
+  const [roleFilter, setRoleFilter] = useState<TaskRole | "all">("all");
   const [updating, setUpdating] = useState(false);
   const [assigneeId, setAssigneeId] = useState("");
   const [reviewComment, setReviewComment] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
   const [resetReason, setResetReason] = useState("");
+  const [roleTagStatuses, setRoleTagStatuses] = useState<UserRoleTagStatus[]>([]);
+  const [roleTagsLoading, setRoleTagsLoading] = useState(false);
+  const [taskUploadType, setTaskUploadType] = useState<FileType>("subtitle");
+  const [taskUploadTags, setTaskUploadTags] = useState("");
+  const [taskUploadSummary, setTaskUploadSummary] = useState("");
+  const [taskUploading, setTaskUploading] = useState(false);
+  const [taskDragOver, setTaskDragOver] = useState(false);
   const units = project.units ?? [];
   const selectedUnit = units.find((unit) => unit.id === selectedUnitId) ?? null;
   const scopedTasks = selectedUnitId
     ? tasks.filter((task) => task.unitId === selectedUnitId)
     : tasks.filter((task) => !task.unitId);
 
-  const filteredTasks = scopedTasks.filter((t) =>
-    taskFilter ? t.name.toLowerCase().includes(taskFilter.toLowerCase()) : true
-  );
+  const filteredTasks = scopedTasks.filter((task) => {
+    if (roleFilter !== "all" && task.role !== roleFilter) return false;
+    if (taskFilter && !task.name.toLowerCase().includes(taskFilter.toLowerCase())) return false;
+    return true;
+  });
 
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const blockedDependencies = (task: Task) =>
@@ -495,6 +605,63 @@ function TasksTab({
       .filter((dep): dep is Task => Boolean(dep))
       .filter((dep) => !["review_approved", "completed"].includes(dep.status));
   const resettableStatuses: TaskStatus[] = ["submitted", "review_rejected", "completed", "review_approved"];
+  const grantedRoleSet = roleSetFromStatuses(roleTagStatuses);
+  const assignedRoleSet = new Set(
+    tasks
+      .filter((task) => task.assigneeId === currentUser?.id && ACTIVE_TASK_STATUSES.includes(task.status) && task.role !== "supervisor")
+      .map((task) => task.role as Exclude<TaskRole, "supervisor">)
+  );
+  const hasGrantedRoleTags = grantedRoleSet.size > 0;
+  const visibleWorkflowSteps = TASK_WORKFLOW_STEPS.filter((step) =>
+    canManageTasks ||
+    !hasGrantedRoleTags ||
+    grantedRoleSet.has(step.role) ||
+    assignedRoleSet.has(step.role)
+  );
+  const selectedTaskDeliveryRule = selectedTask ? getTaskDeliveryRule(selectedTask.role) : null;
+  const newTaskTemplates = getTaskWorkflowStep(newTaskRole)?.templates ?? [];
+  const workflowSummaries = TASK_WORKFLOW_STEPS.map((step) => {
+    const roleTasks = filteredTasks
+      .filter((task) => task.role === step.role)
+      .sort(sortTasksByCreatedAtDesc);
+    const activeCount = roleTasks.filter(isActiveTask).length;
+    const completedCount = roleTasks.filter(isCompletedTask).length;
+    const isComplete = roleTasks.length > 0 && roleTasks.every(isCompletedTask);
+    const isActive = roleTasks.some(isPipelineActiveTask) && !isComplete;
+    return { step, roleTasks, activeCount, completedCount, isComplete, isActive };
+  });
+  const highlightedStepIndex = (() => {
+    const activeIndex = workflowSummaries.findIndex((summary) => summary.isActive);
+    if (activeIndex >= 0) return activeIndex;
+    const firstIncompleteIndex = workflowSummaries.findIndex((summary) => !summary.isComplete);
+    return firstIncompleteIndex >= 0 ? firstIncompleteIndex : workflowSummaries.length - 1;
+  })();
+
+  useEffect(() => {
+    let cancelled = false;
+    setRoleTagsLoading(true);
+    roleTagApi.getMyTagStatuses()
+      .then((statuses) => {
+        if (!cancelled) setRoleTagStatuses(statuses);
+      })
+      .catch(() => {
+        if (!cancelled) setRoleTagStatuses([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRoleTagsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!selectedTask) return;
+    setTaskUploadType(getDefaultTaskFileType(selectedTask.role));
+    setTaskUploadTags("");
+    setTaskUploadSummary("");
+    setTaskDragOver(false);
+  }, [selectedTask?.id, selectedTask?.role]);
 
   const handleTaskAction = async (task: Task, action: string) => {
     setUpdating(true);
@@ -586,7 +753,7 @@ function TasksTab({
 
     setCreating(true);
     try {
-      await taskApi.createTask({
+      const createdTask = await taskApi.createTask({
         project_id: project.id,
         unit_id: newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId,
         title: newTaskTitle.trim(),
@@ -595,11 +762,17 @@ function TasksTab({
         due_date: newTaskDueDate ? new Date(newTaskDueDate).toISOString() : null,
         description: newTaskDescription.trim() || null,
       } as Partial<Task> & Record<string, unknown>);
-      toast.success("任务已创建");
+      const dependencyUnitId = newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId;
+      const predecessor = findPipelinePredecessor(tasks, dependencyUnitId, newTaskRole);
+      if (predecessor && predecessor.id !== createdTask.id) {
+        await taskApi.createDependency(createdTask.id, predecessor.id);
+      }
+      toast.success(predecessor ? "任务已创建，并已串联前置任务" : "任务已创建");
       setCreateOpen(false);
       setNewTaskTitle("");
       setNewTaskUnitId(selectedUnitId ?? units[0]?.id ?? UNASSIGNED_UNIT_SELECT_VALUE);
       setNewTaskRole("translation");
+      setNewTaskTemplateKey(TASK_TEMPLATE_CUSTOM_VALUE);
       setNewTaskAssigneeId("");
       setNewTaskDueDate("");
       setNewTaskDescription("");
@@ -611,9 +784,49 @@ function TasksTab({
     }
   };
 
+  const applyTaskTemplate = (value: string) => {
+    setNewTaskTemplateKey(value);
+    if (value === TASK_TEMPLATE_CUSTOM_VALUE) return;
+
+    const template = newTaskTemplates.find((item) => item.title === value);
+    if (!template) return;
+    setNewTaskTitle(template.title);
+    setNewTaskDescription(template.description);
+  };
+
   const openCreateTaskDialog = () => {
     setNewTaskUnitId(selectedUnitId ?? units[0]?.id ?? UNASSIGNED_UNIT_SELECT_VALUE);
+    setNewTaskTitle("");
+    setNewTaskDescription("");
+    setNewTaskTemplateKey(TASK_TEMPLATE_CUSTOM_VALUE);
+    setNewTaskAssigneeId("");
+    setNewTaskDueDate("");
     setCreateOpen(true);
+  };
+
+  const handleTaskUpload = async (fileList: FileList | null) => {
+    if (!selectedTask || !fileList || fileList.length === 0) return;
+    setTaskUploading(true);
+    try {
+      const tags = taskUploadTags.split(",").map((tag) => tag.trim()).filter(Boolean);
+      await fileApi.uploadFile(fileList[0], {
+        projectId: project.id,
+        taskId: selectedTask.id,
+        unitId: selectedTask.unitId,
+        role: selectedTask.role,
+        type: taskUploadType,
+        tags,
+        changeSummary: taskUploadSummary,
+      });
+      toast.success("任务文件已上传");
+      setTaskUploadTags("");
+      setTaskUploadSummary("");
+      onUpdate();
+    } catch (error) {
+      toast.error("任务文件上传失败: " + getErrorMessage(error));
+    } finally {
+      setTaskUploading(false);
+    }
   };
 
   const createTaskDialog = (
@@ -651,7 +864,13 @@ function TasksTab({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
               <label className="text-sm font-medium">任务角色</label>
-              <Select value={newTaskRole} onValueChange={(value) => setNewTaskRole(value as TaskRole)}>
+              <Select
+                value={newTaskRole}
+                onValueChange={(value) => {
+                  setNewTaskRole(value as TaskRole);
+                  setNewTaskTemplateKey(TASK_TEMPLATE_CUSTOM_VALUE);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -685,6 +904,22 @@ function TasksTab({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">任务模板</label>
+            <Select value={newTaskTemplateKey} onValueChange={applyTaskTemplate}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择任务模板" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={TASK_TEMPLATE_CUSTOM_VALUE}>自定义任务</SelectItem>
+                {newTaskTemplates.map((template) => (
+                  <SelectItem key={template.title} value={template.title}>
+                    {template.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">截止日期</label>
@@ -723,7 +958,7 @@ function TasksTab({
           units={units}
           tasks={tasks}
           onSelectUnit={onSelectUnit}
-          onCreateTask={openCreateTaskDialog}
+          onCreateTask={() => openCreateTaskDialog()}
         />
         {createTaskDialog}
       </>
@@ -754,7 +989,7 @@ function TasksTab({
             </p>
           </div>
         </div>
-        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] lg:w-auto lg:min-w-[360px]">
+        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_160px_auto] lg:w-auto lg:min-w-[520px]">
           <div className="relative min-w-0 lg:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
@@ -764,42 +999,246 @@ function TasksTab({
               onChange={(e) => setTaskFilter(e.target.value)}
             />
           </div>
-          <Button size="sm" className="w-full sm:w-auto" onClick={openCreateTaskDialog}>
+          <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value as TaskRole | "all")}>
+            <SelectTrigger>
+              <SelectValue placeholder="岗位" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部岗位</SelectItem>
+              {TASK_WORKFLOW_STEPS.map((step) => (
+                <SelectItem key={step.role} value={step.role}>
+                  {getRoleLabel(step.role)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" className="w-full sm:w-auto" onClick={() => openCreateTaskDialog()}>
             <Plus className="w-4 h-4 mr-1.5" />
             新建任务
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 md:gap-4">
-        {KANBAN_COLUMNS.map((column) => {
-          const columnTasks = filteredTasks.filter((t) => column.statuses.includes(t.status));
-          return (
-            <Card key={column.id} className="bg-gray-50/50 border-gray-200/60">
-              <CardHeader className="px-4 py-3 pb-0">
-                <CardTitle className="text-h3 flex items-center justify-between">
-                  <span>{column.title}</span>
-                  <span className="text-xs text-gray-400 font-normal bg-gray-100 px-2 py-0.5 rounded-full">
-                    {columnTasks.length}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 pt-3 space-y-2">
-                {columnTasks.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    onClick={() => setSelectedTask(task)}
-                  />
-                ))}
-                {columnTasks.length === 0 && (
-                  <div className="text-center py-8 text-xs text-gray-400">暂无任务</div>
-                )}
-              </CardContent>
-            </Card>
+      <Card className="border-gray-200/80">
+        <CardHeader className="space-y-1 px-4 py-4">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <GitBranch className="h-4 w-4 text-primary-500" />
+            我的岗位操作面板
+          </CardTitle>
+          <p className="text-xs text-gray-500">
+            {roleTagsLoading
+              ? "正在读取技能标签..."
+              : canManageTasks
+                ? "监制及项目管理者可查看全部岗位面板。"
+                : hasGrantedRoleTags
+                  ? "根据已授予标签和正在处理的任务展示可用岗位。"
+                  : "当前没有已授予标签，展示除监制外的全部岗位面板。"}
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {visibleWorkflowSteps.map((step) => {
+            const roleTasks = filteredTasks.filter((task) => task.role === step.role);
+            const claimableTasks = roleTasks.filter((task) => task.status === "claimable");
+            const readyClaimableTasks = claimableTasks.filter((task) => blockedDependencies(task).length === 0);
+            const myActiveTasks = roleTasks.filter(
+              (task) => task.assigneeId === currentUser?.id && ACTIVE_TASK_STATUSES.includes(task.status)
+            );
+            const completedCount = roleTasks.filter(isCompletedTask).length;
+            return (
+              <div key={step.role} className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={cn("text-caption rounded border px-2 py-0.5", getRoleColor(step.role))}>
+                        {getRoleLabel(step.role)}
+                      </span>
+                      {myActiveTasks.length > 0 && (
+                        <Badge variant="secondary" className="text-[10px]">我的任务</Badge>
+                      )}
+                    </div>
+                    <p className="mt-2 line-clamp-2 text-xs text-gray-500">{step.guidance}</p>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-md bg-gray-50 px-2 py-2">
+                    <p className="text-sm font-semibold text-gray-800">{readyClaimableTasks.length}</p>
+                    <p className="text-[11px] text-gray-500">可领取</p>
+                  </div>
+                  <div className="rounded-md bg-gray-50 px-2 py-2">
+                    <p className="text-sm font-semibold text-gray-800">{myActiveTasks.length}</p>
+                    <p className="text-[11px] text-gray-500">我的</p>
+                  </div>
+                  <div className="rounded-md bg-gray-50 px-2 py-2">
+                    <p className="text-sm font-semibold text-gray-800">{completedCount}</p>
+                    <p className="text-[11px] text-gray-500">已完成</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {ROLE_PANEL_HELPERS[step.role].map((helper) => (
+                    <Badge key={helper} variant="outline" className="text-[10px] font-normal">
+                      {helper}
+                    </Badge>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {myActiveTasks[0] && (
+                    <Button size="sm" variant="outline" className="h-8" onClick={() => setSelectedTask(myActiveTasks[0])}>
+                      继续处理
+                    </Button>
+                  )}
+                  {!myActiveTasks[0] && readyClaimableTasks[0] && (
+                    <Button size="sm" variant="outline" className="h-8" onClick={() => setSelectedTask(readyClaimableTasks[0])}>
+                      查看可领取
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8"
+                    onClick={() => {
+                      setRoleFilter(step.role);
+                      setTaskFilter("");
+                    }}
+                  >
+                    筛选岗位
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <Card className="border-gray-200/80">
+        <CardHeader className="px-4 py-4">
+          <CardTitle className="text-base">串行制作流水线</CardTitle>
+          <p className="text-xs text-gray-500">从片源到发布按岗位串联，点击步骤可筛选对应岗位任务。</p>
+        </CardHeader>
+        <CardContent className="space-y-5 px-4 pb-4">
+          <div className="overflow-x-auto pb-2">
+            <div className="min-w-[860px]">
+              <div className="grid grid-cols-6 items-center">
+                {workflowSummaries.map((summary, index) => {
+                  const isHighlighted = index === highlightedStepIndex;
+                  const isDone = summary.isComplete;
+                  return (
+                    <div key={summary.step.role} className="relative flex justify-center">
+                      {index > 0 && (
+                        <div
+                          className={cn(
+                            "absolute right-1/2 top-1/2 h-0.5 w-full -translate-y-1/2",
+                            workflowSummaries[index - 1]?.isComplete ? "bg-primary-500" : "bg-gray-300"
+                          )}
+                        />
+                      )}
+                      <button
+                        type="button"
+                        className={cn(
+                          "relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 bg-white text-base font-medium transition-colors",
+                          isDone && "border-primary-500 bg-primary-500 text-white",
+                          isHighlighted && !isDone && "border-primary-500 text-primary-600",
+                          !isDone && !isHighlighted && "border-gray-300 text-gray-400 hover:border-gray-400"
+                        )}
+                        onClick={() => {
+                          setRoleFilter(summary.step.role);
+                          setTaskFilter("");
+                        }}
+                        aria-label={`筛选${getRoleLabel(summary.step.role)}任务`}
+                      >
+                        {index + 1}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-5 grid grid-cols-6 gap-4 text-center">
+                {workflowSummaries.map((summary, index) => {
+                  const isHighlighted = index === highlightedStepIndex;
+                  const isDone = summary.isComplete;
+                  return (
+                    <button
+                      key={summary.step.role}
+                      type="button"
+                      className="min-w-0 text-center"
+                      onClick={() => {
+                        setRoleFilter(summary.step.role);
+                        setTaskFilter("");
+                      }}
+                    >
+                      <p
+                        className={cn(
+                          "truncate text-base font-semibold",
+                          isDone || isHighlighted ? "text-gray-900" : "text-gray-400"
+                        )}
+                      >
+                        {getRoleLabel(summary.step.role)}
+                      </p>
+                      <p
+                        className={cn(
+                          "mt-1 truncate text-xs",
+                          isDone || isHighlighted ? "text-gray-600" : "text-gray-400"
+                        )}
+                      >
+                        {summary.step.deliverables[0]}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          {workflowSummaries.map(({ step, roleTasks, activeCount, completedCount, isComplete, isActive }) => {
+            return (
+              <Card key={step.role} className="bg-gray-50/60 border-gray-200/70">
+                <CardHeader className="px-3 py-3 pb-0">
+                  <CardTitle className="flex items-start justify-between gap-2 text-sm">
+                    <span className="min-w-0">
+                      <span className="block text-[11px] font-normal text-gray-400">
+                        {isComplete ? "步骤已完成" : isActive ? "正在推进" : "等待前序"}
+                      </span>
+                      <span>{getRoleLabel(step.role)}</span>
+                    </span>
+                    <Badge variant="outline" className="shrink-0 text-[10px]">{roleTasks.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 p-3">
+                  <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                    <div className="rounded-md bg-white px-2 py-1.5">
+                      <p className="font-semibold text-gray-800">{activeCount}</p>
+                      <p className="text-[10px] text-gray-500">进行中</p>
+                    </div>
+                    <div className="rounded-md bg-white px-2 py-1.5">
+                      <p className="font-semibold text-gray-800">{completedCount}</p>
+                      <p className="text-[10px] text-gray-500">完成</p>
+                    </div>
+                  </div>
+                  <div className="rounded-md bg-white px-2 py-2 text-[11px] text-gray-500">
+                    <p className="font-medium text-gray-600">可提交</p>
+                    <p className="mt-1 leading-5">{formatShortList(step.formats, 5)}</p>
+                  </div>
+                  <div className="space-y-2">
+                    {roleTasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        onClick={() => setSelectedTask(task)}
+                      />
+                    ))}
+                    {roleTasks.length === 0 && (
+                      <div className="rounded-lg border border-dashed border-gray-200 bg-white py-8 text-center text-xs text-gray-400">
+                        暂无任务
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
           );
         })}
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Task Detail Sheet */}
       <Sheet open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)}>
@@ -821,6 +1260,48 @@ function TasksTab({
                   <div>
                     <h4 className="text-sm font-medium text-gray-700 mb-1">描述</h4>
                     <p className="text-sm text-gray-600">{selectedTask.description}</p>
+                  </div>
+                )}
+
+                {selectedTaskDeliveryRule && (
+                  <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700">岗位交付要求</h4>
+                      <p className="mt-1 text-xs leading-5 text-gray-500">{selectedTaskDeliveryRule.guidance}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedTaskDeliveryRule.deliverables.map((item) => (
+                        <Badge key={item} variant="outline" className="bg-white text-[10px] font-normal">
+                          {item}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="grid gap-2 text-xs sm:grid-cols-2">
+                      <div className="rounded-md bg-white px-3 py-2">
+                        <p className="font-medium text-gray-600">文件类别</p>
+                        <p className="mt-1 text-gray-500">
+                          {selectedTaskDeliveryRule.fileTypes.map((type) => getFileTypeLabel(type)).join("、")}
+                        </p>
+                      </div>
+                      <div className="rounded-md bg-white px-3 py-2">
+                        <p className="font-medium text-gray-600">常用格式</p>
+                        <p className="mt-1 text-gray-500">{formatShortList(selectedTaskDeliveryRule.formats, 6)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedTask.role === "encoding" && project.productConfig && (
+                  <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700">成品配置</h4>
+                      <div className="mt-2 rounded-md bg-white px-3 py-2 text-xs">
+                        <p className="font-medium text-gray-600">命名规则</p>
+                        <p className="mt-1 break-all font-mono text-gray-700">{project.productConfig.namingRule}</p>
+                      </div>
+                    </div>
+                    <ProductOutputRequirement title="内封成品" output={project.productConfig.outputs.muxed} />
+                    <ProductOutputRequirement title="内嵌成品" output={project.productConfig.outputs.burned} />
                   </div>
                 )}
 
@@ -916,6 +1397,78 @@ function TasksTab({
                       onChange={(event) => setReviewComment(event.target.value)}
                       placeholder="填写通过或驳回说明..."
                     />
+                  </div>
+                )}
+
+                {selectedTaskDeliveryRule && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-sm font-medium text-gray-700">提交任务文件</h4>
+                      <Badge variant="outline" className="text-[10px]">
+                        {getRoleLabel(selectedTask.role)}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Select value={taskUploadType} onValueChange={(value) => setTaskUploadType(value as FileType)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {selectedTaskDeliveryRule.fileTypes.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {getFileTypeLabel(type)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        value={taskUploadTags}
+                        onChange={(event) => setTaskUploadTags(event.target.value)}
+                        placeholder="标签，用逗号分隔"
+                      />
+                    </div>
+                    <Input
+                      value={taskUploadSummary}
+                      onChange={(event) => setTaskUploadSummary(event.target.value)}
+                      placeholder="提交说明或版本变更说明"
+                    />
+                    <div
+                      className={cn(
+                        "rounded-lg border-2 border-dashed p-5 text-center transition-colors",
+                        taskDragOver ? "border-primary-500 bg-primary-50" : "border-gray-300 bg-white"
+                      )}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setTaskDragOver(true);
+                      }}
+                      onDragLeave={() => setTaskDragOver(false)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        setTaskDragOver(false);
+                        handleTaskUpload(event.dataTransfer.files);
+                      }}
+                    >
+                      <Upload className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+                      <p className="text-sm text-gray-600">拖拽符合岗位要求的文件到此处</p>
+                      <p className="mt-1 text-xs text-gray-400">
+                        支持：{formatShortList(selectedTaskDeliveryRule.formats, 8)}
+                      </p>
+                      <label className="mt-3 inline-block">
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept={selectedTaskDeliveryRule.accept}
+                          disabled={taskUploading}
+                          onChange={(event) => handleTaskUpload(event.target.files)}
+                        />
+                        <Button type="button" variant="outline" size="sm" asChild disabled={taskUploading}>
+                          <span>
+                            {taskUploading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                            选择文件
+                          </span>
+                        </Button>
+                      </label>
+                    </div>
                   </div>
                 )}
 

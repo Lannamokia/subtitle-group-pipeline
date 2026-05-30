@@ -56,7 +56,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { roleTagApi } from "@/lib/api";
-import type { ProductOutputConfig, ProjectTemplate, RoleTagDefinition, TaskRole } from "@/types";
+import { TASK_DELIVERY_RULES, TASK_WORKFLOW_STEPS } from "@/lib/taskWorkflow";
+import type { FileType, ProductOutputConfig, ProjectTemplate, RoleTagDefinition, TaskRole, UploadPolicy } from "@/types";
 import {
   Plus,
   Search,
@@ -133,9 +134,7 @@ const templateFormSchema = z.object({
   type: z.enum(["anime", "movie", "collection"]),
   description: z.string().optional(),
   roles: z.array(roleConfigSchema),
-  uploadPolicy: z.object({
-    allowedTypes: z.record(z.string(), z.array(z.string())),
-  }),
+  uploadPolicy: z.record(z.string(), z.unknown()),
   notificationPolicy: z.object({
     events: z.record(z.string(), z.array(z.string())),
   }),
@@ -156,6 +155,92 @@ const templateFormSchema = z.object({
 type TemplateFormValues = z.infer<typeof templateFormSchema>;
 
 type ApiEnvelope<T> = { data: T };
+
+type TemplateUploadRule = {
+  file_types: FileType[];
+  mime_types: string[];
+  extensions: string[];
+};
+
+function defaultUploadPolicy(): UploadPolicy {
+  const rules: Array<[TaskRole, TemplateUploadRule]> = [
+    ...TASK_WORKFLOW_STEPS,
+    { role: "supervisor" as TaskRole, ...TASK_DELIVERY_RULES.supervisor },
+  ].map((rule) => {
+    const acceptValues = rule.accept.split(",").map((item) => item.trim()).filter(Boolean);
+    return [
+      rule.role,
+      {
+        file_types: rule.fileTypes,
+        mime_types: acceptValues.filter((item) => !item.startsWith(".")),
+        extensions: acceptValues.filter((item) => item.startsWith(".")),
+      },
+    ] as [TaskRole, TemplateUploadRule];
+  });
+  const extensionWhitelist = Array.from(
+    new Set(rules.flatMap(([, rule]) => rule.extensions))
+  );
+
+  return {
+    roles: Object.fromEntries(rules),
+    maxSize: 104857600,
+    requireApproval: false,
+    extensionWhitelist,
+  };
+}
+
+function normalizeUploadPolicy(policy: ProjectTemplate["uploadPolicy"] | null | undefined): UploadPolicy {
+  const fallback = defaultUploadPolicy();
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
+    return fallback;
+  }
+
+  const raw = policy as UploadPolicy;
+  const rawRoles = raw.roles ?? raw.byRole;
+  if (rawRoles && typeof rawRoles === "object" && !Array.isArray(rawRoles) && Object.keys(rawRoles).length > 0) {
+    return {
+      ...fallback,
+      ...raw,
+      roles: {
+        ...(fallback.roles ?? {}),
+        ...rawRoles,
+      },
+      extensionWhitelist: Array.isArray(raw.extensionWhitelist)
+        ? raw.extensionWhitelist
+        : Array.isArray(raw.extension_whitelist)
+          ? raw.extension_whitelist
+          : fallback.extensionWhitelist,
+    };
+  }
+
+  if (raw.allowedTypes && typeof raw.allowedTypes === "object" && !Array.isArray(raw.allowedTypes)) {
+    const legacyRules = Object.fromEntries(
+      Object.entries(raw.allowedTypes)
+        .filter((entry): entry is [TaskRole, FileType[]] => Array.isArray(entry[1]))
+        .map(([role, fileTypes]) => [
+          role,
+          {
+            ...fallback.roles?.[role],
+            file_types: fileTypes,
+          },
+        ])
+    ) as Partial<Record<TaskRole, TemplateUploadRule>>;
+
+    if (Object.keys(legacyRules).length > 0) {
+      return {
+        ...fallback,
+        ...raw,
+        roles: {
+          ...(fallback.roles ?? {}),
+          ...legacyRules,
+        },
+        extensionWhitelist: Array.isArray(raw.extensionWhitelist) ? raw.extensionWhitelist : fallback.extensionWhitelist,
+      };
+    }
+  }
+
+  return fallback;
+}
 
 function toBackendProjectType(type: TemplateFormValues["type"]) {
   return type === "collection" ? "other" : type;
@@ -243,7 +328,7 @@ const defaultFormValues: TemplateFormValues = {
     maxSegmentLength: role === "translation" ? 300 : undefined,
     requiredTagIds: [],
   })),
-  uploadPolicy: { allowedTypes: {} },
+  uploadPolicy: defaultUploadPolicy(),
   notificationPolicy: {
     events: {
       task_assigned: ["in_site"],
@@ -519,7 +604,7 @@ function TemplateFormDialog({
           type: fromBackendProjectType(template.type),
           description: template.description || "",
           roles: template.roles,
-          uploadPolicy: template.uploadPolicy,
+          uploadPolicy: normalizeUploadPolicy(template.uploadPolicy),
           notificationPolicy: template.notificationPolicy,
           assPolicy: template.assPolicy,
           productConfig: normalizeProductConfig(template.productConfig),
