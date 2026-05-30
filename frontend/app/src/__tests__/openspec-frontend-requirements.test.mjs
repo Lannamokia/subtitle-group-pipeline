@@ -87,6 +87,7 @@ assertIncludes("serial task workflow stepper", files.projectDetail + files.taskW
   "right-1/2 top-1/2 h-1",
   "summary.activeCount > 0",
   "w-1/2",
+  "制作流水线进度",
   "createDependency",
   "串行制作流水线",
   "提交任务文件",
@@ -109,6 +110,12 @@ assertNotIncludes("task templates do not leave stale project-page panels", files
   "openCreateTaskDialog(step.role",
   "每一步都提供专属任务模板",
   "我的岗位操作面板",
+]);
+
+assertNotIncludes("serial task workflow stepper is display-only", files.projectDetail, [
+  "点击步骤可筛选对应岗位任务",
+  "setRoleFilter(summary.step.role",
+  "aria-label={`筛选${getRoleLabel(summary.step.role)}任务`",
 ]);
 
 assertIncludes("file bucket history and explicit replace", files.fileList, [

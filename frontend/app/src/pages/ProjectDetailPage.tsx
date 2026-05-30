@@ -1007,12 +1007,12 @@ function TasksTab({
       <Card className="border-gray-200/80">
         <CardHeader className="px-4 py-4">
           <CardTitle className="text-base">串行制作流水线</CardTitle>
-          <p className="text-xs text-gray-500">从片源到发布按岗位串联，点击步骤可筛选对应岗位任务。</p>
+          <p className="text-xs text-gray-500">从片源到发布按岗位串联，展示当前分集任务进度。</p>
         </CardHeader>
         <CardContent className="space-y-5 px-4 pb-4">
           <div className="overflow-x-auto pb-2">
             <div className="min-w-[860px]">
-              <div className="grid grid-cols-6 items-center">
+              <div className="grid grid-cols-6 items-center" role="list" aria-label="制作流水线进度">
                 {workflowSummaries.map((summary, index) => {
                   const isHighlighted = index === highlightedStepIndex;
                   const isDone = summary.isComplete;
@@ -1025,7 +1025,7 @@ function TasksTab({
                         : "w-0"
                     : "w-0";
                   return (
-                    <div key={summary.step.role} className="relative flex justify-center">
+                    <div key={summary.step.role} className="relative flex justify-center" role="listitem">
                       {index > 0 && (
                         <div className="absolute right-1/2 top-1/2 h-1 w-full -translate-y-1/2 rounded-full bg-gray-200">
                           <div
@@ -1036,22 +1036,17 @@ function TasksTab({
                           />
                         </div>
                       )}
-                      <button
-                        type="button"
+                      <div
                         className={cn(
                           "relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 bg-white text-base font-semibold shadow-sm transition-colors md:h-14 md:w-14 md:text-lg",
                           isDone && "border-primary-500 bg-primary-500 text-white shadow-primary-100",
                           isHighlighted && !isDone && "border-primary-500 text-primary-600 ring-4 ring-primary-50",
-                          !isDone && !isHighlighted && "border-gray-300 text-gray-400 hover:border-gray-400"
+                          !isDone && !isHighlighted && "border-gray-300 text-gray-400"
                         )}
-                        onClick={() => {
-                          setRoleFilter(summary.step.role);
-                          setTaskFilter("");
-                        }}
-                        aria-label={`筛选${getRoleLabel(summary.step.role)}任务`}
+                        aria-current={isHighlighted ? "step" : undefined}
                       >
                         {index + 1}
-                      </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1061,14 +1056,9 @@ function TasksTab({
                   const isHighlighted = index === highlightedStepIndex;
                   const isDone = summary.isComplete;
                   return (
-                    <button
+                    <div
                       key={summary.step.role}
-                      type="button"
                       className="min-w-0 text-center"
-                      onClick={() => {
-                        setRoleFilter(summary.step.role);
-                        setTaskFilter("");
-                      }}
                     >
                       <p
                         className={cn(
@@ -1086,7 +1076,7 @@ function TasksTab({
                       >
                         {summary.step.deliverables[0]}
                       </p>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
