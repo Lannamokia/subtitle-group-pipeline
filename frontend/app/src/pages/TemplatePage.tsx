@@ -76,12 +76,14 @@ const typeIcons: Record<string, React.ReactNode> = {
   anime: <Monitor className="w-4 h-4" />,
   movie: <Film className="w-4 h-4" />,
   collection: <FolderOpen className="w-4 h-4" />,
+  other: <FolderOpen className="w-4 h-4" />,
 };
 
 const typeLabels: Record<string, string> = {
   anime: "番剧",
   movie: "电影",
   collection: "合集",
+  other: "合集",
 };
 
 const ALL_ROLES: TaskRole[] = [
@@ -137,6 +139,32 @@ const templateFormSchema = z.object({
 
 type TemplateFormValues = z.infer<typeof templateFormSchema>;
 
+type ApiEnvelope<T> = { data: T };
+
+function toBackendProjectType(type: TemplateFormValues["type"]) {
+  return type === "collection" ? "other" : type;
+}
+
+function fromBackendProjectType(type: ProjectTemplate["type"]): TemplateFormValues["type"] {
+  return type === "other" || type === "ova" || type === "special" || type === "music_video"
+    ? "collection"
+    : type;
+}
+
+function toTemplatePayload(values: TemplateFormValues) {
+  return {
+    name: values.name,
+    description: values.description || null,
+    project_type: toBackendProjectType(values.type),
+    roles: JSON.stringify(values.roles),
+    upload_policy: JSON.stringify(values.uploadPolicy),
+    notification_policy: JSON.stringify(values.notificationPolicy),
+    ass_policy: JSON.stringify(values.assPolicy),
+    product_config: JSON.stringify(values.productConfig),
+    delivery_checklist: JSON.stringify(values.deliveryChecklist),
+  };
+}
+
 const defaultFormValues: TemplateFormValues = {
   name: "",
   type: "anime",
@@ -187,7 +215,7 @@ export function TemplatePage() {
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get<{ data: ProjectTemplate[] }>("/templates");
+      const res = await api.get<ApiEnvelope<ProjectTemplate[]>>("/templates");
       setTemplates(res.data.data);
     } catch (error) {
       toast.error("获取模板列表失败: " + getErrorMessage(error));
@@ -224,7 +252,7 @@ export function TemplatePage() {
 
   const filtered = templates.filter((t) => {
     if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (typeFilter !== "all" && t.type !== typeFilter) return false;
+    if (typeFilter !== "all" && fromBackendProjectType(t.type) !== typeFilter) return false;
     return true;
   });
 
@@ -420,7 +448,7 @@ function TemplateFormDialog({
     defaultValues: isEdit
       ? {
           name: template.name,
-          type: template.type,
+          type: fromBackendProjectType(template.type),
           description: template.description || "",
           roles: template.roles,
           uploadPolicy: template.uploadPolicy,
@@ -445,11 +473,12 @@ function TemplateFormDialog({
   const onSubmit = async (values: TemplateFormValues) => {
     setSubmitting(true);
     try {
+      const payload = toTemplatePayload(values);
       if (isEdit && template) {
-        await api.put(`/templates/${template.id}`, values);
+        await api.put(`/templates/${template.id}`, payload);
         toast.success("模板已更新");
       } else {
-        await api.post("/templates", values);
+        await api.post("/templates", payload);
         toast.success("模板已创建");
       }
       onOpenChange(false);
@@ -918,7 +947,7 @@ function TemplateDetailDialog({
                       <span>
                         {role.assignmentStrategy === "manual" ? "手动分配" : "开放认领"}
                       </span>
-                      {role.maxSegmentLength && <span>最大{role.maxSegmentLength}字</span>}
+                      {role.maxSegmentLength && <span>最长{role.maxSegmentLength}秒/人</span>}
                     </div>
                   )}
                 </div>

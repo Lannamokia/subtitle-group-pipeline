@@ -38,7 +38,7 @@ export interface RegisterData {
   password: string;
   confirmPassword: string;
   qq: string;
-  tags: TaskRole[];
+  tags: string[];
 }
 
 export interface VerificationStatus {

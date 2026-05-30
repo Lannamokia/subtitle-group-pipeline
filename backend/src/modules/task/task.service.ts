@@ -531,11 +531,15 @@ export async function getTasks(query: TaskQueryInput) {
 
   const where: Record<string, unknown> = {};
 
-  if (query.project_id) {
-    where.project_id = query.project_id;
+  const projectId = query.project_id ?? query.projectId;
+  const unitId = query.unit_id ?? query.unitId;
+  const assigneeId = query.assignee_id ?? query.assigneeId;
+
+  if (projectId) {
+    where.project_id = projectId;
   }
-  if (query.unit_id) {
-    where.unit_id = query.unit_id;
+  if (unitId) {
+    where.unit_id = unitId;
   }
   if (query.status) {
     where.status = query.status;
@@ -543,8 +547,8 @@ export async function getTasks(query: TaskQueryInput) {
   if (query.role) {
     where.role = query.role;
   }
-  if (query.assignee_id) {
-    where.assignee_id = query.assignee_id;
+  if (assigneeId) {
+    where.assignee_id = assigneeId;
   }
 
   const [tasks, total] = await Promise.all([

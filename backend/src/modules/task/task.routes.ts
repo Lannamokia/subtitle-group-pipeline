@@ -31,6 +31,11 @@ const projectIdParamSchema = z.object({
   projectId: z.string().uuid("Invalid project ID"),
 });
 
+// Workload dashboard routes must be registered before /:id.
+router.get("/workload/personal", authenticate, controller.getPersonalWorkload);
+router.get("/workload/project/:projectId", authenticate, validateParams(projectIdParamSchema), controller.getProjectWorkload);
+router.get("/workload/global", authenticate, requireRole("super_admin", "group_admin"), controller.getGlobalWorkload);
+
 // Basic CRUD
 router.get("/", validateQuery(taskQuerySchema), controller.getTasks);
 router.get("/:id", validateParams(idParamSchema), controller.getTask);
@@ -72,10 +77,5 @@ router.delete("/:id/dependencies/:dependencyId", authenticate, validateParams(de
 // Task comments
 router.get("/:id/comments", authenticate, validateParams(idParamSchema), controller.getTaskComments);
 router.post("/:id/comments", authenticate, validateParams(idParamSchema), validateBody(createCommentSchema), controller.createTaskComment);
-
-// Workload dashboard
-router.get("/workload/personal", authenticate, controller.getPersonalWorkload);
-router.get("/workload/project/:projectId", authenticate, validateParams(projectIdParamSchema), controller.getProjectWorkload);
-router.get("/workload/global", authenticate, requireRole("super_admin", "group_admin"), controller.getGlobalWorkload);
 
 export default router;

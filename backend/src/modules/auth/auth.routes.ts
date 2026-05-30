@@ -129,7 +129,7 @@ router.put(
 );
 
 // Role tags
-router.get("/role-tags", authenticate, controller.getRoleTags);
+router.get("/role-tags", controller.getRoleTags);
 router.post("/role-tags", authenticate, requireRole("super_admin", "group_admin"), validateBody(createRoleTagSchema), controller.createRoleTag);
 router.put("/role-tags/:id", authenticate, requireRole("super_admin", "group_admin"), validateBody(updateRoleTagSchema), controller.updateRoleTag);
 router.delete("/role-tags/:id", authenticate, requireRole("super_admin", "group_admin"), controller.deleteRoleTag);

@@ -45,8 +45,16 @@ export function DashboardPage() {
           announcementApi.getAnnouncements(),
         ]);
         setTasks(tasksRes);
-        setTimelineEvents(timelineRes);
-        setAnnouncements(announcementsRes);
+        // Backend returns { events: [...], meta: {...} }
+        const eventList = Array.isArray(timelineRes)
+          ? timelineRes
+          : (timelineRes as { events?: TimelineEvent[] }).events ?? [];
+        setTimelineEvents(eventList);
+        // Backend returns { announcements: [...], meta: {...} }
+        const announcementList = Array.isArray(announcementsRes)
+          ? announcementsRes
+          : (announcementsRes as { announcements?: Announcement[] }).announcements ?? [];
+        setAnnouncements(announcementList);
       } catch {
         // 保持空数组
       }

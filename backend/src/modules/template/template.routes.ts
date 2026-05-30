@@ -30,6 +30,14 @@ router.patch(
   validateBody(updateTemplateSchema),
   controller.updateTemplate
 );
+router.put(
+  "/:id",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateParams(idParamSchema),
+  validateBody(updateTemplateSchema),
+  controller.updateTemplate
+);
 router.delete(
   "/:id",
   authenticate,
@@ -39,6 +47,13 @@ router.delete(
 );
 router.post(
   "/:id/set-default",
+  authenticate,
+  requireRole("super_admin", "group_admin"),
+  validateParams(idParamSchema),
+  controller.setDefaultTemplate
+);
+router.post(
+  "/:id/default",
   authenticate,
   requireRole("super_admin", "group_admin"),
   validateParams(idParamSchema),

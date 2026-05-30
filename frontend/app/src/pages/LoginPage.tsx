@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useAuthStore } from "@/stores/authStore";
 import { getBrandLogoUrl, useBrandingStore } from "@/stores/brandingStore";
-import { authApi, getErrorMessage } from "@/lib/api";
+import { authApi, getErrorMessage, roleTagApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +19,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import type { TaskRole } from "@/types";
+import type { RoleTagDefinition } from "@/types";
 import { toast } from "sonner";
 import {
   Eye,
@@ -34,15 +34,6 @@ import {
 } from "lucide-react";
 
 type AuthView = "login" | "register" | "verification";
-
-const ROLE_TAGS: { value: TaskRole; label: string }[] = [
-  { value: "source", label: "片源" },
-  { value: "timing", label: "时轴" },
-  { value: "translation", label: "翻译" },
-  { value: "post_production", label: "后期" },
-  { value: "encoding", label: "压制" },
-  { value: "release", label: "发布" },
-];
 
 // Login schema
 const loginSchema = z.object({
@@ -60,7 +51,7 @@ const registerSchema = z
       .min(2, "用户名至少2个字符")
       .max(20, "用户名最多20个字符")
       .regex(/^[a-zA-Z0-9_一-龥]+$/, "用户名只能包含字母、数字、下划线和中文"),
-    password: z.string().min(6, "密码至少6个字符").max(50, "密码最多50个字符"),
+    password: z.string().min(8, "密码至少8个字符").max(50, "密码最多50个字符"),
     confirmPassword: z.string(),
     qq: z
       .string()
@@ -84,7 +75,8 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [selectedRoles, setSelectedRoles] = useState<TaskRole[]>([]);
+  const [availableTags, setAvailableTags] = useState<RoleTagDefinition[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [verificationInfo, setVerificationInfo] = useState<{
     qqGroup: string;
@@ -103,11 +95,32 @@ export function LoginPage() {
     defaultValues: { username: "", password: "", confirmPassword: "", qq: "" },
   });
 
+  useEffect(() => {
+    roleTagApi.getAllTags()
+      .then(setAvailableTags)
+      .catch(() => setAvailableTags([]));
+  }, []);
+
   const handleLogin = async (data: LoginFormData) => {
     setIsLoading(true);
     try {
       const result = await authApi.login(data);
-      login({ ...result.user, token: result.token });
+      if (result.status === "pending_verification" || result.requiresVerification) {
+        setVerificationInfo(
+          result.verification ?? {
+            qqGroup: result.qqGroup || "",
+            command: result.verifyCommand || "",
+          }
+        );
+        setView("verification");
+        toast.info("账号待验证，请先完成QQ群验证");
+        return;
+      }
+      if (!result.user || !result.token) {
+        toast.error("登录响应缺少会话信息");
+        return;
+      }
+      login({ ...result.user, token: result.token, refreshToken: result.refreshToken });
       toast.success("登录成功");
       navigate("/dashboard");
     } catch (error) {
@@ -125,7 +138,7 @@ export function LoginPage() {
         password: data.password,
         confirmPassword: data.confirmPassword,
         qq: data.qq,
-        tags: selectedRoles,
+        tags: selectedTagIds,
       });
 
       if (result.status === "pending_verification" && result.verification) {
@@ -133,7 +146,7 @@ export function LoginPage() {
         setView("verification");
         toast.info("注册成功，请完成QQ群验证");
       } else if (result.user && result.token) {
-        login(result.user);
+        login({ ...result.user, token: result.token, refreshToken: result.refreshToken });
         toast.success("注册成功");
         navigate("/dashboard");
       }
@@ -153,9 +166,9 @@ export function LoginPage() {
     }
   };
 
-  const toggleRole = (role: TaskRole) => {
-    setSelectedRoles((prev) =>
-      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
+  const toggleTag = (tagId: string) => {
+    setSelectedTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
     );
   };
 
@@ -446,21 +459,23 @@ export function LoginPage() {
                       )}
                     />
 
-                    <div className="space-y-2">
-                      <Label>意向岗位（可多选）</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {ROLE_TAGS.map((role) => (
-                          <Badge
-                            key={role.value}
-                            variant={selectedRoles.includes(role.value) ? "default" : "outline"}
-                            className="cursor-pointer px-3 py-1.5 select-none"
-                            onClick={() => toggleRole(role.value)}
-                          >
-                            {role.label}
-                          </Badge>
-                        ))}
+                    {availableTags.length > 0 ? (
+                      <div className="space-y-2">
+                        <Label>意向岗位（可多选）</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {availableTags.map((tag) => (
+                            <Badge
+                              key={tag.id}
+                              variant={selectedTagIds.includes(tag.id) ? "default" : "outline"}
+                              className="cursor-pointer px-3 py-1.5 select-none"
+                              onClick={() => toggleTag(tag.id)}
+                            >
+                              {tag.name}
+                            </Badge>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    ) : null}
 
                     <Button type="submit" className="w-full" disabled={isLoading}>
                       {isLoading ? (

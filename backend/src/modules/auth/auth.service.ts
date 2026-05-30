@@ -119,27 +119,36 @@ async function createVerificationChallenge(userId: string, qqNumber?: string | n
   return code;
 }
 
-async function createInitialTagApplications(userId: string, tags: RegisterInput["tags"]) {
-  if (!tags || tags.length === 0) {
+async function validateRegistrationTagIds(tagIds: RegisterInput["tags"]) {
+  if (!tagIds || tagIds.length === 0) {
+    return [];
+  }
+
+  const uniqueTagIds = [...new Set(tagIds)];
+  const existingTags = await prisma.roleTag.findMany({
+    where: { id: { in: uniqueTagIds } },
+    select: { id: true },
+  });
+
+  if (existingTags.length !== uniqueTagIds.length) {
+    throw new AppError("One or more role tags do not exist", "VALIDATION_ERROR", 400);
+  }
+
+  return uniqueTagIds;
+}
+
+async function createInitialTagApplications(userId: string, tagIds: string[]) {
+  if (tagIds.length === 0) {
     return;
   }
 
-  for (const role of [...new Set(tags)]) {
-    const tag = await prisma.roleTag.upsert({
-      where: { name: role },
-      update: {},
-      create: {
-        name: role,
-        description: `Registration intent for ${role}`,
-      },
-    });
-
+  for (const tagId of tagIds) {
     await prisma.tagApplication.upsert({
-      where: { user_id_tag_id: { user_id: userId, tag_id: tag.id } },
+      where: { user_id_tag_id: { user_id: userId, tag_id: tagId } },
       update: {},
       create: {
         user_id: userId,
-        tag_id: tag.id,
+        tag_id: tagId,
         reason: "Selected during registration",
       },
     });
@@ -181,6 +190,7 @@ export async function registerUser(data: RegisterInput) {
 
   const passwordHash = await hashPassword(data.password);
   const qqNumber = getRegisterQQNumber(data);
+  const tagIds = await validateRegistrationTagIds(data.tags);
 
   if (mode === "qq_verification") {
     // Create user with pending verification status
@@ -206,7 +216,7 @@ export async function registerUser(data: RegisterInput) {
       },
     });
 
-    await createInitialTagApplications(user.id, data.tags);
+    await createInitialTagApplications(user.id, tagIds);
 
     const code = await createVerificationChallenge(user.id, qqNumber);
 
@@ -235,7 +245,7 @@ export async function registerUser(data: RegisterInput) {
     },
   });
 
-  await createInitialTagApplications(user.id, data.tags);
+  await createInitialTagApplications(user.id, tagIds);
 
   const token = signToken({
     userId: user.id,

@@ -95,7 +95,7 @@ export function SkillProfilePage() {
   const fetchApplications = async () => {
     try {
       const result = await roleTagApi.getApplications({ status: "pending" });
-      setApplications(result.items);
+      setApplications(result);
     } catch (error) {
       toast.error(getErrorMessage(error));
     }

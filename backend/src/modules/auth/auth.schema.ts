@@ -27,7 +27,7 @@ export const registerSchema = z.object({
   email: z.string().email("Invalid email address").optional().nullable(),
   qq_number: z.string().max(20).optional().nullable(),
   qq: z.string().max(20).optional().nullable(),
-  tags: z.array(taskRoleSchema).optional().default([]),
+  tags: z.array(z.string().uuid("Invalid tag ID")).optional().default([]),
 });
 
 export const loginSchema = z.object({

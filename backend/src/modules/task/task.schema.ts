@@ -27,10 +27,13 @@ export const taskQuerySchema = z.object({
   page: z.string().optional().transform(Number).default("1"),
   pageSize: z.string().optional().transform(Number).default("20"),
   project_id: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
   unit_id: z.string().uuid().optional(),
+  unitId: z.string().uuid().optional(),
   status: z.nativeEnum(TaskStatus).optional(),
   role: z.nativeEnum(TaskRole).optional(),
   assignee_id: z.string().uuid().optional(),
+  assigneeId: z.string().uuid().optional(),
 });
 
 export const claimSegmentSchema = z.object({

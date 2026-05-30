@@ -51,9 +51,20 @@ export const conflictQuerySchema = z.object({
 });
 
 export const resolveConflictSchema = z.object({
-  resolution: z.nativeEnum(ResolutionStatus),
+  resolution: z.nativeEnum(ResolutionStatus).optional(),
+  status: z.enum(["pending", "resolved", "deferred"]).optional(),
   resolution_note: z.string().max(2000).optional().nullable(),
-});
+  keepTranslationId: z.string().optional(),
+  mergedText: z.string().max(10000).optional(),
+}).transform((data) => ({
+  resolution:
+    data.resolution ??
+    (data.status === "deferred" ? ResolutionStatus.ignored : ResolutionStatus.resolved_manual),
+  resolution_note:
+    data.resolution_note ??
+    data.mergedText ??
+    (data.keepTranslationId ? `keepTranslationId:${data.keepTranslationId}` : null),
+}));
 
 // Version Comparison
 export const compareVersionsSchema = z.object({
@@ -85,7 +96,7 @@ export type MergeJobQueryInput = z.infer<typeof mergeJobQuerySchema>;
 export type CreateMergeJobInput = z.infer<typeof createMergeJobSchema>;
 export type CreateUnitMergeJobInput = z.infer<typeof createUnitMergeJobSchema>;
 export type ConflictQueryInput = z.infer<typeof conflictQuerySchema>;
-export type ResolveConflictInput = z.infer<typeof resolveConflictSchema>;
+export type ResolveConflictInput = z.input<typeof resolveConflictSchema>;
 export type CompareVersionsInput = z.infer<typeof compareVersionsSchema>;
 export type ReviewInput = z.infer<typeof reviewSchema>;
 export type CreateSnapshotInput = z.infer<typeof createSnapshotSchema>;
