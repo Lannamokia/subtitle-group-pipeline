@@ -184,6 +184,7 @@ export interface FileEntity {
   type: FileType;
   projectId: string;
   taskId?: string;
+  unitId?: string;
   uploader: User;
   size: number;
   hash?: string;

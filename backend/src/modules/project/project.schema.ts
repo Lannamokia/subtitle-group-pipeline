@@ -82,6 +82,8 @@ export const updateProjectUnitsSchema = z.object({
   season_number: z.number().int().min(1).default(1),
   units_per_season: z.number().int().min(1).max(999),
   episode_length: z.number().int().min(1).optional().nullable(),
+  delete_unit_ids: z.array(z.string().uuid("Invalid unit ID")).optional(),
+  force_delete_non_empty: z.boolean().optional().default(false),
 });
 
 export const joinRequestSchema = z.object({

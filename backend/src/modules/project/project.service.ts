@@ -28,6 +28,17 @@ const ROLE_PIPELINE: TaskRole[] = [
   "release",
 ];
 
+const UNIT_DELETE_ACTIVE_TASK_STATUSES: TaskStatus[] = [
+  "assigned",
+  "in_progress",
+  "submitted",
+  "review_approved",
+  "review_rejected",
+  "completed",
+  "overdue",
+  "frozen",
+];
+
 function parseJsonObject(value: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value);
@@ -35,6 +46,55 @@ function parseJsonObject(value: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function parseOptionalJsonObject(value: string | null | undefined): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+  return parseJsonObject(value);
+}
+
+function metadataStringValue(metadata: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function isTaskBlockingUnitDeletion(task: {
+  status: TaskStatus;
+  assignee_id: string | null;
+  started_at: Date | null;
+  submitted_at: Date | null;
+  completed_at: Date | null;
+  cancelled_at: Date | null;
+  frozen_at: Date | null;
+  _count: {
+    claims: number;
+    submissions: number;
+    reviews: number;
+    comments: number;
+    notifications: number;
+  };
+}) {
+  return Boolean(
+    task.assignee_id ||
+    UNIT_DELETE_ACTIVE_TASK_STATUSES.includes(task.status) ||
+    task.started_at ||
+    task.submitted_at ||
+    task.completed_at ||
+    task.cancelled_at ||
+    task.frozen_at ||
+    task._count.claims > 0 ||
+    task._count.submissions > 0 ||
+    task._count.reviews > 0 ||
+    task._count.comments > 0 ||
+    task._count.notifications > 0
+  );
 }
 
 function numberFromPolicy(policy: Record<string, unknown>, ...keys: string[]): number | undefined {
@@ -498,6 +558,7 @@ export async function getProjectById(projectId: string) {
         select: {
           tasks: true,
           files: true,
+          units: true,
         },
       },
     },
@@ -1096,12 +1157,38 @@ export async function updateProjectUnits(
 
   const existingUnits = await prisma.projectUnit.findMany({
     where: { project_id: projectId, season_number: data.season_number },
-    include: { _count: { select: { tasks: true, claims: true } } },
     orderBy: { unit_number: "asc" },
   });
 
-  const existingByNumber = new Map(existingUnits.map((unit) => [unit.unit_number, unit]));
-  const unitsToDelete = existingUnits.filter((unit) => unit.unit_number > data.units_per_season);
+  const currentUnitCount = existingUnits.length;
+  const requestedDeleteIds = [...new Set(data.delete_unit_ids ?? [])];
+  const requestedDeleteIdSet = new Set(requestedDeleteIds);
+  let unitsToDelete: typeof existingUnits = [];
+
+  if (data.units_per_season < currentUnitCount) {
+    const deleteCount = currentUnitCount - data.units_per_season;
+
+    if (requestedDeleteIds.length > 0) {
+      if (requestedDeleteIds.length !== deleteCount) {
+        throw new AppError(
+          `Exactly ${deleteCount} episode(s) must be selected for deletion`,
+          "VALIDATION_ERROR",
+          400
+        );
+      }
+
+      unitsToDelete = existingUnits.filter((unit) => requestedDeleteIdSet.has(unit.id));
+
+      if (unitsToDelete.length !== requestedDeleteIds.length) {
+        throw new AppError("One or more selected episodes do not belong to this project season", "VALIDATION_ERROR", 400);
+      }
+    } else {
+      unitsToDelete = existingUnits.slice(-deleteCount);
+    }
+  } else if (requestedDeleteIds.length > 0) {
+    throw new AppError("Episode deletion selection is only allowed when reducing episode count", "VALIDATION_ERROR", 400);
+  }
+
   const unitIdsToDelete = unitsToDelete.map((unit) => unit.id);
   const tasksToDelete = unitIdsToDelete.length > 0
     ? await prisma.task.findMany({
@@ -1119,31 +1206,183 @@ export async function updateProjectUnits(
         },
       })
     : [];
-  const blockingTask = tasksToDelete.find((task) =>
-    Boolean(task.assignee_id) ||
-    !["pending_publish", "claimable"].includes(task.status) ||
-    Boolean(task.started_at || task.submitted_at || task.completed_at || task.cancelled_at || task.frozen_at) ||
-    task._count.claims > 0 ||
-    task._count.submissions > 0 ||
-    task._count.reviews > 0 ||
-    task._count.comments > 0 ||
-    task._count.notifications > 0
-  );
 
-  if (blockingTask || unitsToDelete.some((unit) => unit._count.claims > 0)) {
+  const taskIdsToDelete = tasksToDelete.map((task) => task.id);
+  const taskUnitMap = new Map(tasksToDelete.map((task) => [task.id, task.unit_id]));
+  const [filesInProject, mergeJobs, conflicts, directClaims] = unitIdsToDelete.length > 0
+    ? await Promise.all([
+        prisma.fileEntity.findMany({
+          where: {
+            project_id: projectId,
+            is_deleted: false,
+          },
+          select: {
+            id: true,
+            metadata: true,
+          },
+        }),
+        prisma.mergeJob.findMany({
+          where: {
+            project_id: projectId,
+            unit_id: { in: unitIdsToDelete },
+          },
+          select: { id: true, unit_id: true },
+        }),
+        prisma.subtitleConflict.findMany({
+          where: {
+            project_id: projectId,
+            unit_id: { in: unitIdsToDelete },
+          },
+          select: { id: true, unit_id: true },
+        }),
+        prisma.translationClaim.findMany({
+          where: {
+            unit_id: { in: unitIdsToDelete },
+          },
+          select: { id: true, unit_id: true, task_id: true },
+        }),
+      ])
+    : [[], [], [], []];
+
+  const fileIdsToDelete: string[] = [];
+  const fileUnitCounts = new Map<string, number>();
+  for (const file of filesInProject) {
+    const metadata = parseOptionalJsonObject(file.metadata);
+    const unitId = metadataStringValue(metadata, "unit_id", "unitId");
+    const taskId = metadataStringValue(metadata, "task_id", "taskId");
+    const taskUnitId = taskId ? taskUnitMap.get(taskId) : undefined;
+    const matchedUnitId = unitIdsToDelete.find((id) => id === unitId || id === taskUnitId);
+
+    if (matchedUnitId) {
+      fileIdsToDelete.push(file.id);
+      fileUnitCounts.set(matchedUnitId, (fileUnitCounts.get(matchedUnitId) ?? 0) + 1);
+    }
+  }
+
+  const directClaimIdsToDelete = directClaims
+    .filter((claim) => claim.unit_id && unitIdsToDelete.includes(claim.unit_id))
+    .map((claim) => claim.id);
+
+  const deletionImpacts = unitsToDelete.map((unit) => {
+    const unitTasks = tasksToDelete.filter((task) => task.unit_id === unit.id);
+    const directUnitClaims = directClaims.filter((claim) => claim.unit_id === unit.id);
+    const activeTaskCount = unitTasks.filter(isTaskBlockingUnitDeletion).length;
+    const claimCount = directUnitClaims.length || unitTasks.reduce((sum, task) => sum + task._count.claims, 0);
+    const submissionCount = unitTasks.reduce((sum, task) => sum + task._count.submissions, 0);
+    const reviewCount = unitTasks.reduce((sum, task) => sum + task._count.reviews, 0);
+    const commentCount = unitTasks.reduce((sum, task) => sum + task._count.comments, 0);
+    const notificationCount = unitTasks.reduce((sum, task) => sum + task._count.notifications, 0);
+    const fileCount = fileUnitCounts.get(unit.id) ?? 0;
+    const mergeJobCount = mergeJobs.filter((job) => job.unit_id === unit.id).length;
+    const conflictCount = conflicts.filter((conflict) => conflict.unit_id === unit.id).length;
+    const isEmpty =
+      activeTaskCount === 0 &&
+      claimCount === 0 &&
+      submissionCount === 0 &&
+      reviewCount === 0 &&
+      commentCount === 0 &&
+      notificationCount === 0 &&
+      fileCount === 0 &&
+      mergeJobCount === 0 &&
+      conflictCount === 0;
+
+    return {
+      unit_id: unit.id,
+      season_number: unit.season_number,
+      unit_number: unit.unit_number,
+      title: unit.title,
+      task_count: unitTasks.length,
+      active_task_count: activeTaskCount,
+      claim_count: claimCount,
+      submission_count: submissionCount,
+      review_count: reviewCount,
+      comment_count: commentCount,
+      notification_count: notificationCount,
+      file_count: fileCount,
+      merge_job_count: mergeJobCount,
+      conflict_count: conflictCount,
+      is_empty: isEmpty,
+    };
+  });
+
+  const nonEmptyImpacts = deletionImpacts.filter((impact) => !impact.is_empty);
+
+  if (nonEmptyImpacts.length > 0 && !data.force_delete_non_empty) {
     throw new AppError(
-      "Cannot reduce episode count because removed episodes already contain active work",
-      "BAD_REQUEST",
-      400
+      "Selected episodes contain files or task work and require confirmation before deletion",
+      "UNIT_NOT_EMPTY",
+      409,
+      { units: nonEmptyImpacts }
     );
   }
 
   const roles = parseTemplateRoles(project);
   const createdUnits: Array<{ id: string; season_number: number; unit_number: number; title: string | null }> = [];
+  const remainingUnitNumbers = new Set(
+    existingUnits
+      .filter((unit) => !unitIdsToDelete.includes(unit.id))
+      .map((unit) => unit.unit_number)
+  );
+  const remainingUnitCount = remainingUnitNumbers.size;
+  const unitNumbersToCreate: number[] = [];
+  for (
+    let unitNumber = 1;
+    remainingUnitCount + unitNumbersToCreate.length < data.units_per_season;
+    unitNumber++
+  ) {
+    if (!remainingUnitNumbers.has(unitNumber)) {
+      unitNumbersToCreate.push(unitNumber);
+      remainingUnitNumbers.add(unitNumber);
+    }
+  }
 
   await prisma.$transaction(async (tx) => {
     if (unitsToDelete.length > 0) {
-      const taskIdsToDelete = tasksToDelete.map((task) => task.id);
+      if (fileIdsToDelete.length > 0) {
+        await tx.downloadLink.updateMany({
+          where: {
+            file_id: { in: fileIdsToDelete },
+            is_active: true,
+          },
+          data: { is_active: false },
+        });
+        await tx.fileEntity.updateMany({
+          where: { id: { in: fileIdsToDelete } },
+          data: {
+            is_deleted: true,
+            deleted_at: new Date(),
+            deleted_by: actorId,
+          },
+        });
+      }
+
+      if (taskIdsToDelete.length > 0) {
+        await tx.notification.updateMany({
+          where: { task_id: { in: taskIdsToDelete } },
+          data: { task_id: null },
+        });
+        await tx.review.updateMany({
+          where: { task_id: { in: taskIdsToDelete } },
+          data: { task_id: null },
+        });
+      }
+
+      if (directClaimIdsToDelete.length > 0) {
+        await tx.translationSubmission.deleteMany({
+          where: { claim_id: { in: directClaimIdsToDelete } },
+        });
+        await tx.translationClaim.deleteMany({
+          where: { id: { in: directClaimIdsToDelete } },
+        });
+      }
+
+      await tx.mergeJob.deleteMany({
+        where: { unit_id: { in: unitIdsToDelete } },
+      });
+      await tx.subtitleConflict.deleteMany({
+        where: { unit_id: { in: unitIdsToDelete } },
+      });
+
       if (taskIdsToDelete.length > 0) {
         await tx.taskDependency.deleteMany({
           where: {
@@ -1158,13 +1397,11 @@ export async function updateProjectUnits(
         });
       }
       await tx.projectUnit.deleteMany({
-        where: { id: { in: unitsToDelete.map((unit) => unit.id) } },
+        where: { id: { in: unitIdsToDelete } },
       });
     }
 
-    for (let unitNumber = 1; unitNumber <= data.units_per_season; unitNumber++) {
-      if (existingByNumber.has(unitNumber)) continue;
-
+    for (const unitNumber of unitNumbersToCreate) {
       const unitTitle =
         data.season_number === 1
           ? `Episode ${unitNumber}`
@@ -1175,7 +1412,7 @@ export async function updateProjectUnits(
           season_number: data.season_number,
           unit_number: unitNumber,
           title: unitTitle,
-          episode_length: data.episode_length,
+          episode_length: data.episode_length ?? null,
         },
       });
       createdUnits.push(unit);
@@ -1186,7 +1423,7 @@ export async function updateProjectUnits(
     await createTemplateTasksForUnit(projectId, unit, project.owner_id, roles);
   }
 
-  if (data.episode_length !== undefined && data.episode_length !== null) {
+  if (data.episode_length !== undefined) {
     await prisma.projectUnit.updateMany({
       where: { project_id: projectId, season_number: data.season_number },
       data: { episode_length: data.episode_length },
@@ -1205,7 +1442,13 @@ export async function updateProjectUnits(
     title: "分集数量已调整",
     description: `第 ${data.season_number} 季分集数量调整为 ${data.units_per_season} 集`,
     actor_id: actorId,
-    metadata: { season_number: data.season_number, units_per_season: data.units_per_season },
+    metadata: {
+      season_number: data.season_number,
+      units_per_season: data.units_per_season,
+      created_unit_numbers: createdUnits.map((unit) => unit.unit_number),
+      deleted_unit_numbers: unitsToDelete.map((unit) => unit.unit_number),
+      forced_delete: data.force_delete_non_empty ?? false,
+    },
   });
 
   await auditService.log({
@@ -1214,7 +1457,10 @@ export async function updateProjectUnits(
     resource_type: "project",
     resource_id: projectId,
     old_value: { units: existingUnits.map((unit) => unit.unit_number) },
-    new_value: { units: units.map((unit) => unit.unit_number) },
+    new_value: {
+      units: units.map((unit) => unit.unit_number),
+      deleted_units: deletionImpacts,
+    },
   });
 
   return units;

@@ -264,6 +264,7 @@ export function normalizeFile(raw: AnyRecord): FileEntity {
     type: raw.type ?? raw.file_type ?? "other",
     projectId: raw.projectId ?? raw.project_id,
     taskId: raw.taskId ?? raw.task_id,
+    unitId: raw.unitId ?? raw.unit_id,
     uploader: raw.uploader ? normalizeUser(raw.uploader) : normalizeUser({ id: raw.uploader_id, username: "Unknown", role: "member", status: "active" }),
     size: raw.size ?? raw.size_bytes ?? 0,
     hash: raw.hash ?? raw.checksum,
@@ -986,11 +987,22 @@ export const projectApi = {
   permanentlyDeleteProject: (id: string) =>
     api.delete<ApiResponse<void>>(`/projects/${id}/permanent`).then(extractData),
 
-  updateUnitCount: (id: string, data: { season: number; episodes: number; episodeLength?: number | null }) =>
+  updateUnitCount: (
+    id: string,
+    data: {
+      season: number;
+      episodes: number;
+      episodeLength?: number | null;
+      deleteUnitIds?: string[];
+      forceDeleteNonEmpty?: boolean;
+    }
+  ) =>
     api.put<ApiResponse<unknown[]>>(`/projects/${id}/units/count`, {
       season_number: data.season,
       units_per_season: data.episodes,
       episode_length: data.episodeLength ?? null,
+      delete_unit_ids: data.deleteUnitIds,
+      force_delete_non_empty: data.forceDeleteNonEmpty ?? false,
     }).then((response) =>
       unwrapItems<unknown>(response.data.data).map((unit) => normalizeProjectUnit(unit as AnyRecord))
     ),

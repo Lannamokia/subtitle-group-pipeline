@@ -181,6 +181,49 @@ describe("Project & Workflow Tests", () => {
       expect(tasks.every((task) => task.unit_id === units[0].id)).toBe(true);
     });
 
+    it("should reduce project units by deleting selected episodes instead of only the tail", async () => {
+      const { token } = await createTestUser();
+      const template = await createTestTemplate();
+      const backend = await createTestStorageBackend();
+
+      const createRes = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Selected Episode Delete",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          qq_group_id: "123456789",
+          season_count: 1,
+          units_per_season: 4,
+        },
+        token
+      );
+      expectSuccess(createRes, 201);
+
+      const secondUnit = await prisma.projectUnit.findFirstOrThrow({
+        where: { project_id: createRes.body.data.id, unit_number: 2 },
+      });
+
+      const resizeRes = await put(
+        app,
+        `/api/v1/projects/${createRes.body.data.id}/units/count`,
+        {
+          season_number: 1,
+          units_per_season: 3,
+          delete_unit_ids: [secondUnit.id],
+        },
+        token
+      );
+
+      expectSuccess(resizeRes, 200);
+      const units = await prisma.projectUnit.findMany({
+        where: { project_id: createRes.body.data.id },
+        orderBy: { unit_number: "asc" },
+      });
+      expect(units.map((unit) => unit.unit_number)).toEqual([1, 3, 4]);
+    });
+
     it("should reject reducing episode count when removed episodes contain active work", async () => {
       const { user, token } = await createTestUser();
       const template = await createTestTemplate();
@@ -228,7 +271,67 @@ describe("Project & Workflow Tests", () => {
         token
       );
 
-      expectError(resizeRes, 400, "BAD_REQUEST");
+      expectError(resizeRes, 409, "UNIT_NOT_EMPTY");
+      expect(resizeRes.body.error.details.units[0].unit_number).toBe(2);
+    });
+
+    it("should force delete selected non-empty episodes after explicit confirmation", async () => {
+      const { user, token } = await createTestUser();
+      const template = await createTestTemplate();
+      const backend = await createTestStorageBackend();
+
+      const createRes = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Force Delete Episode",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          qq_group_id: "123456789",
+          season_count: 1,
+          units_per_season: 2,
+        },
+        token
+      );
+      expectSuccess(createRes, 201);
+
+      const removedUnit = await prisma.projectUnit.findFirstOrThrow({
+        where: { project_id: createRes.body.data.id, unit_number: 1 },
+      });
+      const removedTask = await prisma.task.findFirstOrThrow({
+        where: { project_id: createRes.body.data.id, unit_id: removedUnit.id, role: "translation" },
+      });
+      const { file } = await createTestFile({
+        project_id: createRes.body.data.id,
+        uploader_id: user.id,
+        metadata: JSON.stringify({ unit_id: removedUnit.id, task_id: removedTask.id }),
+      });
+
+      const resizeRes = await put(
+        app,
+        `/api/v1/projects/${createRes.body.data.id}/units/count`,
+        {
+          season_number: 1,
+          units_per_season: 1,
+          delete_unit_ids: [removedUnit.id],
+          force_delete_non_empty: true,
+        },
+        token
+      );
+
+      expectSuccess(resizeRes, 200);
+      const remainingUnits = await prisma.projectUnit.findMany({
+        where: { project_id: createRes.body.data.id },
+      });
+      const removedTasks = await prisma.task.findMany({
+        where: { unit_id: removedUnit.id },
+      });
+      const deletedFile = await prisma.fileEntity.findUnique({ where: { id: file.id } });
+
+      expect(remainingUnits).toHaveLength(1);
+      expect(remainingUnits[0].unit_number).toBe(2);
+      expect(removedTasks).toHaveLength(0);
+      expect(deletedFile!.is_deleted).toBe(true);
     });
 
     it("should inherit product config from template", async () => {

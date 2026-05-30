@@ -39,10 +39,12 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Sheet,
   SheetContent,
@@ -2210,6 +2212,33 @@ function ActivityTab({ events }: { events: TimelineEvent[] }) {
 
 /* ---------- Settings Tab ---------- */
 
+type UnitDeletionImpact = {
+  unit_id: string;
+  season_number: number;
+  unit_number: number;
+  title?: string | null;
+  task_count: number;
+  active_task_count: number;
+  claim_count: number;
+  submission_count: number;
+  review_count: number;
+  comment_count: number;
+  notification_count: number;
+  file_count: number;
+  merge_job_count: number;
+  conflict_count: number;
+  is_empty: boolean;
+};
+
+function getUnitDeletionErrorDetails(error: unknown): UnitDeletionImpact[] | null {
+  const response = (error as { response?: { data?: { error?: { code?: string; details?: { units?: UnitDeletionImpact[] } } } } })?.response;
+  const apiError = response?.data?.error;
+  if (apiError?.code !== "UNIT_NOT_EMPTY") {
+    return null;
+  }
+  return Array.isArray(apiError.details?.units) ? apiError.details.units : [];
+}
+
 function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => void }) {
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const [name, setName] = useState(project.name);
@@ -2219,9 +2248,26 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
   const [deliveryChecklist, setDeliveryChecklist] = useState(project.deliveryChecklist ?? []);
   const [downloadLinkTtlSeconds, setDownloadLinkTtlSeconds] = useState(project.downloadLinkTtlSeconds ?? 300);
   const [wikiApprovalRequired, setWikiApprovalRequired] = useState(project.wikiApprovalRequired ?? false);
+  const [unitDeleteDialogOpen, setUnitDeleteDialogOpen] = useState(false);
+  const [pendingEpisodeCount, setPendingEpisodeCount] = useState<number | null>(null);
+  const [selectedUnitDeleteIds, setSelectedUnitDeleteIds] = useState<string[]>([]);
+  const [nonEmptyDeleteImpacts, setNonEmptyDeleteImpacts] = useState<UnitDeletionImpact[]>([]);
   const [saving, setSaving] = useState(false);
   const [savingUnits, setSavingUnits] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const sortedUnits = [...(project.units ?? [])].sort((a, b) => a.season - b.season || a.episode - b.episode);
+  const currentEpisodeCount = sortedUnits.length || project.episodes || 1;
+  const deleteCount = pendingEpisodeCount === null ? 0 : Math.max(0, currentEpisodeCount - pendingEpisodeCount);
+
+  useEffect(() => {
+    setName(project.name);
+    setQqGroupId(project.qqGroupId ?? "");
+    setEpisodeCount(project.episodes || project.units?.length || 1);
+    setEpisodeLength(project.units?.[0]?.episodeLength ?? "");
+    setDeliveryChecklist(project.deliveryChecklist ?? []);
+    setDownloadLinkTtlSeconds(project.downloadLinkTtlSeconds ?? 300);
+    setWikiApprovalRequired(project.wikiApprovalRequired ?? false);
+  }, [project]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -2255,21 +2301,78 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
     }
   };
 
-  const handleUpdateUnits = async () => {
+  const submitUnitUpdate = async (
+    targetEpisodeCount: number,
+    options: { deleteUnitIds?: string[]; forceDeleteNonEmpty?: boolean } = {}
+  ) => {
     setSavingUnits(true);
     try {
       await projectApi.updateUnitCount(project.id, {
         season: project.season || 1,
-        episodes: episodeCount,
+        episodes: targetEpisodeCount,
         episodeLength: episodeLength === "" ? null : Number(episodeLength),
+        deleteUnitIds: options.deleteUnitIds,
+        forceDeleteNonEmpty: options.forceDeleteNonEmpty,
       });
       toast.success("分集数量已更新");
+      setUnitDeleteDialogOpen(false);
+      setPendingEpisodeCount(null);
+      setSelectedUnitDeleteIds([]);
+      setNonEmptyDeleteImpacts([]);
       onUpdate();
     } catch (error) {
+      const details = getUnitDeletionErrorDetails(error);
+      if (details) {
+        setNonEmptyDeleteImpacts(details);
+        return;
+      }
       toast.error("更新分集失败: " + getErrorMessage(error));
     } finally {
       setSavingUnits(false);
     }
+  };
+
+  const handleUpdateUnits = async () => {
+    const targetEpisodeCount = Math.max(1, Math.min(999, Number(episodeCount) || 1));
+    if (targetEpisodeCount < currentEpisodeCount) {
+      const countToDelete = currentEpisodeCount - targetEpisodeCount;
+      setPendingEpisodeCount(targetEpisodeCount);
+      setSelectedUnitDeleteIds(sortedUnits.slice(-countToDelete).map((unit) => unit.id));
+      setNonEmptyDeleteImpacts([]);
+      setUnitDeleteDialogOpen(true);
+      return;
+    }
+
+    await submitUnitUpdate(targetEpisodeCount);
+  };
+
+  const toggleUnitDeletion = (unitId: string) => {
+    setSelectedUnitDeleteIds((current) => {
+      if (current.includes(unitId)) {
+        return current.filter((id) => id !== unitId);
+      }
+      if (deleteCount > 0 && current.length >= deleteCount) {
+        return [...current.slice(1), unitId];
+      }
+      return [...current, unitId];
+    });
+  };
+
+  const confirmSelectedUnitDeletion = async () => {
+    if (pendingEpisodeCount === null) return;
+    if (selectedUnitDeleteIds.length !== deleteCount) {
+      toast.error(`请选择 ${deleteCount} 集进行删除`);
+      return;
+    }
+    await submitUnitUpdate(pendingEpisodeCount, { deleteUnitIds: selectedUnitDeleteIds });
+  };
+
+  const confirmForcedUnitDeletion = async () => {
+    if (pendingEpisodeCount === null) return;
+    await submitUnitUpdate(pendingEpisodeCount, {
+      deleteUnitIds: selectedUnitDeleteIds,
+      forceDeleteNonEmpty: true,
+    });
   };
 
   return (
@@ -2387,6 +2490,110 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={unitDeleteDialogOpen}
+        onOpenChange={(open) => {
+          setUnitDeleteDialogOpen(open);
+          if (!open) {
+            setPendingEpisodeCount(null);
+            setSelectedUnitDeleteIds([]);
+            setNonEmptyDeleteImpacts([]);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>选择要删除的分集</DialogTitle>
+            <DialogDescription>
+              需要删除 {deleteCount} 集，已选择 {selectedUnitDeleteIds.length} 集。删除前会检查所选分集是否存在文件、认领、提交、审核、评论或冲突记录。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[52vh] overflow-y-auto rounded-md border border-gray-200">
+            {sortedUnits.map((unit) => {
+              const selected = selectedUnitDeleteIds.includes(unit.id);
+              const taskCount = project.tasks?.filter((task) => task.unitId === unit.id).length ?? unit.taskCount ?? 0;
+              return (
+                <label
+                  key={unit.id}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-3 border-b border-gray-100 px-4 py-3 last:border-0",
+                    selected ? "bg-primary-50/60" : "hover:bg-gray-50"
+                  )}
+                >
+                  <Checkbox
+                    checked={selected}
+                    onCheckedChange={() => toggleUnitDeletion(unit.id)}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-gray-800">{getUnitTitle(unit)}</div>
+                    <div className="text-xs text-gray-500">第 {unit.season} 季 · 第 {unit.episode} 集 · {taskCount} 个任务</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={savingUnits}
+              onClick={() => setUnitDeleteDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={savingUnits || selectedUnitDeleteIds.length !== deleteCount}
+              onClick={confirmSelectedUnitDeletion}
+            >
+              {savingUnits && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+              检查并删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={nonEmptyDeleteImpacts.length > 0} onOpenChange={(open) => !open && setNonEmptyDeleteImpacts([])}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>所选分集不是空的</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-gray-600">
+                <p>以下分集已经存在文件或任务内容。继续删除会移除分集和任务，并将关联文件移入删除状态。</p>
+                <div className="max-h-64 overflow-y-auto rounded-md border border-red-100 bg-red-50/40">
+                  {nonEmptyDeleteImpacts.map((impact) => (
+                    <div key={impact.unit_id} className="border-b border-red-100 px-3 py-2 last:border-0">
+                      <div className="font-medium text-red-800">
+                        {impact.title || `第 ${impact.season_number} 季 第 ${impact.unit_number} 集`}
+                      </div>
+                      <div className="mt-1 text-xs text-red-700">
+                        任务 {impact.task_count} 个，活跃任务 {impact.active_task_count} 个，文件 {impact.file_count} 个，
+                        认领 {impact.claim_count} 个，提交 {impact.submission_count} 个，审核 {impact.review_count} 个，
+                        评论 {impact.comment_count} 条，冲突 {impact.conflict_count} 个
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={savingUnits}>返回选择</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              disabled={savingUnits}
+              onClick={(event) => {
+                event.preventDefault();
+                confirmForcedUnitDeletion();
+              }}
+            >
+              {savingUnits && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+              确认删除这些内容
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
