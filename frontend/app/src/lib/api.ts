@@ -19,6 +19,7 @@ import type {
   ProjectUnit,
   UploadPolicy,
   Task,
+  TranslationClaim,
   TaskRole,
   TaskComment,
   FileEntity,
@@ -283,6 +284,23 @@ function toStorageBackendPayload(data: Partial<StorageBackendInput>) {
   };
 }
 
+export function normalizeTranslationClaim(raw: AnyRecord): TranslationClaim {
+  return {
+    id: raw.id,
+    taskId: raw.taskId ?? raw.task_id,
+    unitId: raw.unitId ?? raw.unit_id ?? null,
+    userId: raw.userId ?? raw.user_id,
+    user: raw.user ? normalizeUser(raw.user) : undefined,
+    segmentStart: raw.segmentStart ?? raw.segment_start ?? 0,
+    segmentEnd: raw.segmentEnd ?? raw.segment_end ?? 0,
+    status: raw.status,
+    claimedAt: raw.claimedAt ?? raw.claimed_at,
+    submittedAt: raw.submittedAt ?? raw.submitted_at ?? null,
+    approvedAt: raw.approvedAt ?? raw.approved_at ?? null,
+    expiresAt: raw.expiresAt ?? raw.expires_at ?? null,
+  };
+}
+
 export function normalizeTask(raw: AnyRecord): Task {
   return {
     id: raw.id,
@@ -302,6 +320,9 @@ export function normalizeTask(raw: AnyRecord): Task {
     createdAt: raw.createdAt ?? raw.created_at ?? "",
     updatedAt: raw.updatedAt ?? raw.updated_at ?? "",
     fileCount: raw.fileCount ?? raw._count?.files,
+    claims: Array.isArray(raw.claims)
+      ? raw.claims.map((claim: AnyRecord) => normalizeTranslationClaim(claim))
+      : undefined,
   };
 }
 
@@ -1284,6 +1305,17 @@ export const taskApi = {
   claimTask: (id: string) =>
     api.post<ApiResponse<unknown>>(`/tasks/${id}/claim`).then((response) =>
       normalizeTask(response.data.data as AnyRecord)
+    ),
+
+  claimSegment: (id: string, data: { segmentStart: number; segmentEnd: number }) =>
+    api.post<ApiResponse<unknown>>(`/tasks/${id}/claim-segment`, {
+      segment_start: data.segmentStart,
+      segment_end: data.segmentEnd,
+    }).then((response) => normalizeTranslationClaim(response.data.data as AnyRecord)),
+
+  abandonSegment: (taskId: string, claimId: string) =>
+    api.post<ApiResponse<unknown>>(`/tasks/${taskId}/abandon-segment/${claimId}`).then((response) =>
+      normalizeTranslationClaim(response.data.data as AnyRecord)
     ),
 
   assignTask: (id: string, assigneeId: string, overrideReason?: string) =>

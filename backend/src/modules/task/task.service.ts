@@ -1,6 +1,6 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
-import { TaskStatus, TaskRole, TimelineEventType, ReviewStatus } from "@prisma/client";
+import { TaskStatus, TaskRole, TimelineEventType, ReviewStatus, ClaimStatus } from "@prisma/client";
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
@@ -63,6 +63,8 @@ const TASK_DOWNSTREAM_RESET_STATUSES: TaskStatus[] = [
   "overdue",
   "frozen",
 ];
+
+const ACTIVE_TRANSLATION_CLAIM_STATUSES: ClaimStatus[] = ["pending", "active"];
 
 /**
  * Check if all dependencies for a task are completed
@@ -718,7 +720,22 @@ export async function getTasks(query: TaskQueryInput) {
             season_number: true,
             unit_number: true,
             title: true,
+            episode_length: true,
           },
+        },
+        claims: {
+          where: { status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES } },
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                nickname: true,
+                avatar_url: true,
+              },
+            },
+          },
+          orderBy: { segment_start: "asc" },
         },
       },
     }),
@@ -1044,6 +1061,14 @@ export async function claimTask(
   if (task.status !== "claimable") {
     throw new AppError(
       `Task cannot be claimed. Current status: ${task.status}`,
+      "BAD_REQUEST",
+      400
+    );
+  }
+
+  if (task.role === "translation") {
+    throw new AppError(
+      "Translation tasks must be claimed by selecting a time segment",
       "BAD_REQUEST",
       400
     );
@@ -1899,6 +1924,14 @@ export async function claimTranslationSegment(
     );
   }
 
+  if (!(await checkDependenciesMet(taskId))) {
+    throw new AppError(
+      "Cannot claim translation segment: dependencies not met",
+      "DEPENDENCY_NOT_MET",
+      400
+    );
+  }
+
   const membership = await prisma.projectMember.findUnique({
     where: {
       project_id_user_id: {
@@ -1940,30 +1973,6 @@ export async function claimTranslationSegment(
 
   const segmentLength = data.segment_end - data.segment_start;
   const maxSegmentLength = await getTaskRoleMaxSegmentLength(task.project_id, "translation");
-  if (maxSegmentLength !== undefined && segmentLength > maxSegmentLength) {
-    throw new AppError(
-      `Segment length exceeds maximum allowed ${maxSegmentLength}s`,
-      "BAD_REQUEST",
-      400
-    );
-  }
-
-  // Check per-user max segment limit (default: 3 segments per task per user)
-  const userClaimCount = await prisma.translationClaim.count({
-    where: {
-      task_id: taskId,
-      user_id: userId,
-      status: { in: ["pending", "active"] },
-    },
-  });
-
-  if (userClaimCount >= 3) {
-    throw new AppError(
-      "You have reached the maximum number of segments (3) for this task",
-      "BAD_REQUEST",
-      400
-    );
-  }
 
   // Validate within episode length if available
   if (task.unit?.episode_length) {
@@ -1976,11 +1985,34 @@ export async function claimTranslationSegment(
     }
   }
 
-  // Check for overlapping claims
+  const userActiveClaims = await prisma.translationClaim.findMany({
+    where: {
+      task_id: taskId,
+      user_id: userId,
+      status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
+    },
+    select: {
+      segment_start: true,
+      segment_end: true,
+    },
+  });
+  const userClaimedSeconds = userActiveClaims.reduce(
+    (sum, claim) => sum + Math.max(0, claim.segment_end - claim.segment_start),
+    0
+  );
+
+  if (maxSegmentLength !== undefined && userClaimedSeconds + segmentLength > maxSegmentLength) {
+    throw new AppError(
+      `Total claimed translation duration exceeds maximum allowed ${maxSegmentLength}s`,
+      "BAD_REQUEST",
+      400
+    );
+  }
+
   const overlapping = await prisma.translationClaim.findFirst({
     where: {
       task_id: taskId,
-      status: { in: ["pending", "active"] },
+      status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
       AND: [
         { segment_start: { lt: data.segment_end } },
         { segment_end: { gt: data.segment_start } },
@@ -2010,21 +2042,10 @@ export async function claimTranslationSegment(
 
   // Check if all segments are claimed (if episode_length is known)
   if (task.unit?.episode_length) {
-    const totalClaimed = await prisma.translationClaim.aggregate({
-      where: {
-        task_id: taskId,
-        status: { in: ["pending", "active"] },
-      },
-      _sum: {
-        segment_end: true,
-      },
-    });
-
-    // Simple check: if total claimed segments cover the full episode
     const allClaims = await prisma.translationClaim.findMany({
       where: {
         task_id: taskId,
-        status: { in: ["pending", "active"] },
+        status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
       },
       orderBy: { segment_start: "asc" },
     });

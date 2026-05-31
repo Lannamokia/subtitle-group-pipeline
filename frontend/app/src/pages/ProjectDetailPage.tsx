@@ -87,6 +87,7 @@ import type {
   SubtitleConflict,
   User,
   TaskRole,
+  TranslationClaim,
   ProductOutputConfig,
   WikiBlock,
   WikiStatus,
@@ -415,6 +416,18 @@ function formatShortList(items: string[], max = 8) {
   return `${items.slice(0, max).join("、")} 等 ${items.length} 种`;
 }
 
+function formatDuration(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined) return "未设置";
+  const safeSeconds = Math.max(0, seconds);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const secs = safeSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+  return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
 function ProductOutputRequirement({
   title,
   output,
@@ -533,7 +546,7 @@ function TasksTab({
   tasks: Task[];
   selectedUnitId: string | null;
   onSelectUnit: (unitId: string | null) => void;
-  onUpdate: () => void;
+  onUpdate: () => void | Promise<void>;
 }) {
   const isSupervisor = useAuthStore((s) => s.isSupervisor());
   const currentUser = useAuthStore((s) => s.user);
@@ -567,6 +580,10 @@ function TasksTab({
   const [taskUploadSummary, setTaskUploadSummary] = useState("");
   const [taskUploading, setTaskUploading] = useState(false);
   const [taskDragOver, setTaskDragOver] = useState(false);
+  const [segmentStart, setSegmentStart] = useState<number | "">("");
+  const [segmentEnd, setSegmentEnd] = useState<number | "">("");
+  const [claimingSegment, setClaimingSegment] = useState(false);
+  const [abandoningClaimId, setAbandoningClaimId] = useState<string | null>(null);
   const units = project.units ?? [];
   const selectedUnit = units.find((unit) => unit.id === selectedUnitId) ?? null;
   const scopedTasks = selectedUnitId
@@ -597,6 +614,20 @@ function TasksTab({
     "frozen",
   ];
   const selectedTaskAssigneeId = selectedTask?.assigneeId ?? selectedTask?.assignee?.id;
+  const selectedTaskUnit = selectedTask?.unitId
+    ? units.find((unit) => unit.id === selectedTask.unitId) ?? null
+    : null;
+  const selectedTaskClaims = selectedTask?.claims ?? [];
+  const activeSelectedTaskClaims = selectedTaskClaims.filter((claim) =>
+    ["pending", "active"].includes(claim.status)
+  );
+  const activeSelectedTaskClaimSeconds = activeSelectedTaskClaims.reduce(
+    (sum, claim) => sum + Math.max(0, claim.segmentEnd - claim.segmentStart),
+    0
+  );
+  const selectedTaskClaimCoverage = selectedTaskUnit?.episodeLength
+    ? Math.min(100, Math.round((activeSelectedTaskClaimSeconds / selectedTaskUnit.episodeLength) * 100))
+    : null;
   const canReturnSelectedTask = Boolean(
     selectedTask &&
       returnableStatuses.includes(selectedTask.status) &&
@@ -635,6 +666,28 @@ function TasksTab({
     setTaskDragOver(false);
   }, [selectedTask?.id, selectedTaskDeliveryRule]);
 
+  useEffect(() => {
+    setSegmentStart("");
+    setSegmentEnd("");
+    setAbandoningClaimId(null);
+  }, [selectedTask?.id]);
+
+  const refreshTaskDetail = async (taskId: string) => {
+    const freshTask = await taskApi.getTask(taskId);
+    setSelectedTask(freshTask);
+    await onUpdate();
+  };
+
+  const handleOpenTask = async (task: Task) => {
+    setSelectedTask(task);
+    try {
+      const freshTask = await taskApi.getTask(task.id);
+      setSelectedTask(freshTask);
+    } catch {
+      // The list item is still usable if the detail request races with a reload.
+    }
+  };
+
   const handleTaskAction = async (task: Task, action: string) => {
     setUpdating(true);
     try {
@@ -652,6 +705,48 @@ function TasksTab({
       toast.error("操作失败: " + getErrorMessage(error));
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleClaimSegment = async () => {
+    if (!selectedTask) return;
+    if (segmentStart === "" || segmentEnd === "") {
+      toast.error("请填写认领起止时间");
+      return;
+    }
+    if (segmentStart >= segmentEnd) {
+      toast.error("结束时间必须大于开始时间");
+      return;
+    }
+
+    setClaimingSegment(true);
+    try {
+      await taskApi.claimSegment(selectedTask.id, {
+        segmentStart: Number(segmentStart),
+        segmentEnd: Number(segmentEnd),
+      });
+      toast.success("已认领翻译时间段");
+      setSegmentStart("");
+      setSegmentEnd("");
+      await refreshTaskDetail(selectedTask.id);
+    } catch (error) {
+      toast.error("认领失败: " + getErrorMessage(error));
+    } finally {
+      setClaimingSegment(false);
+    }
+  };
+
+  const handleAbandonSegment = async (claim: TranslationClaim) => {
+    if (!selectedTask) return;
+    setAbandoningClaimId(claim.id);
+    try {
+      await taskApi.abandonSegment(selectedTask.id, claim.id);
+      toast.success("已释放翻译时间段");
+      await refreshTaskDetail(selectedTask.id);
+    } catch (error) {
+      toast.error("释放失败: " + getErrorMessage(error));
+    } finally {
+      setAbandoningClaimId(null);
     }
   };
 
@@ -1118,7 +1213,7 @@ function TasksTab({
                       <TaskCard
                         key={task.id}
                         task={task}
-                        onClick={() => setSelectedTask(task)}
+                        onClick={() => handleOpenTask(task)}
                       />
                     ))}
                     {roleTasks.length === 0 && (
@@ -1250,6 +1345,97 @@ function TasksTab({
                   </div>
                 )}
 
+                {selectedTask.role === "translation" && (
+                  <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/60 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-800">分段认领</h4>
+                        <p className="mt-1 text-xs leading-5 text-gray-500">
+                          翻译任务需要按时间段认领，时间单位为秒。
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-white text-[10px]">
+                        {selectedTaskClaimCoverage === null ? "时长未设置" : `${selectedTaskClaimCoverage}% 已认领`}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-2 text-xs sm:grid-cols-3">
+                      <div className="rounded-md bg-white px-3 py-2">
+                        <p className="font-medium text-gray-600">本集时长</p>
+                        <p className="mt-1 text-gray-500">{formatDuration(selectedTaskUnit?.episodeLength)}</p>
+                      </div>
+                      <div className="rounded-md bg-white px-3 py-2">
+                        <p className="font-medium text-gray-600">已认领</p>
+                        <p className="mt-1 text-gray-500">{formatDuration(activeSelectedTaskClaimSeconds)}</p>
+                      </div>
+                      <div className="rounded-md bg-white px-3 py-2">
+                        <p className="font-medium text-gray-600">有效片段</p>
+                        <p className="mt-1 text-gray-500">{activeSelectedTaskClaims.length} 段</p>
+                      </div>
+                    </div>
+                    {activeSelectedTaskClaims.length > 0 ? (
+                      <div className="space-y-2">
+                        {activeSelectedTaskClaims.map((claim) => {
+                          const isOwnClaim = claim.userId === currentUser?.id;
+                          return (
+                            <div key={claim.id} className="flex flex-col gap-2 rounded-md bg-white px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
+                                <p className="font-medium text-gray-700">
+                                  {formatDuration(claim.segmentStart)} - {formatDuration(claim.segmentEnd)}
+                                </p>
+                                <p className="mt-0.5 truncate text-gray-500">
+                                  {claim.user?.nickname || claim.user?.username || "未知成员"} · {formatDuration(claim.segmentEnd - claim.segmentStart)}
+                                </p>
+                              </div>
+                              {isOwnClaim && ["pending", "active"].includes(claim.status) && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 w-full text-xs sm:w-auto"
+                                  onClick={() => handleAbandonSegment(claim)}
+                                  disabled={abandoningClaimId === claim.id}
+                                >
+                                  {abandoningClaimId === claim.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                                  释放
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-blue-200 bg-white py-5 text-center text-xs text-gray-400">
+                        还没有人认领时间段
+                      </div>
+                    )}
+                    {selectedTask.status === "claimable" && (
+                      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={segmentStart}
+                          onChange={(event) => setSegmentStart(event.target.value === "" ? "" : Number(event.target.value))}
+                          placeholder="开始秒数"
+                        />
+                        <Input
+                          type="number"
+                          min={0}
+                          value={segmentEnd}
+                          onChange={(event) => setSegmentEnd(event.target.value === "" ? "" : Number(event.target.value))}
+                          placeholder="结束秒数"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleClaimSegment}
+                          disabled={claimingSegment}
+                        >
+                          {claimingSegment && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                          认领时间段
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {isSupervisor && (
                   <div className="min-w-0 space-y-2">
                     <h4 className="text-sm font-medium text-gray-700">监制指派</h4>
@@ -1374,7 +1560,7 @@ function TasksTab({
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-gray-700">操作</h4>
                   <div className="flex flex-wrap gap-2">
-                    {selectedTask.status === "claimable" && (
+                    {selectedTask.status === "claimable" && selectedTask.role !== "translation" && (
                       <Button
                         size="sm"
                         onClick={() => handleTaskAction(selectedTask, "claim")}

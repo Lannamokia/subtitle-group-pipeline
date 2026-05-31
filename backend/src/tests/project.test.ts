@@ -761,6 +761,34 @@ describe("Project & Workflow Tests", () => {
       expect(claimRes.body.data.status).toBe("active");
     });
 
+    it("should reject whole-task claiming for translation tasks", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: translator, token: translatorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 1440 });
+
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: translator.id, role: "translation" },
+      });
+
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      const res = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim`,
+        {},
+        translatorToken
+      );
+
+      expectError(res, 400, "BAD_REQUEST");
+    });
+
     it("should reject overlapping segment claims", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
       const { user: t1, token: t1Token } = await createTestUser();
@@ -802,12 +830,20 @@ describe("Project & Workflow Tests", () => {
       expectError(overlapRes, 409, "CONFLICT");
     });
 
-    it("should enforce per-user segment limit (max 3)", async () => {
+    it("should enforce per-user maximum claimed translation duration", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
       const { user: translator, token: translatorToken } = await createTestUser();
       const project = await createTestProject({ owner_id: owner.id });
       const unit = await createTestUnit({ project_id: project.id, episode_length: 2000 });
 
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            { role: "translation", maxSegmentLength: 900 },
+          ]),
+        },
+      });
       await prisma.projectMember.create({
         data: { project_id: project.id, user_id: translator.id, role: "translation" },
       });
@@ -820,26 +856,24 @@ describe("Project & Workflow Tests", () => {
         creator_id: owner.id,
       });
 
-      // Claim 3 segments
-      for (let i = 0; i < 3; i++) {
+      for (const [segment_start, segment_end] of [[0, 400], [500, 900]]) {
         const res = await post(
           app,
           `/api/v1/tasks/${task.id}/claim-segment`,
-          { segment_start: i * 500, segment_end: (i * 500) + 400 },
+          { segment_start, segment_end },
           translatorToken
         );
         expectSuccess(res, 201);
       }
 
-      // 4th claim should fail
-      const fourthRes = await post(
+      const overflowRes = await post(
         app,
         `/api/v1/tasks/${task.id}/claim-segment`,
-        { segment_start: 2000, segment_end: 2400 },
+        { segment_start: 900, segment_end: 1100 },
         translatorToken
       );
 
-      expectError(fourthRes, 400, "BAD_REQUEST");
+      expectError(overflowRes, 400, "BAD_REQUEST");
     });
 
     it("should validate segment within episode length", async () => {

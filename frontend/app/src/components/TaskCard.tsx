@@ -14,6 +14,7 @@ interface TaskCardProps {
 
 export function TaskCard({ task, onClick, draggable = false, showProject = false, className }: TaskCardProps) {
   const isOverdue = task.status === "overdue";
+  const activeClaimCount = task.claims?.filter((claim) => ["pending", "active"].includes(claim.status)).length ?? 0;
 
   return (
     <div
@@ -52,6 +53,11 @@ export function TaskCard({ task, onClick, draggable = false, showProject = false
               {task.fileCount}
             </span>
           ) : null}
+          {task.role === "translation" && activeClaimCount > 0 && (
+            <span className="text-xs text-blue-500">
+              已认领 {activeClaimCount} 段
+            </span>
+          )}
         </div>
       </div>
 

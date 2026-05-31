@@ -480,6 +480,20 @@ export async function getProjectById(projectId: string) {
               },
             },
           },
+          claims: {
+            where: { status: { in: ["pending", "active"] } },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  nickname: true,
+                  avatar_url: true,
+                },
+              },
+            },
+            orderBy: { segment_start: "asc" },
+          },
         },
         orderBy: { created_at: "asc" },
       },

@@ -155,6 +155,31 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   fileCount?: number;
+  claims?: TranslationClaim[];
+}
+
+export type TranslationClaimStatus =
+  | 'pending'
+  | 'active'
+  | 'submitted'
+  | 'approved'
+  | 'rejected'
+  | 'abandoned'
+  | 'expired';
+
+export interface TranslationClaim {
+  id: string;
+  taskId: string;
+  unitId?: string | null;
+  userId: string;
+  user?: User;
+  segmentStart: number;
+  segmentEnd: number;
+  status: TranslationClaimStatus;
+  claimedAt?: string;
+  submittedAt?: string | null;
+  approvedAt?: string | null;
+  expiresAt?: string | null;
 }
 
 export interface TaskComment {
