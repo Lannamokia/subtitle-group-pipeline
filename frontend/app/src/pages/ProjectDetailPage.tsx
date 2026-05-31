@@ -462,6 +462,46 @@ function getPreviousWorkflowRole(project: Project, role: TaskRole) {
   return roleIndex > 0 ? workflowRoles[roleIndex - 1] : null;
 }
 
+type PreviousResultTarget = {
+  role: TaskRole;
+  label: string;
+  taskIds?: Set<string>;
+};
+
+function getPreviousTranslationTask(tasks: Task[], currentTask: Task) {
+  const currentOrder = currentTask.translationOrder;
+  if (currentTask.role !== "translation" || typeof currentOrder !== "number" || currentOrder <= 1) {
+    return null;
+  }
+
+  return tasks
+    .filter((task) =>
+      task.id !== currentTask.id &&
+      task.role === "translation" &&
+      (task.unitId ?? null) === (currentTask.unitId ?? null) &&
+      task.translationOrder === currentOrder - 1
+    )
+    .sort(sortTasksByCreatedAtDesc)[0] ?? null;
+}
+
+function getPreviousResultTarget(project: Project, tasks: Task[], currentTask: Task): PreviousResultTarget | null {
+  if (currentTask.role === "translation" && typeof currentTask.translationOrder === "number" && currentTask.translationOrder > 1) {
+    const previousTask = getPreviousTranslationTask(tasks, currentTask);
+    return {
+      role: "translation",
+      label: previousTask
+        ? `翻译排序 ID ${previousTask.translationOrder ?? "未设置"}`
+        : `翻译排序 ID ${currentTask.translationOrder - 1}`,
+      taskIds: new Set(previousTask ? [previousTask.id] : []),
+    };
+  }
+
+  const previousRole = getPreviousWorkflowRole(project, currentTask.role);
+  return previousRole
+    ? { role: previousRole, label: getRoleLabel(previousRole) }
+    : null;
+}
+
 function findPipelinePredecessor(project: Project, tasks: Task[], unitId: string | null, role: TaskRole) {
   const workflowRoles = getProjectWorkflowRoles(project);
   const roleIndex = workflowRoles.indexOf(role as Exclude<TaskRole, "supervisor">);
@@ -480,13 +520,19 @@ function findPipelinePredecessor(project: Project, tasks: Task[], unitId: string
 function filterPreviousResultFiles(
   candidates: FileEntity[],
   currentTask: Task,
-  previousRole: TaskRole,
+  target: PreviousResultTarget,
   tasks: Task[]
 ) {
   const unitId = currentTask.unitId ?? null;
+  const targetTaskIds = target.taskIds;
   const completedPreviousTaskIds = new Set(
     tasks
-      .filter((task) => (task.unitId ?? null) === unitId && task.role === previousRole && isCompletedTask(task))
+      .filter((task) => {
+        if ((task.unitId ?? null) !== unitId || task.role !== target.role || !isCompletedTask(task)) {
+          return false;
+        }
+        return targetTaskIds ? targetTaskIds.has(task.id) : true;
+      })
       .map((task) => task.id)
   );
 
@@ -497,8 +543,8 @@ function filterPreviousResultFiles(
   return candidates
     .filter((file) => {
       if ((file.unitId ?? null) !== unitId) return false;
-      if (file.role !== previousRole) return false;
-      return file.taskId ? completedPreviousTaskIds.has(file.taskId) : true;
+      if (file.role !== target.role) return false;
+      return file.taskId ? completedPreviousTaskIds.has(file.taskId) : !targetTaskIds;
     })
     .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 }
@@ -886,9 +932,10 @@ function TasksTab({
     () => selectedTask ? getPolicyAwareTaskDeliveryRule(selectedTask.role, project.uploadPolicy) : null,
     [project.uploadPolicy, selectedTask?.id, selectedTask?.role]
   );
-  const selectedTaskPreviousRole = selectedTask
-    ? getPreviousWorkflowRole(project, selectedTask.role)
-    : null;
+  const selectedTaskPreviousResultTarget = useMemo(
+    () => selectedTask ? getPreviousResultTarget(project, tasks, selectedTask) : null,
+    [project, selectedTask, tasks]
+  );
   const selectedTaskAllowsLink = Boolean(
     selectedTask && ["source", "encoding"].includes(selectedTask.role)
   );
@@ -935,14 +982,14 @@ function TasksTab({
   }, [selectedTask?.id]);
 
   useEffect(() => {
-    if (!selectedTask || !selectedTaskPreviousRole) {
+    if (!selectedTask || !selectedTaskPreviousResultTarget) {
       setPreviousResultFiles([]);
       setPreviousResultsLoading(false);
       return;
     }
 
     let cancelled = false;
-    const localResults = filterPreviousResultFiles(files, selectedTask, selectedTaskPreviousRole, tasks);
+    const localResults = filterPreviousResultFiles(files, selectedTask, selectedTaskPreviousResultTarget, tasks);
     setPreviousResultFiles(localResults);
     setPreviousResultsLoading(true);
 
@@ -950,13 +997,13 @@ function TasksTab({
       .getFiles({
         projectId: project.id,
         unitId: selectedTask.unitId || undefined,
-        role: selectedTaskPreviousRole,
+        role: selectedTaskPreviousResultTarget.role,
         pageSize: 100,
       })
       .then((result) => {
         if (cancelled) return;
         setPreviousResultFiles(
-          filterPreviousResultFiles(result.items, selectedTask, selectedTaskPreviousRole, tasks)
+          filterPreviousResultFiles(result.items, selectedTask, selectedTaskPreviousResultTarget, tasks)
         );
       })
       .catch((error) => {
@@ -973,7 +1020,7 @@ function TasksTab({
     return () => {
       cancelled = true;
     };
-  }, [files, project.id, selectedTask, selectedTaskPreviousRole, tasks]);
+  }, [files, project.id, selectedTask, selectedTaskPreviousResultTarget, tasks]);
 
   const refreshTaskDetail = async (taskId: string) => {
     const freshTask = await taskApi.getTask(taskId);
@@ -1762,13 +1809,13 @@ function TasksTab({
                   </div>
                 )}
 
-                {selectedTaskPreviousRole && (
+                {selectedTaskPreviousResultTarget && (
                   <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
                     <div className="flex min-w-0 items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h4 className="text-sm font-medium text-gray-700">上一流程结果</h4>
                         <p className="mt-1 text-xs text-gray-500">
-                          来自{getRoleLabel(selectedTaskPreviousRole)}已完成任务，可直接下载继续当前流程。
+                          来自{selectedTaskPreviousResultTarget.label}已完成任务，可直接下载继续当前流程。
                         </p>
                       </div>
                       <Badge variant="outline" className="shrink-0 bg-white text-[10px]">
