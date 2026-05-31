@@ -1,6 +1,18 @@
 node_modules
 backend/node_modules
 
+# Local environment files
+.env
+.env.*
+!.env.example
+!.env.compose.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+nonebot-bridge/.env
+nonebot-bridge/.env.*
+!nonebot-bridge/.env.example
+
 # Backend build artifacts
 backend/dist/
 backend/coverage/
