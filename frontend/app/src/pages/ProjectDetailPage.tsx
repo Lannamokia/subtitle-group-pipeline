@@ -484,6 +484,19 @@ function getPreviousTranslationTask(tasks: Task[], currentTask: Task) {
     .sort(sortTasksByCreatedAtDesc)[0] ?? null;
 }
 
+function getLastTranslationTask(tasks: Task[], unitId: string | null) {
+  return tasks
+    .filter((task) =>
+      task.role === "translation" &&
+      (task.unitId ?? null) === unitId &&
+      typeof task.translationOrder === "number"
+    )
+    .sort((a, b) => {
+      const orderDelta = (b.translationOrder ?? 0) - (a.translationOrder ?? 0);
+      return orderDelta !== 0 ? orderDelta : sortTasksByCreatedAtDesc(a, b);
+    })[0] ?? null;
+}
+
 function getPreviousResultTarget(project: Project, tasks: Task[], currentTask: Task): PreviousResultTarget | null {
   if (currentTask.role === "translation" && typeof currentTask.translationOrder === "number" && currentTask.translationOrder > 1) {
     const previousTask = getPreviousTranslationTask(tasks, currentTask);
@@ -493,6 +506,17 @@ function getPreviousResultTarget(project: Project, tasks: Task[], currentTask: T
         ? `翻译排序 ID ${previousTask.translationOrder ?? "未设置"}`
         : `翻译排序 ID ${currentTask.translationOrder - 1}`,
       taskIds: new Set(previousTask ? [previousTask.id] : []),
+    };
+  }
+
+  if (currentTask.role === "post_production") {
+    const lastTranslationTask = getLastTranslationTask(tasks, currentTask.unitId ?? null);
+    return {
+      role: "translation",
+      label: lastTranslationTask
+        ? `最终翻译排序 ID ${lastTranslationTask.translationOrder ?? "未设置"}`
+        : "最终翻译任务",
+      taskIds: new Set(lastTranslationTask ? [lastTranslationTask.id] : []),
     };
   }
 
