@@ -83,6 +83,10 @@ async function checkDependenciesMet(taskId: string): Promise<boolean> {
   );
 }
 
+function getUnlockedTaskStatus(task: { assignee_id: string | null }): TaskStatus {
+  return task.assignee_id ? "assigned" : "claimable";
+}
+
 /**
  * Get downstream tasks (tasks that depend on this task)
  */
@@ -567,6 +571,63 @@ async function notifyUnlockedDownstreamTask(
       projectName,
       actorId,
       reason: "依赖任务已完成，开放任务可领取",
+    });
+  }
+}
+
+async function unlockPendingTaskIfReady(
+  task: {
+    id: string;
+    project_id: string;
+    title: string;
+    role: TaskRole;
+    assignee_id: string | null;
+    status: TaskStatus;
+  },
+  actorId?: string
+): Promise<boolean> {
+  if (task.status !== "pending_publish") return false;
+  if (!(await checkDependenciesMet(task.id))) return false;
+
+  await prisma.task.update({
+    where: { id: task.id },
+    data: { status: getUnlockedTaskStatus(task) },
+  });
+  await notifyUnlockedDownstreamTask(task, actorId);
+  return true;
+}
+
+async function reconcileTaskDependencyState(taskId: string, actorId?: string): Promise<void> {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      project_id: true,
+      title: true,
+      role: true,
+      assignee_id: true,
+      status: true,
+    },
+  });
+
+  if (!task) {
+    throw new AppError("Task not found", "NOT_FOUND", 404);
+  }
+
+  if (await unlockPendingTaskIfReady(task, actorId)) return;
+
+  const depsMet = await checkDependenciesMet(task.id);
+  if (depsMet) return;
+
+  if (task.status === "claimable" || task.status === "assigned") {
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        status: "pending_publish",
+        started_at: null,
+        submitted_at: null,
+        completed_at: null,
+      },
     });
   }
 }
@@ -1289,13 +1350,16 @@ export async function deleteTask(taskId: string, actorId?: string) {
       });
 
       if (!blockingDependency) {
-        await tx.task.updateMany({
-          where: {
-            id: dependentTaskId,
-            status: "pending_publish",
-          },
-          data: { status: "claimable" },
+        const dependentTask = await tx.task.findUnique({
+          where: { id: dependentTaskId },
+          select: { status: true, assignee_id: true },
         });
+        if (dependentTask?.status === "pending_publish") {
+          await tx.task.update({
+            where: { id: dependentTaskId },
+            data: { status: getUnlockedTaskStatus(dependentTask) },
+          });
+        }
       }
     }
 
@@ -1487,7 +1551,10 @@ export async function assignTask(
 
   // Check dependencies
   const depsMet = await checkDependenciesMet(taskId);
-  if (!depsMet) {
+  const hasOverrideReason = Boolean(overrideReason?.trim());
+  let appliesOverride = false;
+
+  if (!depsMet && (task.status !== "pending_publish" || hasOverrideReason)) {
     const canOverride = await canSupervisorOverride(task.project_id, actorId);
     if (!canOverride) {
       throw new AppError(
@@ -1497,22 +1564,25 @@ export async function assignTask(
       );
     }
 
-    if (!overrideReason || !overrideReason.trim()) {
+    if (!hasOverrideReason) {
       throw new AppError(
         "Override reason is required when assigning before dependencies are complete",
         "VALIDATION_ERROR",
         400
       );
     }
+
+    appliesOverride = true;
   }
 
   const previousAssigneeId = task.assignee_id;
+  const nextStatus: TaskStatus = depsMet || appliesOverride ? "assigned" : "pending_publish";
 
   const updated = await prisma.task.update({
     where: { id: taskId },
     data: {
       assignee_id: assigneeId,
-      status: "assigned",
+      status: nextStatus,
     },
     include: {
       assignee: {
@@ -1552,16 +1622,19 @@ export async function assignTask(
       taskId: taskId,
       taskName: task.title,
       actorId,
+      reason: nextStatus === "pending_publish"
+        ? "任务已预指派，等待前置任务完成后解锁"
+        : undefined,
     });
   }
 
   await auditService.log({
     user_id: actorId,
-    action: depsMet ? "task.assign" : "task.override_assign",
+    action: appliesOverride ? "task.override_assign" : "task.assign",
     resource_type: "task",
     resource_id: taskId,
     old_value: task,
-    new_value: depsMet ? updated : { ...updated, override_reason: overrideReason },
+    new_value: appliesOverride ? { ...updated, override_reason: overrideReason } : updated,
   });
 
   return updated;
@@ -1847,14 +1920,7 @@ export async function submitTask(
   } else {
     const downstream = await getDownstreamTasks(taskId);
     for (const downTask of downstream) {
-      const downDepsMet = await checkDependenciesMet(downTask.id);
-      if (downDepsMet && downTask.status === "pending_publish") {
-        await prisma.task.update({
-          where: { id: downTask.id },
-          data: { status: "claimable" },
-        });
-        await notifyUnlockedDownstreamTask(downTask, userId);
-      }
+      await unlockPendingTaskIfReady(downTask, userId);
     }
   }
 
@@ -2011,14 +2077,7 @@ export async function approveTask(
 
       const downstream = await getDownstreamTasks(taskId);
       for (const downTask of downstream) {
-        const downDepsMet = await checkDependenciesMet(downTask.id);
-        if (downDepsMet && downTask.status === "pending_publish") {
-          await prisma.task.update({
-            where: { id: downTask.id },
-            data: { status: "claimable" },
-          });
-          await notifyUnlockedDownstreamTask(downTask, reviewerId);
-        }
+        await unlockPendingTaskIfReady(downTask, reviewerId);
       }
     } else {
       updated = await prisma.task.update({
@@ -2042,14 +2101,7 @@ export async function approveTask(
     // Unlock next stage: make the next task in pipeline claimable if dependencies are met
     const downstream = await getDownstreamTasks(taskId);
     for (const downTask of downstream) {
-      const downDepsMet = await checkDependenciesMet(downTask.id);
-      if (downDepsMet && downTask.status === "pending_publish") {
-        await prisma.task.update({
-          where: { id: downTask.id },
-          data: { status: "claimable" },
-        });
-        await notifyUnlockedDownstreamTask(downTask, reviewerId);
-      }
+      await unlockPendingTaskIfReady(downTask, reviewerId);
     }
   }
 
@@ -2686,6 +2738,36 @@ export async function createDependency(
     throw new AppError("A task cannot depend on itself", "BAD_REQUEST", 400);
   }
 
+  const [task, dependsOn] = await Promise.all([
+    prisma.task.findUnique({
+      where: { id: taskId },
+      select: { id: true, project_id: true, status: true },
+    }),
+    prisma.task.findUnique({
+      where: { id: data.depends_on_id },
+      select: { id: true, project_id: true, status: true },
+    }),
+  ]);
+
+  if (!task || !dependsOn) {
+    throw new AppError("Task not found", "NOT_FOUND", 404);
+  }
+
+  if (task.project_id !== dependsOn.project_id) {
+    throw new AppError("Task dependencies must belong to the same project", "BAD_REQUEST", 400);
+  }
+
+  if (
+    dependsOn.status !== "completed" &&
+    ["in_progress", "submitted", "review_approved", "completed", "overdue"].includes(task.status)
+  ) {
+    throw new AppError(
+      "Cannot add an unmet dependency to an already-started task",
+      "BAD_REQUEST",
+      400
+    );
+  }
+
   const dependency = await prisma.taskDependency.create({
     data: {
       task_id: taskId,
@@ -2693,6 +2775,8 @@ export async function createDependency(
       dependency_type: data.dependency_type,
     },
   });
+
+  await reconcileTaskDependencyState(taskId);
 
   return dependency;
 }
@@ -2709,6 +2793,8 @@ export async function removeDependency(
       },
     },
   });
+
+  await reconcileTaskDependencyState(taskId);
 
   return { success: true };
 }

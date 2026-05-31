@@ -1511,6 +1511,124 @@ describe("Project & Workflow Tests", () => {
   });
 
   describe("Dependency Gating", () => {
+    it("should keep newly preassigned downstream tasks blocked until dependencies complete", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker, token: workerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const upstreamRes = await post(
+        app,
+        "/api/v1/tasks",
+        {
+          project_id: project.id,
+          unit_id: unit.id,
+          title: "片源整理",
+          role: "source",
+          assignee_id: worker.id,
+        },
+        ownerToken
+      );
+      expectSuccess(upstreamRes, 201);
+
+      const downstreamRes = await post(
+        app,
+        "/api/v1/tasks",
+        {
+          project_id: project.id,
+          unit_id: unit.id,
+          title: "时轴制作",
+          role: "timing",
+          assignee_id: worker.id,
+        },
+        ownerToken
+      );
+      expectSuccess(downstreamRes, 201);
+
+      const upstreamId = upstreamRes.body.data.id;
+      const downstreamId = downstreamRes.body.data.id;
+
+      const depRes = await post(
+        app,
+        `/api/v1/tasks/${downstreamId}/dependencies`,
+        { depends_on_id: upstreamId },
+        ownerToken
+      );
+      expectSuccess(depRes, 201);
+
+      const blockedDownstream = await prisma.task.findUnique({ where: { id: downstreamId } });
+      expect(blockedDownstream!.status).toBe("pending_publish");
+      expect(blockedDownstream!.assignee_id).toBe(worker.id);
+
+      const startBlockedRes = await post(
+        app,
+        `/api/v1/tasks/${downstreamId}/start`,
+        {},
+        workerToken
+      );
+      expectError(startBlockedRes, 400, "BAD_REQUEST");
+
+      const startUpstreamRes = await post(
+        app,
+        `/api/v1/tasks/${upstreamId}/start`,
+        {},
+        workerToken
+      );
+      expectSuccess(startUpstreamRes, 200);
+
+      const submitUpstreamRes = await post(
+        app,
+        `/api/v1/tasks/${upstreamId}/submit`,
+        {},
+        workerToken
+      );
+      expectSuccess(submitUpstreamRes, 200);
+
+      const unlockedDownstream = await prisma.task.findUnique({ where: { id: downstreamId } });
+      expect(unlockedDownstream!.status).toBe("assigned");
+      expect(unlockedDownstream!.assignee_id).toBe(worker.id);
+    });
+
+    it("should allow preassigning a blocked pending task without forcing a dependency override", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "in_progress",
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "pending_publish",
+        creator_id: owner.id,
+      });
+      await prisma.taskDependency.create({
+        data: {
+          task_id: downstream.id,
+          depends_on_id: upstream.id,
+          dependency_type: "finish_to_start",
+        },
+      });
+
+      const assignRes = await post(
+        app,
+        `/api/v1/tasks/${downstream.id}/assign`,
+        { assignee_id: worker.id },
+        ownerToken
+      );
+
+      expectSuccess(assignRes, 200);
+      expect(assignRes.body.data.status).toBe("pending_publish");
+      expect(assignRes.body.data.assignee_id).toBe(worker.id);
+    });
+
     it("should prevent claiming task when dependencies not met", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
       const { user: worker, token: workerToken } = await createTestUser();
