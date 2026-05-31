@@ -79,9 +79,27 @@ services:
       timeout: 5s
       retries: 5
 
+  mysql:
+    image: mysql:8.4
+    profiles: ["mysql"]
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-subtitle}
+      MYSQL_USER: ${MYSQL_USER:-subtitle}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-subtitle}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-subtitle-root}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MYSQL_USER:-subtitle} -p${MYSQL_PASSWORD:-subtitle} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   app-config:
   app-uploads:
   caddy-data:
   caddy-config:
   postgres-data:
+  mysql-data:

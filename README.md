@@ -335,6 +335,23 @@ postgresql://subtitle:subtitle@postgres:5432/subtitle?schema=public
 
 这里的 `postgres` 是 Compose 网络里的服务名，不是宿主机地址。如果改了 `.env` 里的 `POSTGRES_DB`、`POSTGRES_USER` 或 `POSTGRES_PASSWORD`，连接串也要同步修改。
 
+### 使用内置 MySQL
+
+如果希望 Compose 同时启动 MySQL：
+
+```bash
+cp .env.compose.example .env
+docker compose --profile mysql up -d --build
+```
+
+初始化页面中的 MySQL 连接串填写：
+
+```text
+mysql://subtitle:subtitle@mysql:3306/subtitle
+```
+
+这里的 `mysql` 是 Compose 网络里的服务名。如果改了 `.env` 里的 `MYSQL_DATABASE`、`MYSQL_USER` 或 `MYSQL_PASSWORD`，连接串也要同步修改。
+
 ### 使用外部数据库
 
 外部 PostgreSQL / MySQL / MariaDB 不需要启用 `postgres` profile。直接启动应用和 QQ 桥接器：
