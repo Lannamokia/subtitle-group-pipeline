@@ -17,6 +17,8 @@ const ENV_PATH = path.resolve(process.cwd(), ".env");
 const SCHEMA_PATH = path.resolve(process.cwd(), "prisma/schema.prisma");
 const SCHEMA_DIR = path.dirname(SCHEMA_PATH);
 const MIGRATIONS_DIR = path.join(SCHEMA_DIR, "migrations");
+const LEGACY_UPLOAD_MAX_SIZE_BYTES = 104857600n;
+const LARGE_UPLOAD_MAX_SIZE_BYTES = 536870912000n;
 
 function inferProvider(url: string): "sqlite" | "mysql" | "mariadb" | "postgresql" | "unknown" {
   if (url.startsWith("file:")) return "sqlite";
@@ -96,11 +98,78 @@ export async function upgradeConfiguredDatabaseSchema() {
 
   const provider = prismaProvider(inferred);
   await syncSchema(databaseUrl, provider);
+  await upgradeLegacyUploadPolicyLimits(databaseUrl, provider);
 
   return {
     skipped: false as const,
     provider,
   };
+}
+
+function isLegacyUploadLimit(value: unknown): boolean {
+  return (
+    value === Number(LEGACY_UPLOAD_MAX_SIZE_BYTES) ||
+    value === LEGACY_UPLOAD_MAX_SIZE_BYTES.toString()
+  );
+}
+
+function upgradeUploadPolicyJson(policyJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(policyJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const policy = { ...(parsed as Record<string, unknown>) };
+  let changed = false;
+  if (isLegacyUploadLimit(policy.maxSize)) {
+    policy.maxSize = Number(LARGE_UPLOAD_MAX_SIZE_BYTES);
+    changed = true;
+  }
+  if (isLegacyUploadLimit(policy.max_size_bytes)) {
+    policy.max_size_bytes = Number(LARGE_UPLOAD_MAX_SIZE_BYTES);
+    changed = true;
+  }
+
+  return changed ? JSON.stringify(policy) : null;
+}
+
+async function upgradeLegacyUploadPolicyLimits(
+  databaseUrl: string,
+  provider: "sqlite" | "mysql" | "postgresql"
+) {
+  const client = new PrismaClient({
+    datasources: {
+      db: { url: databaseUrlForPrismaCli(databaseUrl, provider) },
+    },
+    log: process.env.NODE_ENV === "development" ? ["error"] : ["error"],
+  });
+
+  try {
+    await client.$connect();
+    await client.uploadPolicy.updateMany({
+      where: { max_size_bytes: LEGACY_UPLOAD_MAX_SIZE_BYTES },
+      data: { max_size_bytes: LARGE_UPLOAD_MAX_SIZE_BYTES },
+    });
+
+    const templates = await client.projectTemplate.findMany({
+      select: { id: true, upload_policy: true },
+    });
+    for (const template of templates) {
+      const upgraded = upgradeUploadPolicyJson(template.upload_policy);
+      if (!upgraded) continue;
+      await client.projectTemplate.update({
+        where: { id: template.id },
+        data: { upload_policy: upgraded },
+      });
+    }
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 async function generatePrismaClient(databaseUrl: string, provider: "sqlite" | "mysql" | "postgresql") {
