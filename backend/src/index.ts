@@ -2,19 +2,40 @@ import { createApp } from "./app";
 import { env } from "./config/env";
 import { canConnectDatabase, prisma } from "./config/database";
 import { registerAllJobs, scheduler } from "./jobs";
+import { upgradeConfiguredDatabaseSchema } from "./modules/setup/setup.service";
 import { setupState } from "./modules/setup/setup.state";
 
 const PORT = env.PORT;
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function startServer(): Promise<void> {
   let databaseReady = false;
+  let databaseUpgradeFailed = false;
 
-  try {
-    databaseReady = await canConnectDatabase();
-    console.log(databaseReady ? "Connected to database" : "Database unavailable; setup mode enabled");
-  } catch {
-    databaseReady = false;
-    console.log("Database unavailable; setup mode enabled");
+  if (env.DATABASE_AUTO_UPGRADE) {
+    try {
+      const result = await upgradeConfiguredDatabaseSchema();
+      if (!result.skipped) {
+        console.log(`Database schema synchronized (${result.provider})`);
+      }
+    } catch (error) {
+      databaseUpgradeFailed = true;
+      console.error(`Database auto-upgrade failed: ${errorMessage(error)}`);
+      console.log("Database unavailable; setup mode enabled");
+    }
+  }
+
+  if (!databaseUpgradeFailed) {
+    try {
+      databaseReady = await canConnectDatabase();
+      console.log(databaseReady ? "Connected to database" : "Database unavailable; setup mode enabled");
+    } catch {
+      databaseReady = false;
+      console.log("Database unavailable; setup mode enabled");
+    }
   }
   setupState.databaseReady = databaseReady;
 

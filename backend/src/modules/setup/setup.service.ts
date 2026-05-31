@@ -59,7 +59,11 @@ function buildPrismaSchema(provider: "sqlite" | "mysql" | "postgresql") {
   return schema.replace(/provider\s*=\s*"(sqlite|mysql|postgresql)"/, `provider = "${provider}"`);
 }
 
-async function syncSchema(databaseUrl: string, provider: "sqlite" | "mysql" | "postgresql") {
+async function syncSchema(
+  databaseUrl: string,
+  provider: "sqlite" | "mysql" | "postgresql",
+  options: { acceptDataLoss?: boolean } = {}
+) {
   if (provider === "sqlite") {
     await applySqliteMigrations(databaseUrl);
     return;
@@ -69,10 +73,34 @@ async function syncSchema(databaseUrl: string, provider: "sqlite" | "mysql" | "p
   const tempSchemaPath = path.join(SCHEMA_DIR, `.setup-${crypto.randomUUID()}.prisma`);
   try {
     fs.writeFileSync(tempSchemaPath, buildPrismaSchema(provider));
-    await runPrismaCommand(["db", "push", "--accept-data-loss", "--skip-generate", "--schema", tempSchemaPath], env);
+    const args = ["db", "push", "--skip-generate", "--schema", tempSchemaPath];
+    if (options.acceptDataLoss) {
+      args.splice(2, 0, "--accept-data-loss");
+    }
+    await runPrismaCommand(args, env);
   } finally {
     fs.rmSync(tempSchemaPath, { force: true });
   }
+}
+
+export async function upgradeConfiguredDatabaseSchema() {
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    return { skipped: true as const, reason: "not_configured" as const };
+  }
+
+  const inferred = inferProvider(databaseUrl);
+  if (inferred === "unknown") {
+    throw new AppError("Unsupported database URL scheme", "VALIDATION_ERROR", 400);
+  }
+
+  const provider = prismaProvider(inferred);
+  await syncSchema(databaseUrl, provider);
+
+  return {
+    skipped: false as const,
+    provider,
+  };
 }
 
 async function generatePrismaClient(databaseUrl: string, provider: "sqlite" | "mysql" | "postgresql") {
