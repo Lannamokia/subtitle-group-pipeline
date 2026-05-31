@@ -110,7 +110,7 @@ export const DEFAULT_ROLE_UPLOAD_POLICY = {
       extensions: [...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS, ...FONT_EXTENSIONS, ...PACKAGE_EXTENSIONS, ...RELEASE_EXTENSIONS],
     },
   },
-  maxSize: 104857600,
+  maxSize: 536870912000,
   requireApproval: false,
   extensionWhitelist: Array.from(new Set([
     ...VIDEO_EXTENSIONS,

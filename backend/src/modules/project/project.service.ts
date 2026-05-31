@@ -362,7 +362,7 @@ export async function createProjectFromTemplate(
     data: {
       project_id: project.id,
       allowed_types: uploadPolicy.json,
-      max_size_bytes: numberFromPolicy(uploadPolicy.policy, "max_size_bytes", "maxSize") ?? 104857600,
+      max_size_bytes: numberFromPolicy(uploadPolicy.policy, "max_size_bytes", "maxSize") ?? 536870912000,
       require_approval: booleanFromPolicy(uploadPolicy.policy, "require_approval", "requireApproval") ?? false,
       extension_whitelist: stringifyPolicyList(uploadPolicy.policy, "extension_whitelist", "extensionWhitelist", "extensions"),
     },

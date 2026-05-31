@@ -337,7 +337,7 @@ CREATE TABLE "UploadPolicy" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "project_id" TEXT,
     "allowed_types" TEXT NOT NULL,
-    "max_size_bytes" INTEGER NOT NULL DEFAULT 104857600,
+    "max_size_bytes" INTEGER NOT NULL DEFAULT 536870912000,
     "require_approval" BOOLEAN NOT NULL DEFAULT false,
     "extension_whitelist" TEXT,
     "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

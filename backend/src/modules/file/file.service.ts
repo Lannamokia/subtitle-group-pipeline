@@ -31,7 +31,7 @@ import { normalizeUploadPolicyJson } from "../../utils/uploadPolicy";
 function defaultUploadPolicyRecord() {
   return {
     allowed_types: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY),
-    max_size_bytes: 104857600,
+    max_size_bytes: 536870912000,
     require_approval: false,
     extension_whitelist: JSON.stringify(DEFAULT_ROLE_UPLOAD_POLICY.extensionWhitelist),
   };
@@ -102,10 +102,14 @@ interface NormalizedPolicyRule {
 type UploadPolicyRecord = {
   id?: string;
   allowed_types: string;
-  max_size_bytes: number;
+  max_size_bytes: number | bigint;
   require_approval: boolean;
   extension_whitelist?: string | null;
 };
+
+function toNumber(value: number | bigint): number {
+  return typeof value === "bigint" ? Number(value) : value;
+}
 
 function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
   if (!value) {
@@ -705,7 +709,7 @@ export async function validateUpload(
     };
   }
   const { policy, allowedRule } = resolvedPolicy;
-  const maxSize = policy.max_size_bytes;
+  const maxSize = toNumber(policy.max_size_bytes);
   const whitelist = policy.extension_whitelist
     ? tryParseStringList(policy.extension_whitelist)
     : null;

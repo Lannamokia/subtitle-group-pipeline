@@ -62,6 +62,94 @@ export const replaceFileSchema = z.object({
   change_summary: z.string().max(1000).optional().nullable(),
 });
 
+const multipartUploadBaseObject = z.object({
+  project_id: z.string().uuid("Invalid project ID").optional(),
+  projectId: z.string().uuid("Invalid project ID").optional(),
+  file_id: z.string().uuid("Invalid file ID").optional(),
+  fileId: z.string().uuid("Invalid file ID").optional(),
+  name: z.string().min(1, "File name is required").max(500),
+  file_type: z.nativeEnum(FileType).optional(),
+  type: z.nativeEnum(FileType).optional(),
+  mime_type: z.string().min(1, "MIME type is required").optional(),
+  mimeType: z.string().min(1, "MIME type is required").optional(),
+  size_bytes: z.coerce.number().int().min(0).optional(),
+  sizeBytes: z.coerce.number().int().min(0).optional(),
+  task_id: z.string().uuid("Invalid task ID").optional(),
+  taskId: z.string().uuid("Invalid task ID").optional(),
+  unit_id: z.string().uuid("Invalid unit ID").optional(),
+  unitId: z.string().uuid("Invalid unit ID").optional(),
+  role: z.nativeEnum(TaskRole).optional(),
+  tags: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  metadata: z.string().optional().nullable(),
+  episode_length: z.coerce.number().int().min(1).optional().nullable(),
+  episodeLength: z.coerce.number().int().min(1).optional().nullable(),
+  change_summary: z.string().max(1000).optional().nullable(),
+  changeSummary: z.string().max(1000).optional().nullable(),
+});
+
+const multipartUploadBaseSchema = multipartUploadBaseObject.refine((data) => data.project_id || data.projectId || data.file_id || data.fileId, {
+  message: "project_id or file_id is required",
+}).refine((data) => data.mime_type || data.mimeType, {
+  message: "mime_type is required",
+}).refine((data) => data.size_bytes !== undefined || data.sizeBytes !== undefined, {
+  message: "size_bytes is required",
+});
+
+export const initiateMultipartUploadSchema = multipartUploadBaseSchema;
+
+export const signMultipartPartSchema = z.object({
+  storage_backend_id: z.string().uuid("Invalid storage backend ID"),
+  storageBackendId: z.string().uuid("Invalid storage backend ID").optional(),
+  key: z.string().min(1, "Storage key is required"),
+  upload_id: z.string().min(1, "Upload ID is required").optional(),
+  uploadId: z.string().min(1, "Upload ID is required").optional(),
+  part_number: z.coerce.number().int().min(1).max(10000).optional(),
+  partNumber: z.coerce.number().int().min(1).max(10000).optional(),
+}).refine((data) => data.upload_id || data.uploadId, {
+  message: "upload_id is required",
+}).refine((data) => data.part_number !== undefined || data.partNumber !== undefined, {
+  message: "part_number is required",
+});
+
+const completedPartSchema = z.object({
+  part_number: z.coerce.number().int().min(1).max(10000).optional(),
+  partNumber: z.coerce.number().int().min(1).max(10000).optional(),
+  e_tag: z.string().min(1).optional(),
+  eTag: z.string().min(1).optional(),
+  ETag: z.string().min(1).optional(),
+}).refine((data) => data.part_number !== undefined || data.partNumber !== undefined, {
+  message: "part_number is required",
+}).refine((data) => data.e_tag || data.eTag || data.ETag, {
+  message: "eTag is required",
+});
+
+export const completeMultipartUploadSchema = multipartUploadBaseObject.extend({
+  storage_backend_id: z.string().uuid("Invalid storage backend ID"),
+  storageBackendId: z.string().uuid("Invalid storage backend ID").optional(),
+  key: z.string().min(1, "Storage key is required"),
+  upload_id: z.string().min(1, "Upload ID is required").optional(),
+  uploadId: z.string().min(1, "Upload ID is required").optional(),
+  parts: z.array(completedPartSchema).min(1).max(10000),
+}).refine((data) => data.project_id || data.projectId || data.file_id || data.fileId, {
+  message: "project_id or file_id is required",
+}).refine((data) => data.mime_type || data.mimeType, {
+  message: "mime_type is required",
+}).refine((data) => data.size_bytes !== undefined || data.sizeBytes !== undefined, {
+  message: "size_bytes is required",
+}).refine((data) => data.upload_id || data.uploadId, {
+  message: "upload_id is required",
+});
+
+export const abortMultipartUploadSchema = z.object({
+  storage_backend_id: z.string().uuid("Invalid storage backend ID"),
+  storageBackendId: z.string().uuid("Invalid storage backend ID").optional(),
+  key: z.string().min(1, "Storage key is required"),
+  upload_id: z.string().min(1, "Upload ID is required").optional(),
+  uploadId: z.string().min(1, "Upload ID is required").optional(),
+}).refine((data) => data.upload_id || data.uploadId, {
+  message: "upload_id is required",
+});
+
 export const createVersionSchema = z.object({
   storage_path: z.string().min(1, "Storage path is required"),
   size_bytes: z.number().int().min(0),
@@ -129,6 +217,10 @@ export const batchArchiveUnitsSchema = z.object({
 export type FileQueryInput = z.infer<typeof fileQuerySchema>;
 export type UploadFileInput = z.infer<typeof uploadFileSchema>;
 export type ReplaceFileInput = z.infer<typeof replaceFileSchema>;
+export type InitiateMultipartUploadInput = z.infer<typeof initiateMultipartUploadSchema>;
+export type SignMultipartPartInput = z.infer<typeof signMultipartPartSchema>;
+export type CompleteMultipartUploadInput = z.infer<typeof completeMultipartUploadSchema>;
+export type AbortMultipartUploadInput = z.infer<typeof abortMultipartUploadSchema>;
 export type CreateVersionInput = z.infer<typeof createVersionSchema>;
 export type ApproveVersionInput = z.infer<typeof approveVersionSchema>;
 export type CreateLinkInput = z.infer<typeof createLinkSchema>;

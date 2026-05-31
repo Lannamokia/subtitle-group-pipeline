@@ -29,7 +29,7 @@ export function successResponse<T>(
   if (meta) {
     response.meta = meta;
   }
-  res.status(statusCode).json(response);
+  sendJson(res, response, statusCode);
 }
 
 export function errorResponse(
@@ -49,7 +49,16 @@ export function errorResponse(
   if (details) {
     response.error!.details = details;
   }
-  res.status(statusCode).json(response);
+  sendJson(res, response, statusCode);
+}
+
+function sendJson<T>(res: Response, payload: T, statusCode: number): void {
+  res
+    .status(statusCode)
+    .type("application/json")
+    .send(JSON.stringify(payload, (_key, value) =>
+      typeof value === "bigint" ? Number(value) : value
+    ));
 }
 
 export class AppError extends Error {

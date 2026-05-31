@@ -1456,6 +1456,236 @@ export const taskApi = {
 
 // ========== File API ==========
 
+type FileUploadData = {
+  projectId: string;
+  taskId?: string;
+  unitId?: string;
+  type?: string;
+  role?: string;
+  tags?: string[];
+  changeSummary?: string;
+  episodeLength?: number | null;
+};
+
+type ReplaceUploadData = {
+  changeSummary?: string;
+  tags?: string[];
+};
+
+type MultipartUploadSession = {
+  uploadMode?: 'multipart' | 'server';
+  mode?: 'multipart' | 'server';
+  storageBackendId?: string;
+  storage_backend_id?: string;
+  key?: string;
+  uploadId?: string;
+  upload_id?: string;
+  partSize?: number;
+  part_size?: number;
+  partCount?: number;
+  part_count?: number;
+};
+
+function buildServerUploadFormData(file: File, data: FileUploadData): FormData {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('projectId', data.projectId);
+  if (data.taskId) formData.append('taskId', data.taskId);
+  if (data.unitId) formData.append('unitId', data.unitId);
+  if (data.type) formData.append('type', data.type);
+  if (data.role) formData.append('role', data.role);
+  if (data.tags?.length) formData.append('tags', JSON.stringify(data.tags));
+  if (data.changeSummary) formData.append('change_summary', data.changeSummary);
+  if (data.episodeLength !== undefined && data.episodeLength !== null) {
+    formData.append('episode_length', String(data.episodeLength));
+  }
+  return formData;
+}
+
+function buildServerReplaceFormData(file: File, data?: ReplaceUploadData): FormData {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (data?.changeSummary) formData.append('change_summary', data.changeSummary);
+  if (data?.tags?.length) formData.append('tags', JSON.stringify(data.tags));
+  return formData;
+}
+
+function serverUploadFile(file: File, data: FileUploadData) {
+  return api.post<ApiResponse<unknown>>('/files', buildServerUploadFormData(file, data), {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
+  }).then((response) => normalizeFile(response.data.data as AnyRecord));
+}
+
+function serverReplaceFile(fileId: string, file: File, data?: ReplaceUploadData) {
+  return api.post<ApiResponse<unknown>>(`/files/${fileId}/replace`, buildServerReplaceFormData(file, data), {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
+  }).then((response) => normalizeFile(response.data.data as AnyRecord));
+}
+
+function multipartInitPayload(file: File, data: FileUploadData, fileId?: string) {
+  return {
+    project_id: data.projectId,
+    file_id: fileId,
+    name: file.name,
+    mime_type: file.type || 'application/octet-stream',
+    size_bytes: file.size,
+    type: data.type,
+    role: data.role,
+    task_id: data.taskId,
+    unit_id: data.unitId,
+    tags: data.tags,
+    change_summary: data.changeSummary,
+    episode_length: data.episodeLength,
+  };
+}
+
+function getMultipartMode(session: MultipartUploadSession): 'multipart' | 'server' {
+  return session.uploadMode ?? session.mode ?? 'server';
+}
+
+function requireMultipartSessionValue(value: unknown, label: string): string {
+  if (typeof value === 'string' && value) return value;
+  throw new Error(`分片上传初始化响应缺少 ${label}`);
+}
+
+async function uploadMultipartParts(file: File, session: MultipartUploadSession) {
+  const storageBackendId = requireMultipartSessionValue(
+    session.storageBackendId ?? session.storage_backend_id,
+    'storageBackendId'
+  );
+  const key = requireMultipartSessionValue(session.key, 'key');
+  const uploadId = requireMultipartSessionValue(session.uploadId ?? session.upload_id, 'uploadId');
+  const partSize = Number(session.partSize ?? session.part_size ?? 0);
+  const partCount = Number(session.partCount ?? session.part_count ?? Math.ceil(file.size / partSize));
+  if (!partSize || !partCount) {
+    throw new Error('分片上传初始化响应缺少分片大小');
+  }
+
+  const completedParts: Array<{ partNumber: number; eTag: string }> = [];
+  let nextPartNumber = 1;
+  const workerCount = Math.min(4, partCount);
+
+  const uploadOne = async () => {
+    while (nextPartNumber <= partCount) {
+      const partNumber = nextPartNumber;
+      nextPartNumber += 1;
+      const start = (partNumber - 1) * partSize;
+      const end = Math.min(file.size, start + partSize);
+      const { data } = await api.post<ApiResponse<{ url: string }>>('/files/multipart/part', {
+        storage_backend_id: storageBackendId,
+        key,
+        upload_id: uploadId,
+        part_number: partNumber,
+      });
+      const url = data.data?.url;
+      if (!url) {
+        throw new Error('后端没有返回分片上传地址');
+      }
+
+      const response = await axios.put(url, file.slice(start, end), {
+        timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
+      });
+      const eTag = response.headers.etag || response.headers.ETag;
+      if (!eTag) {
+        throw new Error('S3 未返回 ETag，请检查存储桶 CORS 是否暴露 ETag 响应头');
+      }
+      completedParts.push({ partNumber, eTag });
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, uploadOne));
+  completedParts.sort((a, b) => a.partNumber - b.partNumber);
+  return { storageBackendId, key, uploadId, parts: completedParts };
+}
+
+async function multipartUploadFile(file: File, data: FileUploadData) {
+  const init = await api.post<ApiResponse<MultipartUploadSession>>(
+    '/files/multipart/initiate',
+    multipartInitPayload(file, data)
+  ).then(extractData);
+
+  if (getMultipartMode(init) !== 'multipart') {
+    return serverUploadFile(file, data);
+  }
+
+  const uploaded = {
+    storageBackendId: requireMultipartSessionValue(init.storageBackendId ?? init.storage_backend_id, 'storageBackendId'),
+    key: requireMultipartSessionValue(init.key, 'key'),
+    uploadId: requireMultipartSessionValue(init.uploadId ?? init.upload_id, 'uploadId'),
+    parts: [] as Array<{ partNumber: number; eTag: string }>,
+  };
+  try {
+    const partsResult = await uploadMultipartParts(file, init);
+    uploaded.parts = partsResult.parts;
+    return await api.post<ApiResponse<unknown>>('/files/multipart/complete', {
+      ...multipartInitPayload(file, data),
+      storage_backend_id: uploaded.storageBackendId,
+      key: uploaded.key,
+      upload_id: uploaded.uploadId,
+      parts: uploaded.parts.map((part) => ({
+        part_number: part.partNumber,
+        e_tag: part.eTag,
+      })),
+    }).then((response) => normalizeFile(response.data.data as AnyRecord));
+  } catch (error) {
+    await api.post('/files/multipart/abort', {
+      storage_backend_id: uploaded.storageBackendId,
+      key: uploaded.key,
+      upload_id: uploaded.uploadId,
+    }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function multipartReplaceFile(fileId: string, file: File, data?: ReplaceUploadData) {
+  const initPayload = {
+    ...multipartInitPayload(file, {
+      projectId: '00000000-0000-0000-0000-000000000000',
+      tags: data?.tags,
+      changeSummary: data?.changeSummary,
+    }, fileId),
+    project_id: undefined,
+  };
+  const init = await api.post<ApiResponse<MultipartUploadSession>>(
+    '/files/multipart/initiate',
+    initPayload
+  ).then(extractData);
+
+  if (getMultipartMode(init) !== 'multipart') {
+    return serverReplaceFile(fileId, file, data);
+  }
+
+  const uploaded = {
+    storageBackendId: requireMultipartSessionValue(init.storageBackendId ?? init.storage_backend_id, 'storageBackendId'),
+    key: requireMultipartSessionValue(init.key, 'key'),
+    uploadId: requireMultipartSessionValue(init.uploadId ?? init.upload_id, 'uploadId'),
+    parts: [] as Array<{ partNumber: number; eTag: string }>,
+  };
+  try {
+    const partsResult = await uploadMultipartParts(file, init);
+    uploaded.parts = partsResult.parts;
+    return await api.post<ApiResponse<unknown>>('/files/multipart/complete', {
+      ...initPayload,
+      storage_backend_id: uploaded.storageBackendId,
+      key: uploaded.key,
+      upload_id: uploaded.uploadId,
+      parts: uploaded.parts.map((part) => ({
+        part_number: part.partNumber,
+        e_tag: part.eTag,
+      })),
+    }).then((response) => normalizeFile(response.data.data as AnyRecord));
+  } catch (error) {
+    await api.post('/files/multipart/abort', {
+      storage_backend_id: uploaded.storageBackendId,
+      key: uploaded.key,
+      upload_id: uploaded.uploadId,
+    }).catch(() => undefined);
+    throw error;
+  }
+}
+
 export const fileApi = {
   getFiles: (params?: { projectId?: string; taskId?: string; type?: string; search?: string; tag?: string; role?: string }) =>
     api.get<ApiResponse<unknown>>('/files', { params }).then((response) =>
@@ -1467,35 +1697,9 @@ export const fileApi = {
       normalizeFile(response.data.data as AnyRecord)
     ),
 
-  uploadFile: (file: File, data: { projectId: string; taskId?: string; unitId?: string; type?: string; role?: string; tags?: string[]; changeSummary?: string; episodeLength?: number | null }) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('projectId', data.projectId);
-    if (data.taskId) formData.append('taskId', data.taskId);
-    if (data.unitId) formData.append('unitId', data.unitId);
-    if (data.type) formData.append('type', data.type);
-    if (data.role) formData.append('role', data.role);
-    if (data.tags?.length) formData.append('tags', JSON.stringify(data.tags));
-    if (data.changeSummary) formData.append('change_summary', data.changeSummary);
-    if (data.episodeLength !== undefined && data.episodeLength !== null) {
-      formData.append('episode_length', String(data.episodeLength));
-    }
-    return api.post<ApiResponse<unknown>>('/files', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
-    }).then((response) => normalizeFile(response.data.data as AnyRecord));
-  },
+  uploadFile: (file: File, data: FileUploadData) => multipartUploadFile(file, data),
 
-  replaceFile: (fileId: string, file: File, data?: { changeSummary?: string; tags?: string[] }) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (data?.changeSummary) formData.append('change_summary', data.changeSummary);
-    if (data?.tags?.length) formData.append('tags', JSON.stringify(data.tags));
-    return api.post<ApiResponse<unknown>>(`/files/${fileId}/replace`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
-    }).then((response) => normalizeFile(response.data.data as AnyRecord));
-  },
+  replaceFile: (fileId: string, file: File, data?: ReplaceUploadData) => multipartReplaceFile(fileId, file, data),
 
   getVersions: (fileId: string) =>
     api.get<ApiResponse<unknown[]>>(`/files/${fileId}/versions`).then((response) =>

@@ -1,4 +1,7 @@
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
@@ -6,6 +9,10 @@ import {
   HeadObjectCommand,
   HeadBucketCommand,
   ListObjectsV2Command,
+  UploadPartCommand,
+  type CompletedPart,
+  type CompleteMultipartUploadCommandOutput,
+  type CreateMultipartUploadCommandOutput,
   type GetObjectCommandOutput,
   type HeadObjectCommandOutput,
   type ListObjectsV2CommandOutput,
@@ -30,6 +37,17 @@ export interface S3UploadResult {
   key: string;
   etag: string;
   size: number;
+  url: string;
+}
+
+export interface S3MultipartUploadSession {
+  key: string;
+  uploadId: string;
+}
+
+export interface S3CompletedMultipartUpload {
+  key: string;
+  etag: string;
   url: string;
 }
 
@@ -114,6 +132,81 @@ export class S3Adapter {
       size: buffer.length,
       url: `s3://${this.config.bucket}/${key}`,
     };
+  }
+
+  async createMultipartUpload(
+    projectId: string,
+    originalFilename: string,
+    contentType?: string
+  ): Promise<S3MultipartUploadSession> {
+    const key = this.generateKey(projectId, originalFilename);
+    const command = new CreateMultipartUploadCommand({
+      Bucket: this.config.bucket,
+      Key: key,
+      ContentType: contentType || "application/octet-stream",
+    });
+
+    const result = await this.send<CreateMultipartUploadCommandOutput>(command);
+    if (!result.UploadId) {
+      throw new AppError("S3 did not return a multipart upload ID", "STORAGE_ERROR", 500);
+    }
+
+    return { key, uploadId: result.UploadId };
+  }
+
+  async getMultipartPartUrl(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    expiresIn: number = 3600
+  ): Promise<string> {
+    const command = new UploadPartCommand({
+      Bucket: this.config.bucket,
+      Key: key,
+      UploadId: uploadId,
+      PartNumber: partNumber,
+    });
+
+    return getSignedUrl(this.client, command, { expiresIn });
+  }
+
+  async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: Array<{ partNumber: number; eTag: string }>
+  ): Promise<S3CompletedMultipartUpload> {
+    const completedParts: CompletedPart[] = parts
+      .map((part) => ({
+        PartNumber: part.partNumber,
+        ETag: part.eTag,
+      }))
+      .sort((a, b) => (a.PartNumber || 0) - (b.PartNumber || 0));
+
+    const command = new CompleteMultipartUploadCommand({
+      Bucket: this.config.bucket,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: completedParts,
+      },
+    });
+
+    const result = await this.send<CompleteMultipartUploadCommandOutput>(command);
+    return {
+      key,
+      etag: result.ETag || "",
+      url: `s3://${this.config.bucket}/${key}`,
+    };
+  }
+
+  async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    const command = new AbortMultipartUploadCommand({
+      Bucket: this.config.bucket,
+      Key: key,
+      UploadId: uploadId,
+    });
+
+    await this.send(command);
   }
 
   async download(key: string): Promise<Buffer> {

@@ -16,7 +16,7 @@ export const prisma = basePrisma.$extends({
         const file = result as {
           id: string;
           storage_path: string;
-          size_bytes: number;
+          size_bytes: number | bigint;
           checksum: string | null;
         };
 

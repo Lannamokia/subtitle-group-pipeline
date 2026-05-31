@@ -24,6 +24,10 @@ function toNumber(value: bigint | number | null | undefined): number | null {
   return typeof value === "bigint" ? Number(value) : value;
 }
 
+function toBigInt(value: bigint | number): bigint {
+  return typeof value === "bigint" ? value : BigInt(value);
+}
+
 export function serializeStorageBackend<T extends NonNullable<StorageBackendRecord>>(backend: T) {
   return {
     ...backend,
@@ -279,7 +283,7 @@ export async function downloadStoredFile(
 export async function deleteFile(
   backendId: string,
   storagePath: string,
-  sizeBytes: number
+  sizeBytes: number | bigint
 ): Promise<void> {
   const adapter = await initAdapterForBackend(backendId);
 
@@ -493,7 +497,7 @@ export async function getDefaultBackend() {
 
 export async function updateUsage(
   backendId: string,
-  sizeDelta: number,
+  sizeDelta: number | bigint,
   fileCountDelta: number
 ) {
   const backend = await prisma.storageBackend.findUnique({
@@ -505,7 +509,7 @@ export async function updateUsage(
   }
 
   const currentUsed = typeof backend.used_bytes === "bigint" ? backend.used_bytes : BigInt(backend.used_bytes);
-  const newUsed = currentUsed + BigInt(sizeDelta);
+  const newUsed = currentUsed + toBigInt(sizeDelta);
   const safeUsed = newUsed > 0n ? newUsed : 0n;
   const newFileCount = Math.max(0, backend.file_count + fileCountDelta);
 
@@ -522,7 +526,7 @@ export async function updateUsage(
 
 export async function checkQuota(
   backendId: string,
-  additionalBytes: number
+  additionalBytes: number | bigint
 ): Promise<boolean> {
   const backend = await prisma.storageBackend.findUnique({
     where: { id: backendId },
@@ -532,7 +536,7 @@ export async function checkQuota(
     return true; // No quota = unlimited
   }
 
-  return backend.used_bytes + BigInt(additionalBytes) <= backend.quota_bytes;
+  return backend.used_bytes + toBigInt(additionalBytes) <= backend.quota_bytes;
 }
 
 // ==================== AVATAR UPLOAD ====================

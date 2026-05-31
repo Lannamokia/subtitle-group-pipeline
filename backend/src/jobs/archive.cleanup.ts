@@ -73,12 +73,12 @@ interface ProjectWithFiles {
     name: string;
     storage_path: string;
     storage_backend_id: string | null;
-    size_bytes: number;
+    size_bytes: number | bigint;
     versions: Array<{
       id: string;
       version_number: number;
       storage_path: string;
-      size_bytes: number;
+      size_bytes: number | bigint;
       is_current: boolean;
       is_latest: boolean;
       is_latest_approved: boolean;
@@ -164,7 +164,7 @@ async function cleanupFileVersions(
 async function deleteFileFromStorage(
   backendId: string,
   storagePath: string,
-  sizeBytes: number
+  sizeBytes: number | bigint
 ): Promise<void> {
   try {
     await deleteFile(backendId, storagePath, sizeBytes);

@@ -10,6 +10,10 @@ import {
   downloadLinkQuerySchema,
   batchAssignTasksSchema,
   batchArchiveUnitsSchema,
+  abortMultipartUploadSchema,
+  completeMultipartUploadSchema,
+  initiateMultipartUploadSchema,
+  signMultipartPartSchema,
 } from "./file.schema";
 import { z } from "zod";
 
@@ -40,6 +44,34 @@ router.post(
   requireRole("super_admin", "group_admin", "supervisor"),
   validateBody(updateUploadPolicySchema),
   controller.updateUploadPolicy
+);
+
+router.post(
+  "/multipart/initiate",
+  authenticate,
+  validateBody(initiateMultipartUploadSchema),
+  controller.initiateMultipartUpload
+);
+
+router.post(
+  "/multipart/part",
+  authenticate,
+  validateBody(signMultipartPartSchema),
+  controller.signMultipartPart
+);
+
+router.post(
+  "/multipart/complete",
+  authenticate,
+  validateBody(completeMultipartUploadSchema),
+  controller.completeMultipartUpload
+);
+
+router.post(
+  "/multipart/abort",
+  authenticate,
+  validateBody(abortMultipartUploadSchema),
+  controller.abortMultipartUpload
 );
 
 router.post(

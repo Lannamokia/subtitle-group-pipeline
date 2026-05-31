@@ -653,7 +653,7 @@ model FileEntity {
   original_name   String
   file_type       FileType
   mime_type       String
-  size_bytes      Int
+  size_bytes      BigInt
   storage_path    String
   storage_backend_id String?
   checksum        String?
@@ -681,7 +681,7 @@ model FileVersion {
   file_id         String
   version_number  Int
   storage_path    String
-  size_bytes      Int
+  size_bytes      BigInt
   checksum        String?
   change_summary  String?
   is_current      Boolean  @default(false)
@@ -724,7 +724,7 @@ model UploadPolicy {
   id              String   @id @default(uuid())
   project_id      String?  // null = global default
   allowed_types   String   // JSON: array of mime types
-  max_size_bytes  Int      @default(104857600) // 100MB
+  max_size_bytes  BigInt   @default(536870912000) // 500GB
   require_approval Boolean @default(false)
   extension_whitelist String? // JSON: array of extensions
   created_at      DateTime @default(now())

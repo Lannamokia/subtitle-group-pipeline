@@ -183,7 +183,7 @@ function defaultUploadPolicy(): UploadPolicy {
 
   return {
     roles: Object.fromEntries(rules),
-    maxSize: 104857600,
+    maxSize: 536870912000,
     requireApproval: false,
     extensionWhitelist,
   };

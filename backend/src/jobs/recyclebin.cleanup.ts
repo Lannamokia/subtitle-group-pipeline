@@ -73,11 +73,11 @@ interface ProjectToDelete {
     id: string;
     storage_path: string;
     storage_backend_id: string | null;
-    size_bytes: number;
+    size_bytes: number | bigint;
     versions: Array<{
       id: string;
       storage_path: string;
-      size_bytes: number;
+      size_bytes: number | bigint;
     }>;
   }>;
 }
