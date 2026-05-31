@@ -54,6 +54,47 @@ const API_ORIGIN = (() => {
   }
 })();
 const LARGE_FILE_UPLOAD_TIMEOUT_MS = 12 * 60 * 60 * 1000;
+const SESSION_EXPIRED_ERROR_CODES = new Set(["TOKEN_EXPIRED", "INVALID_TOKEN"]);
+const SESSION_AUTH_MESSAGES = new Set([
+  "Authentication required",
+  "Authentication failed",
+  "User not found",
+]);
+const PUBLIC_AUTH_PATHS = new Set([
+  "/auth/login",
+  "/auth/register",
+  "/auth/verify-qq",
+  "/auth/request-password-reset",
+  "/auth/confirm-password-reset",
+]);
+
+function getApiRequestPath(url?: string) {
+  if (!url) return "";
+  try {
+    const pathname = new URL(url, API_BASE_URL).pathname;
+    return pathname.startsWith("/api/v1")
+      ? pathname.slice("/api/v1".length)
+      : pathname;
+  } catch {
+    return url;
+  }
+}
+
+function shouldForceLogoutOnUnauthorized(error: AxiosError) {
+  if (error.response?.status !== 401) return false;
+
+  const requestPath = getApiRequestPath(error.config?.url);
+  if (PUBLIC_AUTH_PATHS.has(requestPath)) return false;
+
+  const responseError = (error.response?.data as AnyRecord | undefined)?.error as AnyRecord | undefined;
+  const errorCode = responseError?.code;
+  const message = responseError?.message;
+
+  return (
+    SESSION_EXPIRED_ERROR_CODES.has(String(errorCode)) ||
+    SESSION_AUTH_MESSAGES.has(String(message))
+  );
+}
 
 // Create axios instance
 export const api: AxiosInstance = axios.create({
@@ -89,7 +130,7 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     const errorCode = (error.response?.data as AnyRecord | undefined)?.error?.code;
-    if (error.response?.status === 401) {
+    if (shouldForceLogoutOnUnauthorized(error)) {
       useAuthStore.getState().logout();
       toast.error('登录已过期，请重新登录');
       window.location.href = '/login';
@@ -1012,6 +1053,14 @@ export function getErrorMessage(error: unknown): string {
       if (message.includes('QQ')) return 'QQ号已被其他账号使用，请检查后重新填写';
       if (message.includes('Email')) return '邮箱已被注册，请换一个邮箱';
       return '账号信息已存在，请检查用户名、QQ号或邮箱是否重复';
+    }
+
+    if (code === 'UNAUTHORIZED' && message === 'Invalid credentials') {
+      return '用户名或密码错误';
+    }
+
+    if (code === 'UNAUTHORIZED' && message === 'Current password is incorrect') {
+      return '当前密码不正确';
     }
 
     if (code === 'VALIDATION_ERROR') {
