@@ -238,10 +238,23 @@ function stringifyPolicyList(policy: Record<string, unknown>, ...keys: string[])
   return null;
 }
 
+async function assertCanCreateProject(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+
+  if (!user || !["super_admin", "group_admin", "supervisor"].includes(user.role)) {
+    throw new AppError("Only supervisors can create projects", "FORBIDDEN", 403);
+  }
+}
+
 export async function createProject(
   ownerId: string,
   data: CreateProjectInput
 ) {
+  await assertCanCreateProject(ownerId);
+
   const project = await prisma.project.create({
     data: {
       name: data.name,
@@ -298,6 +311,8 @@ export async function createProjectFromTemplate(
   ownerId: string,
   data: CreateProjectFromTemplateInput
 ) {
+  await assertCanCreateProject(ownerId);
+
   const template = await prisma.projectTemplate.findUnique({
     where: { id: data.template_id },
   });

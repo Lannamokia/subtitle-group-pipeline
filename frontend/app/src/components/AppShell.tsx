@@ -70,7 +70,7 @@ const adminNavItems: NavItem[] = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, isAdmin } = useAuthStore();
+  const { user, logout, isAdmin, isSupervisor } = useAuthStore();
   const branding = useBrandingStore((state) => state.branding);
   const logoUrl = getBrandLogoUrl(branding);
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
@@ -99,7 +99,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     ...memberNavItems,
     ...adminNavItems.filter((item) => {
       if (item.adminOnly) return isAdmin();
-      if (item.supervisorPlus) return useAuthStore.getState().isSupervisor();
+      if (item.supervisorPlus) return isSupervisor();
       return true;
     }),
   ];
@@ -258,24 +258,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </kbd>
             </Button>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" className="h-8 px-3">
-                  <Plus className="w-4 h-4 mr-1" />
-                  新建
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => navigate("/projects/new")}>
-                  <FolderKanban className="w-4 h-4 mr-2" />
-                  新建项目
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate("/templates")}>
-                  <Layers className="w-4 h-4 mr-2" />
-                  从模板创建
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {isSupervisor() && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" className="h-8 px-3">
+                    <Plus className="w-4 h-4 mr-1" />
+                    新建
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => navigate("/projects/new")}>
+                    <FolderKanban className="w-4 h-4 mr-2" />
+                    新建项目
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/templates")}>
+                    <Layers className="w-4 h-4 mr-2" />
+                    从模板创建
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
 
             <Tooltip>
               <TooltipTrigger asChild>

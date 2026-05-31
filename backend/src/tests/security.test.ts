@@ -177,7 +177,7 @@ describe("Security Tests", () => {
     });
 
     it("should handle XSS in project descriptions", async () => {
-      const { user, token } = await createTestUser();
+      const { user, token } = await createTestUser({ role: "supervisor" });
 
       const res = await post(
         app,

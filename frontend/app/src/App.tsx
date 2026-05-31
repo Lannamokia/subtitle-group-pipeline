@@ -53,7 +53,6 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectListPage />} />
-        <Route path="/projects/new" element={<ProjectCreatePage />} />
         <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
         <Route path="/projects/:projectId/dedup" element={<DedupPage />} />
         <Route path="/projects/:projectId/wiki" element={<WikiPage />} />
@@ -67,6 +66,7 @@ export default function App() {
         <Route path="/admin/settings" element={<SystemSettingsPage />} />
 
         <Route element={<SupervisorRoute />}>
+          <Route path="/projects/new" element={<ProjectCreatePage />} />
           <Route path="/workload" element={<WorkloadPage />} />
           <Route path="/templates" element={<Navigate to="/admin/settings?section=templates" replace />} />
         </Route>

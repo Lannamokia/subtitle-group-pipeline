@@ -24,6 +24,7 @@ type ProjectStatus = "all" | "recruiting" | "active" | "completed" | "archived";
 export function ProjectListPage() {
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.user);
+  const canCreateProject = useAuthStore((s) => s.isSupervisor());
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus>("all");
   const [scope, setScope] = useState<"mine" | "all">("mine");
@@ -57,16 +58,18 @@ export function ProjectListPage() {
           <h1 className="text-display text-gray-800">任务广场</h1>
           <p className="text-sm text-gray-500 mt-1">共 {filteredProjects.length} 个项目</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={() => navigate("/templates")}>
-            <Layers className="w-4 h-4 mr-1.5" />
-            从模板创建
-          </Button>
-          <Button onClick={() => navigate("/projects/new")}>
-            <FolderKanban className="w-4 h-4 mr-1.5" />
-            新建项目
-          </Button>
-        </div>
+        {canCreateProject && (
+          <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={() => navigate("/templates")}>
+              <Layers className="w-4 h-4 mr-1.5" />
+              从模板创建
+            </Button>
+            <Button onClick={() => navigate("/projects/new")}>
+              <FolderKanban className="w-4 h-4 mr-1.5" />
+              新建项目
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -116,7 +119,7 @@ export function ProjectListPage() {
           ))}
         </div>
       ) : (
-        <EmptyProjectState onCreate={() => navigate("/projects/new")} />
+        <EmptyProjectState canCreate={canCreateProject} onCreate={() => navigate("/projects/new")} />
       )}
     </div>
   );
@@ -228,7 +231,7 @@ function FilterTab({
   );
 }
 
-function EmptyProjectState({ onCreate }: { onCreate: () => void }) {
+function EmptyProjectState({ canCreate, onCreate }: { canCreate: boolean; onCreate: () => void }) {
   return (
     <div className="flex flex-col items-center py-16 text-center">
       <div className="w-16 h-16 rounded-full bg-gray-50 flex items-center justify-center mb-4">
@@ -236,9 +239,11 @@ function EmptyProjectState({ onCreate }: { onCreate: () => void }) {
       </div>
       <p className="text-sm text-gray-500">暂无项目</p>
       <p className="text-xs text-gray-400 mt-1">有开放认领任务的项目会显示在任务广场</p>
-      <Button className="mt-4" onClick={onCreate}>
-        创建项目
-      </Button>
+      {canCreate && (
+        <Button className="mt-4" onClick={onCreate}>
+          创建项目
+        </Button>
+      )}
     </div>
   );
 }

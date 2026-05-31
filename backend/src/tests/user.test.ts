@@ -666,7 +666,7 @@ describe("User Profile & Storage Tests", () => {
 
   describe("Project Creation with Storage Backend Binding", () => {
     it("should create project with storage backend binding", async () => {
-      const { user, token } = await createTestUser();
+      const { user, token } = await createTestUser({ role: "supervisor" });
       const backend = await createTestStorageBackend();
 
       const res = await post(

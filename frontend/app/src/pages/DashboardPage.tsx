@@ -21,6 +21,7 @@ import {
 export function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const canCreateProject = useAuthStore((s) => s.isSupervisor());
   const branding = useBrandingStore((state) => state.branding);
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem("onboarding-dismissed");
@@ -87,16 +88,18 @@ export function DashboardPage() {
           </h1>
           <p className="text-sm text-gray-500 mt-1">{formatFullDate(new Date().toISOString())}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button onClick={() => navigate("/projects/new")}>
-            <Plus className="w-4 h-4 mr-1.5" />
-            新建项目
-          </Button>
-          <Button variant="outline" onClick={() => navigate("/templates")}>
-            <Layers className="w-4 h-4 mr-1.5" />
-            从模板创建
-          </Button>
-        </div>
+        {canCreateProject && (
+          <div className="flex items-center gap-3">
+            <Button onClick={() => navigate("/projects/new")}>
+              <Plus className="w-4 h-4 mr-1.5" />
+              新建项目
+            </Button>
+            <Button variant="outline" onClick={() => navigate("/templates")}>
+              <Layers className="w-4 h-4 mr-1.5" />
+              从模板创建
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Global announcement banner */}

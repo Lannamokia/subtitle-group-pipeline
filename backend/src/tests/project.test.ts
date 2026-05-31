@@ -109,8 +109,37 @@ describe("Project & Workflow Tests", () => {
   });
 
   describe("Template Instantiation", () => {
+    it("should prevent regular members from creating projects", async () => {
+      const { token } = await createTestUser({ role: "member" });
+      const template = await createTestTemplate();
+      const backend = await createTestStorageBackend();
+
+      const directRes = await post(
+        app,
+        "/api/v1/projects",
+        { name: "Member Project", qq_group_id: "123456789" },
+        token
+      );
+      const templatedRes = await post(
+        app,
+        "/api/v1/projects/from-template",
+        {
+          name: "Member Template Project",
+          template_id: template.id,
+          storage_backend_id: backend.id,
+          qq_group_id: "123456789",
+          season_count: 1,
+          units_per_season: 1,
+        },
+        token
+      );
+
+      expectError(directRes, 403, "FORBIDDEN");
+      expectError(templatedRes, 403, "FORBIDDEN");
+    });
+
     it("should inherit delivery checklist from template", async () => {
-      const { user, token } = await createTestUser();
+      const { user, token } = await createTestUser({ role: "supervisor" });
       const checklist = [
         { item: "Source video acquired", required: true },
         { item: "Timing completed", required: true },
@@ -150,7 +179,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should require a project QQ group when creating from a template", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate();
       const backend = await createTestStorageBackend();
 
@@ -171,7 +200,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should increase project units without creating default tasks", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate({
         roles: [
           { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
@@ -220,7 +249,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should reduce project units without requiring default tasks", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate();
       const backend = await createTestStorageBackend();
 
@@ -263,7 +292,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should reduce project units by deleting selected episodes instead of only the tail", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate();
       const backend = await createTestStorageBackend();
 
@@ -306,7 +335,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should reject reducing episode count when removed episodes contain active work", async () => {
-      const { user, token } = await createTestUser();
+      const { user, token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate();
       const backend = await createTestStorageBackend();
 
@@ -361,7 +390,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should force delete selected non-empty episodes after explicit confirmation", async () => {
-      const { user, token } = await createTestUser();
+      const { user, token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate();
       const backend = await createTestStorageBackend();
 
@@ -424,7 +453,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should inherit product config from template", async () => {
-      const { user, token } = await createTestUser();
+      const { user, token } = await createTestUser({ role: "supervisor" });
       const productConfig = {
         resolutions: ["1080p", "720p"],
         codecs: ["h264", "hevc"],
@@ -461,7 +490,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should require an active storage backend when creating from a template", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate();
 
       const missingRes = await post(
@@ -495,7 +524,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should snapshot template defaults so later template edits do not affect the project", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const backend = await createTestStorageBackend();
       const template = await createTestTemplate({
         upload_policy: {
@@ -550,7 +579,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should normalize empty template upload policy snapshots to default role rules", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const backend = await createTestStorageBackend();
       const template = await createTestTemplate({
         upload_policy: { allowedTypes: {} },
@@ -584,7 +613,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should snapshot template roles without creating default tasks", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate({
         roles: [
           { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
@@ -623,7 +652,7 @@ describe("Project & Workflow Tests", () => {
     });
 
     it("should not create task dependencies before supervisors create tasks", async () => {
-      const { token } = await createTestUser();
+      const { token } = await createTestUser({ role: "supervisor" });
       const template = await createTestTemplate({
         roles: [
           { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
