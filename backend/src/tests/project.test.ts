@@ -855,7 +855,8 @@ describe("Project & Workflow Tests", () => {
         project_id: project.id,
         unit_id: unit.id,
         role: "translation",
-        status: "claimable",
+        status: "assigned",
+        assignee_id: t2.id,
         creator_id: owner.id,
       });
 
@@ -866,6 +867,13 @@ describe("Project & Workflow Tests", () => {
         t1Token
       );
       expectSuccess(claimRes, 201);
+
+      const claimedTaskOne = await prisma.task.findUnique({ where: { id: taskOne.id } });
+      const unchangedTaskTwo = await prisma.task.findUnique({ where: { id: taskTwo.id } });
+      expect(claimedTaskOne!.status).toBe("assigned");
+      expect(claimedTaskOne!.assignee_id).toBe(t1.id);
+      expect(unchangedTaskTwo!.status).toBe("assigned");
+      expect(unchangedTaskTwo!.assignee_id).toBe(t2.id);
 
       const taskTwoDetail = await get(app, `/api/v1/tasks/${taskTwo.id}`, t2Token);
       expectSuccess(taskTwoDetail, 200);
@@ -881,6 +889,21 @@ describe("Project & Workflow Tests", () => {
         t2Token
       );
       expectError(overlapRes, 409, "CONFLICT");
+
+      const abandonRes = await post(
+        app,
+        `/api/v1/tasks/${taskOne.id}/abandon-segment/${claimRes.body.data.id}`,
+        {},
+        t1Token
+      );
+      expectSuccess(abandonRes, 200);
+
+      const abandonedTaskOne = await prisma.task.findUnique({ where: { id: taskOne.id } });
+      const stillUnchangedTaskTwo = await prisma.task.findUnique({ where: { id: taskTwo.id } });
+      expect(abandonedTaskOne!.status).toBe("claimable");
+      expect(abandonedTaskOne!.assignee_id).toBeNull();
+      expect(stillUnchangedTaskTwo!.status).toBe("assigned");
+      expect(stillUnchangedTaskTwo!.assignee_id).toBe(t2.id);
     });
 
     it("should enforce per-user maximum claimed translation duration", async () => {

@@ -145,6 +145,13 @@ async function activateNextTranslationClaim(task: {
           nickname: true,
         },
       },
+      task: {
+        select: {
+          id: true,
+          project_id: true,
+          title: true,
+        },
+      },
     },
   });
 
@@ -166,8 +173,8 @@ async function activateNextTranslationClaim(task: {
     },
   });
 
-  await prisma.task.updateMany({
-    where: translationClaimScope(task),
+  await prisma.task.update({
+    where: { id: next.task_id },
     data: {
       status: "assigned",
       assignee_id: next.user_id,
@@ -178,9 +185,9 @@ async function activateNextTranslationClaim(task: {
   });
 
   await notificationService.createNotification(next.user_id, "task_assigned", {
-    projectId: task.project_id,
-    taskId: task.id,
-    taskName: task.title,
+    projectId: next.task.project_id,
+    taskId: next.task_id,
+    taskName: next.task.title,
     reason: "上一段翻译已通过，请下载最新通过版本继续下一段翻译",
   });
 
@@ -2628,15 +2635,10 @@ export async function abandonTranslationSegment(
 
   if (!next) {
     await prisma.task.updateMany({
-      where: claim.unit_id
-        ? {
-            project_id: claim.task.project_id,
-            unit_id: claim.unit_id,
-            role: "translation",
-          }
-        : {
-            id: claim.task_id,
-          },
+      where: {
+        id: claim.task_id,
+        assignee_id: userId,
+      },
       data: { status: "claimable", assignee_id: null, started_at: null, submitted_at: null },
     });
   }
