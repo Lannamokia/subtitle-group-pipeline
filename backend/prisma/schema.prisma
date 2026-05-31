@@ -466,6 +466,7 @@ model Task {
   title           String
   description     String?
   role            TaskRole
+  translation_order Int?
   status          TaskStatus @default(pending_publish)
   assignee_id     String?
   creator_id      String
@@ -498,6 +499,7 @@ model Task {
   @@index([status])
   @@index([role])
   @@index([due_date])
+  @@index([project_id, unit_id, role, translation_order])
 }
 
 model TaskDependency {

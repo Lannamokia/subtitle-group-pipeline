@@ -107,36 +107,111 @@ function translationClaimScope(task: { id: string; project_id: string; unit_id: 
     : { id: task.id };
 }
 
+function normalizeTranslationOrder(value: unknown): number | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  return undefined;
+}
+
+function translationOrderFromTask(task: { translation_order?: number | null; created_at?: Date | null }) {
+  return task.translation_order ?? Number.MAX_SAFE_INTEGER;
+}
+
+function compareTranslationClaims<
+  T extends {
+    segment_start: number;
+    claimed_at: Date;
+    task?: { translation_order?: number | null; created_at?: Date | null } | null;
+  }
+>(a: T, b: T): number {
+  const orderDelta = translationOrderFromTask(a.task || {}) - translationOrderFromTask(b.task || {});
+  if (orderDelta !== 0) return orderDelta;
+  const createdDelta = (a.task?.created_at?.getTime() ?? 0) - (b.task?.created_at?.getTime() ?? 0);
+  if (createdDelta !== 0) return createdDelta;
+  const segmentDelta = a.segment_start - b.segment_start;
+  if (segmentDelta !== 0) return segmentDelta;
+  return a.claimed_at.getTime() - b.claimed_at.getTime();
+}
+
+async function resolveTranslationOrder(
+  projectId: string,
+  unitId: string | null | undefined,
+  role: TaskRole,
+  requestedOrder: number | null | undefined,
+  excludeTaskId?: string
+) {
+  if (role !== TaskRole.translation) {
+    return null;
+  }
+
+  const where = {
+    project_id: projectId,
+    unit_id: unitId ?? null,
+    role: TaskRole.translation,
+    ...(excludeTaskId ? { id: { not: excludeTaskId } } : {}),
+  };
+
+  if (requestedOrder !== undefined && requestedOrder !== null) {
+    const duplicate = await prisma.task.findFirst({
+      where: {
+        ...where,
+        translation_order: requestedOrder,
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new AppError("Translation order is already used in this episode", "CONFLICT", 409);
+    }
+    return requestedOrder;
+  }
+
+  const max = await prisma.task.aggregate({
+    where,
+    _max: { translation_order: true },
+  });
+  if (max._max.translation_order) {
+    return max._max.translation_order + 1;
+  }
+
+  const count = await prisma.task.count({ where });
+  return count + 1;
+}
+
 async function activateNextTranslationClaim(task: {
   id: string;
   project_id: string;
   unit_id: string | null;
   title: string;
 }) {
-  const activeOrSubmitted = await prisma.translationClaim.findFirst({
+  const activeOrSubmittedClaims = await prisma.translationClaim.findMany({
     where: {
       task: translationClaimScope(task),
       status: { in: ["active", "submitted"] },
     },
-    orderBy: [
-      { segment_start: "asc" },
-      { claimed_at: "asc" },
-    ],
+    include: {
+      task: {
+        select: {
+          translation_order: true,
+          created_at: true,
+        },
+      },
+    },
   });
+  const activeOrSubmitted = activeOrSubmittedClaims.sort(compareTranslationClaims)[0];
 
   if (activeOrSubmitted) {
     return activeOrSubmitted;
   }
 
-  const next = await prisma.translationClaim.findFirst({
+  const pendingClaims = await prisma.translationClaim.findMany({
     where: {
       task: translationClaimScope(task),
       status: "pending",
     },
-    orderBy: [
-      { segment_start: "asc" },
-      { claimed_at: "asc" },
-    ],
     include: {
       user: {
         select: {
@@ -150,10 +225,13 @@ async function activateNextTranslationClaim(task: {
           id: true,
           project_id: true,
           title: true,
+          translation_order: true,
+          created_at: true,
         },
       },
     },
   });
+  const next = pendingClaims.sort(compareTranslationClaims)[0];
 
   if (!next) {
     return null;
@@ -726,16 +804,21 @@ async function getSubmittedTranslationClaimForApproval(task: {
   assignee_id: string | null;
   status: TaskStatus;
 }) {
-  const submittedClaim = await prisma.translationClaim.findFirst({
+  const submittedClaims = await prisma.translationClaim.findMany({
     where: {
       task: translationClaimScope(task),
       status: "submitted",
     },
-    orderBy: [
-      { segment_start: "asc" },
-      { submitted_at: "asc" },
-    ],
+    include: {
+      task: {
+        select: {
+          translation_order: true,
+          created_at: true,
+        },
+      },
+    },
   });
+  const submittedClaim = submittedClaims.sort(compareTranslationClaims)[0];
 
   if (submittedClaim) {
     await ensureTranslationSubmissionForClaim(task, submittedClaim);
@@ -746,17 +829,22 @@ async function getSubmittedTranslationClaimForApproval(task: {
     return null;
   }
 
-  const activeClaim = await prisma.translationClaim.findFirst({
+  const activeClaims = await prisma.translationClaim.findMany({
     where: {
       task: translationClaimScope(task),
       status: "active",
       ...(task.assignee_id ? { user_id: task.assignee_id } : {}),
     },
-    orderBy: [
-      { segment_start: "asc" },
-      { claimed_at: "asc" },
-    ],
+    include: {
+      task: {
+        select: {
+          translation_order: true,
+          created_at: true,
+        },
+      },
+    },
   });
+  const activeClaim = activeClaims.sort(compareTranslationClaims)[0];
 
   if (!activeClaim) {
     return null;
@@ -963,6 +1051,16 @@ export async function createTask(creatorId: string, data: CreateTaskInput) {
     throw new AppError("Cannot create tasks in archived project", "BAD_REQUEST", 400);
   }
 
+  const requestedTranslationOrder = normalizeTranslationOrder(
+    data.translation_order ?? data.translationOrder
+  );
+  const translationOrder = await resolveTranslationOrder(
+    data.project_id,
+    data.unit_id ?? null,
+    data.role,
+    requestedTranslationOrder
+  );
+
   const task = await prisma.task.create({
     data: {
       project_id: data.project_id,
@@ -970,6 +1068,7 @@ export async function createTask(creatorId: string, data: CreateTaskInput) {
       title: data.title,
       description: data.description,
       role: data.role,
+      translation_order: translationOrder,
       assignee_id: data.assignee_id,
       creator_id: creatorId,
       due_date: data.due_date ? new Date(data.due_date) : null,
@@ -1001,7 +1100,7 @@ export async function createTask(creatorId: string, data: CreateTaskInput) {
     title: "Task created",
     description: `Task "${task.title}" was created`,
     actor_id: creatorId,
-    metadata: { task_id: task.id, role: task.role },
+    metadata: { task_id: task.id, role: task.role, translation_order: task.translation_order },
   });
 
   await auditService.log({
@@ -1125,6 +1224,14 @@ export async function getTaskById(taskId: string) {
               nickname: true,
             },
           },
+          task: {
+            select: {
+              id: true,
+              title: true,
+              translation_order: true,
+              created_at: true,
+            },
+          },
         },
       },
       dependencies: {
@@ -1174,7 +1281,7 @@ export async function getTaskById(taskId: string) {
     const unitClaims = await prisma.translationClaim.findMany({
       where: {
         unit_id: task.unit_id,
-        status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
+        status: { in: ["pending", "active", "submitted", "approved", "rejected"] },
       },
       include: {
         user: {
@@ -1184,12 +1291,19 @@ export async function getTaskById(taskId: string) {
             nickname: true,
           },
         },
+        task: {
+          select: {
+            id: true,
+            title: true,
+            translation_order: true,
+            created_at: true,
+          },
+        },
       },
-      orderBy: { segment_start: "asc" },
     });
     return {
       ...task,
-      claims: unitClaims,
+      claims: unitClaims.sort(compareTranslationClaims),
     };
   }
 
@@ -1225,6 +1339,28 @@ export async function updateTask(
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined) updateData.description = data.description;
   if (data.role !== undefined) updateData.role = data.role;
+  const nextRole = data.role ?? existing.role;
+  const requestedTranslationOrder = normalizeTranslationOrder(
+    data.translation_order ?? data.translationOrder
+  );
+  if (nextRole === TaskRole.translation) {
+    const shouldResolveOrder =
+      data.role !== undefined ||
+      data.translation_order !== undefined ||
+      data.translationOrder !== undefined ||
+      existing.translation_order === null;
+    if (shouldResolveOrder) {
+      updateData.translation_order = await resolveTranslationOrder(
+        existing.project_id,
+        existing.unit_id,
+        nextRole,
+        requestedTranslationOrder ?? existing.translation_order ?? undefined,
+        taskId
+      );
+    }
+  } else if (data.role !== undefined && existing.role === TaskRole.translation) {
+    updateData.translation_order = null;
+  }
   if (data.assignee_id !== undefined) updateData.assignee_id = data.assignee_id;
   if (data.due_date !== undefined) {
     updateData.due_date = data.due_date ? new Date(data.due_date) : null;
@@ -2213,16 +2349,21 @@ export async function rejectTask(
   });
 
   if (task.role === TaskRole.translation) {
-    const submittedClaim = await prisma.translationClaim.findFirst({
+    const submittedClaims = await prisma.translationClaim.findMany({
       where: {
         task: translationClaimScope(task),
         status: "submitted",
       },
-      orderBy: [
-        { segment_start: "asc" },
-        { submitted_at: "asc" },
-      ],
+      include: {
+        task: {
+          select: {
+            translation_order: true,
+            created_at: true,
+          },
+        },
+      },
     });
+    const submittedClaim = submittedClaims.sort(compareTranslationClaims)[0];
 
     if (submittedClaim) {
       await prisma.translationClaim.update({
@@ -2442,6 +2583,14 @@ export async function claimTranslationSegment(
   if (!canClaim) {
     throw new AppError(
       "You must be a project translator to claim translation segments",
+      "FORBIDDEN",
+      403
+    );
+  }
+
+  if (membership.role !== "supervisor" && task.assignee_id !== userId) {
+    throw new AppError(
+      "Only the assigned member can claim segments in this translation task",
       "FORBIDDEN",
       403
     );

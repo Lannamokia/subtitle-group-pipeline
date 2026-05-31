@@ -395,6 +395,44 @@ function sortTasksByCreatedAtDesc(a: Task, b: Task) {
   return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
 }
 
+function sortTasksForDisplay(a: Task, b: Task) {
+  if (a.role === "translation" && b.role === "translation") {
+    const aOrder = a.translationOrder ?? Number.MAX_SAFE_INTEGER;
+    const bOrder = b.translationOrder ?? Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+  }
+  return sortTasksByCreatedAtDesc(a, b);
+}
+
+function getNextTranslationOrder(tasks: Task[], unitId: string | null) {
+  const orders = tasks
+    .filter((task) => task.role === "translation" && (task.unitId ?? null) === unitId)
+    .map((task) => task.translationOrder)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return orders.length > 0 ? Math.max(...orders) + 1 : 1;
+}
+
+function getClaimStatusLabel(status: TranslationClaim["status"]) {
+  const labels: Record<TranslationClaim["status"], string> = {
+    pending: "排队中",
+    active: "进行中",
+    submitted: "待审核",
+    approved: "已通过",
+    rejected: "已驳回",
+    abandoned: "已释放",
+    expired: "已过期",
+  };
+  return labels[status] || status;
+}
+
+function getClaimStatusClass(status: TranslationClaim["status"]) {
+  if (status === "active") return "border-blue-200 bg-blue-50 text-blue-700";
+  if (status === "submitted") return "border-yellow-200 bg-yellow-50 text-yellow-700";
+  if (status === "approved") return "border-green-200 bg-green-50 text-green-700";
+  if (status === "rejected") return "border-red-200 bg-red-50 text-red-700";
+  return "border-gray-200 bg-gray-50 text-gray-600";
+}
+
 function findPipelinePredecessor(tasks: Task[], unitId: string | null, role: TaskRole) {
   const roleIndex = TASK_PIPELINE_ROLES.indexOf(role as Exclude<TaskRole, "supervisor">);
   if (roleIndex <= 0) return null;
@@ -568,6 +606,7 @@ function TasksTab({
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskUnitId, setNewTaskUnitId] = useState(UNASSIGNED_UNIT_SELECT_VALUE);
   const [newTaskRole, setNewTaskRole] = useState<TaskRole>("translation");
+  const [newTaskTranslationOrder, setNewTaskTranslationOrder] = useState<number | "">(1);
   const [newTaskTemplateKey, setNewTaskTemplateKey] = useState(TASK_TEMPLATE_CUSTOM_VALUE);
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState("");
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
@@ -624,19 +663,23 @@ function TasksTab({
     "frozen",
   ];
   const selectedTaskAssigneeId = selectedTask?.assigneeId ?? selectedTask?.assignee?.id;
+  const canClaimSelectedTranslationSegment = Boolean(
+    selectedTask?.role === "translation" &&
+      (canManageTasks || selectedTaskAssigneeId === currentUser?.id)
+  );
   const selectedTaskUnit = selectedTask?.unitId
     ? units.find((unit) => unit.id === selectedTask.unitId) ?? null
     : null;
   const selectedTaskClaims = selectedTask?.claims ?? [];
-  const activeSelectedTaskClaims = selectedTaskClaims.filter((claim) =>
-    ["pending", "active"].includes(claim.status)
+  const coverageSelectedTaskClaims = selectedTaskClaims.filter((claim) =>
+    ["pending", "active", "submitted", "approved"].includes(claim.status)
   );
-  const activeSelectedTaskClaimSeconds = activeSelectedTaskClaims.reduce(
+  const selectedTaskClaimSeconds = coverageSelectedTaskClaims.reduce(
     (sum, claim) => sum + Math.max(0, claim.segmentEnd - claim.segmentStart),
     0
   );
   const selectedTaskClaimCoverage = selectedTaskUnit?.episodeLength
-    ? Math.min(100, Math.round((activeSelectedTaskClaimSeconds / selectedTaskUnit.episodeLength) * 100))
+    ? Math.min(100, Math.round((selectedTaskClaimSeconds / selectedTaskUnit.episodeLength) * 100))
     : null;
   const canReturnSelectedTask = Boolean(
     selectedTask &&
@@ -654,7 +697,7 @@ function TasksTab({
   const workflowSummaries = TASK_WORKFLOW_STEPS.map((step) => {
     const roleTasks = filteredTasks
       .filter((task) => task.role === step.role)
-      .sort(sortTasksByCreatedAtDesc);
+      .sort(sortTasksForDisplay);
     const activeCount = roleTasks.filter(isActiveTask).length;
     const completedCount = roleTasks.filter(isCompletedTask).length;
     const isComplete = roleTasks.length > 0 && roleTasks.every(isCompletedTask);
@@ -837,20 +880,25 @@ function TasksTab({
       toast.error("请选择任务归属分集");
       return;
     }
+    if (newTaskRole === "translation" && (newTaskTranslationOrder === "" || Number(newTaskTranslationOrder) <= 0)) {
+      toast.error("请填写翻译任务排序 ID");
+      return;
+    }
 
     setCreating(true);
     try {
+      const taskUnitId = newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId;
       const createdTask = await taskApi.createTask({
         project_id: project.id,
-        unit_id: newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId,
+        unit_id: taskUnitId,
         title: newTaskTitle.trim(),
         role: newTaskRole,
+        translationOrder: newTaskRole === "translation" ? Number(newTaskTranslationOrder) : null,
         assignee_id: newTaskAssigneeId || null,
         due_date: newTaskDueDate ? new Date(newTaskDueDate).toISOString() : null,
         description: newTaskDescription.trim() || null,
       } as Partial<Task> & Record<string, unknown>);
-      const dependencyUnitId = newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId;
-      const predecessor = findPipelinePredecessor(tasks, dependencyUnitId, newTaskRole);
+      const predecessor = findPipelinePredecessor(tasks, taskUnitId, newTaskRole);
       if (predecessor && predecessor.id !== createdTask.id) {
         await taskApi.createDependency(createdTask.id, predecessor.id);
       }
@@ -859,6 +907,7 @@ function TasksTab({
       setNewTaskTitle("");
       setNewTaskUnitId(selectedUnitId ?? units[0]?.id ?? UNASSIGNED_UNIT_SELECT_VALUE);
       setNewTaskRole("translation");
+      setNewTaskTranslationOrder(getNextTranslationOrder(tasks, selectedUnitId ?? units[0]?.id ?? null));
       setNewTaskTemplateKey(TASK_TEMPLATE_CUSTOM_VALUE);
       setNewTaskAssigneeId("");
       setNewTaskDueDate("");
@@ -882,15 +931,21 @@ function TasksTab({
     if (!step || !template) return;
 
     setNewTaskRole(step.role);
+    if (step.role === "translation") {
+      const taskUnitId = newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId;
+      setNewTaskTranslationOrder(getNextTranslationOrder(tasks, taskUnitId));
+    }
     setNewTaskTitle(template.title);
     setNewTaskDescription(template.description);
   };
 
   const openCreateTaskDialog = () => {
-    setNewTaskUnitId(selectedUnitId ?? units[0]?.id ?? UNASSIGNED_UNIT_SELECT_VALUE);
+    const taskUnitId = selectedUnitId ?? units[0]?.id ?? UNASSIGNED_UNIT_SELECT_VALUE;
+    setNewTaskUnitId(taskUnitId);
     setNewTaskTitle("");
     setNewTaskDescription("");
     setNewTaskTemplateKey(TASK_TEMPLATE_CUSTOM_VALUE);
+    setNewTaskTranslationOrder(getNextTranslationOrder(tasks, taskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : taskUnitId));
     setNewTaskAssigneeId("");
     setNewTaskDueDate("");
     setCreateOpen(true);
@@ -986,7 +1041,15 @@ function TasksTab({
           {units.length > 0 && (
             <div className="space-y-2">
               <label className="text-sm font-medium">归属分集</label>
-              <Select value={newTaskUnitId} onValueChange={setNewTaskUnitId}>
+              <Select
+                value={newTaskUnitId}
+                onValueChange={(value) => {
+                  setNewTaskUnitId(value);
+                  if (newTaskRole === "translation") {
+                    setNewTaskTranslationOrder(getNextTranslationOrder(tasks, value === UNASSIGNED_UNIT_SELECT_VALUE ? null : value));
+                  }
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="选择任务归属分集" />
                 </SelectTrigger>
@@ -1006,8 +1069,13 @@ function TasksTab({
               <Select
                 value={newTaskRole}
                 onValueChange={(value) => {
-                  setNewTaskRole(value as TaskRole);
+                  const role = value as TaskRole;
+                  setNewTaskRole(role);
                   setNewTaskTemplateKey(TASK_TEMPLATE_CUSTOM_VALUE);
+                  if (role === "translation") {
+                    const taskUnitId = newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId;
+                    setNewTaskTranslationOrder(getNextTranslationOrder(tasks, taskUnitId));
+                  }
                 }}
               >
                 <SelectTrigger>
@@ -1044,6 +1112,23 @@ function TasksTab({
               </Select>
             </div>
           </div>
+          {newTaskRole === "translation" && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">翻译排序 ID</label>
+              <Input
+                type="number"
+                min={1}
+                value={newTaskTranslationOrder}
+                onChange={(event) =>
+                  setNewTaskTranslationOrder(event.target.value === "" ? "" : Number(event.target.value))
+                }
+                placeholder="例如 1、2、3，用于串行翻译顺序"
+              />
+              <p className="text-xs leading-5 text-gray-500">
+                同一分集内的翻译任务会按这个 ID 从小到大串行激活。
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <label className="text-sm font-medium">任务模板</label>
             <Select value={newTaskTemplateKey} onValueChange={applyTaskTemplate}>
@@ -1304,6 +1389,11 @@ function TasksTab({
                   <span className={cn("text-caption rounded border px-2 py-0.5", getRoleColor(selectedTask.role))}>
                     {getRoleLabel(selectedTask.role)}
                   </span>
+                  {selectedTask.role === "translation" && (
+                    <Badge variant="outline" className="text-[10px]">
+                      排序 ID {selectedTask.translationOrder ?? "未设置"}
+                    </Badge>
+                  )}
                 </div>
 
                 {selectedTask.description && (
@@ -1431,24 +1521,35 @@ function TasksTab({
                       </div>
                       <div className="rounded-md bg-white px-3 py-2">
                         <p className="font-medium text-gray-600">已认领</p>
-                        <p className="mt-1 text-gray-500">{formatDuration(activeSelectedTaskClaimSeconds)}</p>
+                        <p className="mt-1 text-gray-500">{formatDuration(selectedTaskClaimSeconds)}</p>
                       </div>
                       <div className="rounded-md bg-white px-3 py-2">
-                        <p className="font-medium text-gray-600">有效片段</p>
-                        <p className="mt-1 text-gray-500">{activeSelectedTaskClaims.length} 段</p>
+                        <p className="font-medium text-gray-600">整体认领</p>
+                        <p className="mt-1 text-gray-500">{selectedTaskClaims.length} 段</p>
                       </div>
                     </div>
-                    {activeSelectedTaskClaims.length > 0 ? (
+                    {selectedTaskClaims.length > 0 ? (
                       <div className="space-y-2">
-                        {activeSelectedTaskClaims.map((claim) => {
+                        {selectedTaskClaims.map((claim) => {
                           const isOwnClaim = claim.userId === currentUser?.id;
                           return (
                             <div key={claim.id} className="flex flex-col gap-2 rounded-md bg-white px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
                               <div className="min-w-0">
-                                <p className="font-medium text-gray-700">
-                                  {formatDuration(claim.segmentStart)} - {formatDuration(claim.segmentEnd)}
-                                </p>
+                                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                  <p className="font-medium text-gray-700">
+                                    {formatDuration(claim.segmentStart)} - {formatDuration(claim.segmentEnd)}
+                                  </p>
+                                  <Badge variant="outline" className={cn("text-[10px]", getClaimStatusClass(claim.status))}>
+                                    {getClaimStatusLabel(claim.status)}
+                                  </Badge>
+                                  {claim.translationOrder && (
+                                    <Badge variant="outline" className="bg-white text-[10px]">
+                                      排序 {claim.translationOrder}
+                                    </Badge>
+                                  )}
+                                </div>
                                 <p className="mt-0.5 truncate text-gray-500">
+                                  {claim.taskName ? `${claim.taskName} · ` : ""}
                                   {claim.user?.nickname || claim.user?.username || "未知成员"} · {formatDuration(claim.segmentEnd - claim.segmentStart)}
                                 </p>
                               </div>
@@ -1473,7 +1574,12 @@ function TasksTab({
                         还没有人认领时间段
                       </div>
                     )}
-                    {["claimable", "assigned", "in_progress", "submitted", "review_approved"].includes(selectedTask.status) && (
+                    {!canClaimSelectedTranslationSegment && (
+                      <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
+                        只有被分发到该翻译任务的成员可以在这里认领时间段。
+                      </div>
+                    )}
+                    {canClaimSelectedTranslationSegment && ["claimable", "assigned", "in_progress", "submitted", "review_approved"].includes(selectedTask.status) && (
                       <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                         <Input
                           type="number"

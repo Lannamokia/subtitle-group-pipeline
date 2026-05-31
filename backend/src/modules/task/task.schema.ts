@@ -7,6 +7,8 @@ export const createTaskSchema = z.object({
   title: z.string().min(1, "Task title is required").max(200),
   description: z.string().max(5000).optional().nullable(),
   role: z.nativeEnum(TaskRole),
+  translation_order: z.number().int().positive().optional().nullable(),
+  translationOrder: z.number().int().positive().optional().nullable(),
   assignee_id: z.string().uuid("Invalid user ID").optional().nullable(),
   due_date: z.string().datetime().optional().nullable(),
 });
@@ -15,6 +17,8 @@ export const updateTaskSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).optional().nullable(),
   role: z.nativeEnum(TaskRole).optional(),
+  translation_order: z.number().int().positive().optional().nullable(),
+  translationOrder: z.number().int().positive().optional().nullable(),
   assignee_id: z.string().uuid().optional().nullable(),
   due_date: z.string().datetime().optional().nullable(),
 });

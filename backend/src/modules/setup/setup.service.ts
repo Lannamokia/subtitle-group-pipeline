@@ -99,6 +99,7 @@ export async function upgradeConfiguredDatabaseSchema() {
   const provider = prismaProvider(inferred);
   await syncSchema(databaseUrl, provider);
   await upgradeLegacyUploadPolicyLimits(databaseUrl, provider);
+  await upgradeLegacyTranslationTaskOrder(databaseUrl, provider);
 
   return {
     skipped: false as const,
@@ -166,6 +167,80 @@ async function upgradeLegacyUploadPolicyLimits(
         where: { id: template.id },
         data: { upload_policy: upgraded },
       });
+    }
+  } finally {
+    await client.$disconnect();
+  }
+}
+
+async function upgradeLegacyTranslationTaskOrder(
+  databaseUrl: string,
+  provider: "sqlite" | "mysql" | "postgresql"
+) {
+  const client = new PrismaClient({
+    datasources: {
+      db: { url: databaseUrlForPrismaCli(databaseUrl, provider) },
+    },
+    log: process.env.NODE_ENV === "development" ? ["error"] : ["error"],
+  });
+
+  try {
+    await client.$connect();
+    const [orderedTasks, missingOrderTasks] = await Promise.all([
+      client.task.findMany({
+        where: {
+          role: "translation",
+          translation_order: { not: null },
+        },
+        select: {
+          project_id: true,
+          unit_id: true,
+          translation_order: true,
+        },
+      }),
+      client.task.findMany({
+        where: {
+          role: "translation",
+          translation_order: null,
+        },
+        select: {
+          id: true,
+          project_id: true,
+          unit_id: true,
+          created_at: true,
+        },
+        orderBy: [
+          { project_id: "asc" },
+          { unit_id: "asc" },
+          { created_at: "asc" },
+        ],
+      }),
+    ]);
+
+    if (missingOrderTasks.length === 0) {
+      return;
+    }
+
+    const groupKey = (task: { project_id: string; unit_id: string | null }) =>
+      `${task.project_id}:${task.unit_id || "__project__"}`;
+    const nextOrderByGroup = new Map<string, number>();
+
+    for (const task of orderedTasks) {
+      const key = groupKey(task);
+      nextOrderByGroup.set(
+        key,
+        Math.max(nextOrderByGroup.get(key) || 1, (task.translation_order || 0) + 1)
+      );
+    }
+
+    for (const task of missingOrderTasks) {
+      const key = groupKey(task);
+      const nextOrder = nextOrderByGroup.get(key) || 1;
+      await client.task.update({
+        where: { id: task.id },
+        data: { translation_order: nextOrder },
+      });
+      nextOrderByGroup.set(key, nextOrder + 1);
     }
   } finally {
     await client.$disconnect();

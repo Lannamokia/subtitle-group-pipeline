@@ -149,6 +149,7 @@ export interface Task {
   project?: Project;
   unitId?: string;
   role: TaskRole;
+  translationOrder?: number | null;
   status: TaskStatus;
   assigneeId?: string;
   assignee?: User;
@@ -174,6 +175,8 @@ export interface TranslationClaim {
   id: string;
   taskId: string;
   unitId?: string | null;
+  taskName?: string;
+  translationOrder?: number | null;
   userId: string;
   user?: User;
   segmentStart: number;

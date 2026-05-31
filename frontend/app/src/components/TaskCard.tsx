@@ -47,6 +47,11 @@ export function TaskCard({ task, onClick, draggable = false, showProject = false
           <span className={cn("text-caption px-1.5 py-0.5 rounded border", getRoleColor(task.role))}>
             {getRoleLabel(task.role)}
           </span>
+          {task.role === "translation" && (
+            <span className="rounded border border-purple-100 bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-700">
+              排序 {task.translationOrder ?? "未设"}
+            </span>
+          )}
           {task.fileCount ? (
             <span className="flex items-center gap-0.5 text-xs text-gray-400">
               <FileText className="w-3 h-3" />
