@@ -52,6 +52,7 @@ const API_ORIGIN = (() => {
     return '';
   }
 })();
+const LARGE_FILE_UPLOAD_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 
 // Create axios instance
 export const api: AxiosInstance = axios.create({
@@ -1481,6 +1482,7 @@ export const fileApi = {
     }
     return api.post<ApiResponse<unknown>>('/files', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
     }).then((response) => normalizeFile(response.data.data as AnyRecord));
   },
 
@@ -1491,6 +1493,7 @@ export const fileApi = {
     if (data?.tags?.length) formData.append('tags', JSON.stringify(data.tags));
     return api.post<ApiResponse<unknown>>(`/files/${fileId}/replace`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
     }).then((response) => normalizeFile(response.data.data as AnyRecord));
   },
 

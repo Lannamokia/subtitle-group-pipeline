@@ -6,6 +6,7 @@ import { upgradeConfiguredDatabaseSchema } from "./modules/setup/setup.service";
 import { setupState } from "./modules/setup/setup.state";
 
 const PORT = env.PORT;
+const LARGE_FILE_UPLOAD_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -46,6 +47,8 @@ async function startServer(): Promise<void> {
       console.log(`Environment: ${env.NODE_ENV}`);
       console.log(`API prefix: ${env.API_PREFIX}`);
     });
+    server.requestTimeout = LARGE_FILE_UPLOAD_TIMEOUT_MS;
+    server.setTimeout(LARGE_FILE_UPLOAD_TIMEOUT_MS);
 
     if (databaseReady) {
       registerAllJobs();
