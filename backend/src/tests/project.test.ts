@@ -830,6 +830,59 @@ describe("Project & Workflow Tests", () => {
       expectError(overlapRes, 409, "CONFLICT");
     });
 
+    it("should share claimed segments across translation tasks in the same unit", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: t1, token: t1Token } = await createTestUser();
+      const { user: t2, token: t2Token } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 1440 });
+
+      await prisma.projectMember.createMany({
+        data: [
+          { project_id: project.id, user_id: t1.id, role: "translation" },
+          { project_id: project.id, user_id: t2.id, role: "translation" },
+        ],
+      });
+
+      const taskOne = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+      const taskTwo = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      const claimRes = await post(
+        app,
+        `/api/v1/tasks/${taskOne.id}/claim-segment`,
+        { segment_start: 100, segment_end: 500 },
+        t1Token
+      );
+      expectSuccess(claimRes, 201);
+
+      const taskTwoDetail = await get(app, `/api/v1/tasks/${taskTwo.id}`, t2Token);
+      expectSuccess(taskTwoDetail, 200);
+      expect(taskTwoDetail.body.data.claims).toHaveLength(1);
+      expect(taskTwoDetail.body.data.claims[0].task_id).toBe(taskOne.id);
+      expect(taskTwoDetail.body.data.claims[0].segment_start).toBe(100);
+      expect(taskTwoDetail.body.data.claims[0].segment_end).toBe(500);
+
+      const overlapRes = await post(
+        app,
+        `/api/v1/tasks/${taskTwo.id}/claim-segment`,
+        { segment_start: 400, segment_end: 800 },
+        t2Token
+      );
+      expectError(overlapRes, 409, "CONFLICT");
+    });
+
     it("should enforce per-user maximum claimed translation duration", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
       const { user: translator, token: translatorToken } = await createTestUser();

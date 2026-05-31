@@ -827,6 +827,29 @@ export async function getTaskById(taskId: string) {
     throw new AppError("Task not found", "NOT_FOUND", 404);
   }
 
+  if (task.role === "translation" && task.unit_id) {
+    const unitClaims = await prisma.translationClaim.findMany({
+      where: {
+        unit_id: task.unit_id,
+        status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            nickname: true,
+          },
+        },
+      },
+      orderBy: { segment_start: "asc" },
+    });
+    return {
+      ...task,
+      claims: unitClaims,
+    };
+  }
+
   return task;
 }
 
@@ -1985,9 +2008,12 @@ export async function claimTranslationSegment(
     }
   }
 
+  const activeClaimScope = task.unit_id
+    ? { unit_id: task.unit_id }
+    : { task_id: taskId };
   const userActiveClaims = await prisma.translationClaim.findMany({
     where: {
-      task_id: taskId,
+      ...activeClaimScope,
       user_id: userId,
       status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
     },
@@ -2011,7 +2037,7 @@ export async function claimTranslationSegment(
 
   const overlapping = await prisma.translationClaim.findFirst({
     where: {
-      task_id: taskId,
+      ...activeClaimScope,
       status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
       AND: [
         { segment_start: { lt: data.segment_end } },
@@ -2044,7 +2070,7 @@ export async function claimTranslationSegment(
   if (task.unit?.episode_length) {
     const allClaims = await prisma.translationClaim.findMany({
       where: {
-        task_id: taskId,
+        ...activeClaimScope,
         status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
       },
       orderBy: { segment_start: "asc" },
@@ -2064,9 +2090,16 @@ export async function claimTranslationSegment(
     }
 
     if (covered >= task.unit.episode_length) {
-      // Lock the task - all segments claimed
-      await prisma.task.update({
-        where: { id: taskId },
+      // Lock translation claiming for this unit once all time ranges are covered.
+      await prisma.task.updateMany({
+        where: task.unit_id
+          ? {
+              project_id: task.project_id,
+              unit_id: task.unit_id,
+              role: "translation",
+              status: "claimable",
+            }
+          : { id: taskId },
         data: { status: "assigned" },
       });
     }
@@ -2089,6 +2122,15 @@ export async function abandonTranslationSegment(
 ) {
   const claim = await prisma.translationClaim.findUnique({
     where: { id: claimId },
+    include: {
+      task: {
+        select: {
+          project_id: true,
+          unit_id: true,
+          role: true,
+        },
+      },
+    },
   });
 
   if (!claim) {
@@ -2111,10 +2153,17 @@ export async function abandonTranslationSegment(
   });
 
   await prisma.task.updateMany({
-    where: {
-      id: claim.task_id,
-      status: "assigned",
-    },
+    where: claim.unit_id
+      ? {
+          project_id: claim.task.project_id,
+          unit_id: claim.unit_id,
+          role: "translation",
+          status: "assigned",
+        }
+      : {
+          id: claim.task_id,
+          status: "assigned",
+        },
     data: { status: "claimable" },
   });
 
