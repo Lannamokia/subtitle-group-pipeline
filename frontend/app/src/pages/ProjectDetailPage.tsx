@@ -146,6 +146,43 @@ const UNASSIGNED_SELECT_VALUE = "__unassigned__";
 const UNASSIGNED_UNIT_SELECT_VALUE = "__project__";
 const TASK_TEMPLATE_CUSTOM_VALUE = "__custom__";
 
+function createDefaultWikiBlock(pageId: string, pageTitle: string): WikiBlock {
+  if (pageId === "role-names") {
+    return {
+      id: `block-${Date.now()}`,
+      type: "table",
+      content: "",
+      data: {
+        pageId,
+        pageTitle,
+        headers: ["角色原名", "中文译名", "备注"],
+        rows: [["", "", ""]],
+      },
+    };
+  }
+
+  if (pageId === "term-glossary") {
+    return {
+      id: `block-${Date.now()}`,
+      type: "table",
+      content: "",
+      data: {
+        pageId,
+        pageTitle,
+        headers: ["原文", "译名", "分类", "备注"],
+        rows: [["", "", "", ""]],
+      },
+    };
+  }
+
+  return {
+    id: `block-${Date.now()}`,
+    type: "markdown",
+    content: pageId === "production-guide" ? "## 制作规范\n\n- " : "",
+    data: { pageId, pageTitle },
+  };
+}
+
 const FILE_TYPE_OPTIONS: { value: FileType | "all"; label: string }[] = [
   { value: "all", label: "全部" },
   { value: "video", label: "视频" },
@@ -321,7 +358,7 @@ export function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="wiki" className="mt-6">
-          <WikiTab wiki={wiki} projectId={projectId!} />
+          <WikiTab wiki={wiki} projectId={projectId!} onWikiChange={setWiki} />
         </TabsContent>
 
         <TabsContent value="members" className="mt-6">
@@ -3004,7 +3041,16 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
 
 /* ---------- Wiki Tab (Enhanced) ---------- */
 
-function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: string }) {
+function WikiTab({
+  wiki,
+  projectId,
+  onWikiChange,
+}: {
+  wiki: WikiDocument | null;
+  projectId: string;
+  onWikiChange: (wiki: WikiDocument) => void;
+}) {
+  const [currentWiki, setCurrentWiki] = useState<WikiDocument | null>(wiki);
   const [isEditing, setIsEditing] = useState(false);
   const [blocks, setBlocks] = useState<WikiBlock[]>(wiki?.blocks || []);
   const [title, setTitle] = useState(wiki?.title || "项目Wiki");
@@ -3013,6 +3059,7 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    setCurrentWiki(wiki);
     setBlocks(wiki?.blocks || []);
     setTitle(wiki?.title || "项目Wiki");
     setStatus(wiki?.status || "draft");
@@ -3031,17 +3078,26 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
   const activeBlocks = blocks.filter((block) => getBlockPageId(block) === activePageId);
 
   const handleAddBlock = (type: WikiBlock["type"]) => {
-    const newBlock: WikiBlock = {
-      id: `block-${Date.now()}`,
-      type,
-      content: type === "markdown" ? "" : "",
-      data: {
-        pageId: activePageId,
-        pageTitle: activePageTitle,
-        ...(type === "table" ? { headers: ["列1", "列2", "列3"], rows: [["", "", ""]] } : {}),
-      },
-    };
+    const newBlock: WikiBlock = type === "table" && (activePageId === "role-names" || activePageId === "term-glossary")
+      ? createDefaultWikiBlock(activePageId, activePageTitle)
+      : {
+          id: `block-${Date.now()}`,
+          type,
+          content: type === "markdown" ? "" : "",
+          data: {
+            pageId: activePageId,
+            pageTitle: activePageTitle,
+            ...(type === "table" ? { headers: ["列1", "列2", "列3"], rows: [["", "", ""]] } : {}),
+          },
+        };
     setBlocks((prev) => [...prev, newBlock]);
+  };
+
+  const startEditing = () => {
+    if (activeBlocks.length === 0) {
+      setBlocks((prev) => [...prev, createDefaultWikiBlock(activePageId, activePageTitle)]);
+    }
+    setIsEditing(true);
   };
 
   const handleUpdateBlock = (blockId: string, block: WikiBlock) => {
@@ -3071,9 +3127,11 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
   const handleSave = async () => {
     setSaving(true);
     try {
-      const updated = wiki
-        ? await wikiApi.updateWiki(wiki.id, { title, blocks })
+      const updated = currentWiki
+        ? await wikiApi.updateWiki(currentWiki.id, { title, blocks })
         : await wikiApi.createWiki({ projectId, title, blocks, status: "draft" });
+      setCurrentWiki(updated);
+      onWikiChange(updated);
       setBlocks(updated.blocks);
       setTitle(updated.title);
       setStatus(updated.status);
@@ -3117,10 +3175,10 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
         <CardHeader className="flex flex-row items-center justify-between py-4 border-b">
           <div>
             <CardTitle className="text-h2">{activePageTitle}</CardTitle>
-            {wiki && (
+            {currentWiki && (
               <p className="text-xs text-gray-400 mt-1">
-                最后更新：{wiki.updatedBy.username} ·{" "}
-                {new Date(wiki.updatedAt).toLocaleDateString("zh-CN")}
+                最后更新：{currentWiki?.updatedBy.username} ·{" "}
+                {new Date(currentWiki?.updatedAt || new Date().toISOString()).toLocaleDateString("zh-CN")}
               </p>
             )}
           </div>
@@ -3132,7 +3190,7 @@ function WikiTab({ wiki, projectId }: { wiki: WikiDocument | null; projectId: st
               {status === "approved" ? "已批准" : status === "pending" ? "待审核" : "草稿"}
             </Badge>
             {!isEditing ? (
-              <Button size="sm" variant="outline" onClick={() => setIsEditing(true)}>
+              <Button size="sm" variant="outline" onClick={startEditing}>
                 <Edit3 className="w-3.5 h-3.5 mr-1" />
                 编辑
               </Button>
