@@ -23,7 +23,7 @@ import {
   TASK_PIPELINE_ROLES,
   TASK_WORKFLOW_STEPS,
 } from "@/lib/taskWorkflow";
-import { cn, getFileTypeLabel, getRoleLabel, getRoleColor, formatRelativeTime } from "@/lib/utils";
+import { cn, getFileTypeLabel, getRoleLabel, getRoleColor, formatFileSize, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -81,6 +81,7 @@ import type {
   Task,
   TaskStatus,
   FileEntity,
+  FilePreview,
   FileType,
   FileVersion,
   TimelineEvent,
@@ -123,6 +124,7 @@ import {
   Trash2,
   FileText,
   ListOrdered,
+  ExternalLink,
 } from "lucide-react";
 
 type ProjectTab = "tasks" | "files" | "wiki" | "members" | "settings" | "activity" | "dedup" | "announcements";
@@ -457,6 +459,100 @@ function formatShortList(items: string[], max = 8) {
 }
 
 const breakableTextClass = "break-words [overflow-wrap:anywhere]";
+
+type DiffLineKind = "same" | "add" | "remove";
+
+interface DiffLine {
+  kind: DiffLineKind;
+  oldLine?: number;
+  newLine?: number;
+  text: string;
+}
+
+function splitPreviewLines(text: string) {
+  return text.split(/\r\n|\n|\r/);
+}
+
+function buildFallbackDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = splitPreviewLines(oldText);
+  const newLines = splitPreviewLines(newText);
+  const rows: DiffLine[] = [];
+  const max = Math.max(oldLines.length, newLines.length);
+  for (let index = 0; index < max; index += 1) {
+    const oldLine = oldLines[index];
+    const newLine = newLines[index];
+    if (oldLine === newLine) {
+      rows.push({ kind: "same", oldLine: index + 1, newLine: index + 1, text: oldLine ?? "" });
+      continue;
+    }
+    if (oldLine !== undefined) {
+      rows.push({ kind: "remove", oldLine: index + 1, text: oldLine });
+    }
+    if (newLine !== undefined) {
+      rows.push({ kind: "add", newLine: index + 1, text: newLine });
+    }
+  }
+  return rows;
+}
+
+function buildLineDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = splitPreviewLines(oldText);
+  const newLines = splitPreviewLines(newText);
+  const cellCount = oldLines.length * newLines.length;
+  if (cellCount > 250_000) {
+    return buildFallbackDiff(oldText, newText);
+  }
+
+  const dp = Array.from({ length: oldLines.length + 1 }, () =>
+    Array(newLines.length + 1).fill(0)
+  );
+  for (let i = oldLines.length - 1; i >= 0; i -= 1) {
+    for (let j = newLines.length - 1; j >= 0; j -= 1) {
+      dp[i][j] = oldLines[i] === newLines[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const rows: DiffLine[] = [];
+  let oldIndex = 0;
+  let newIndex = 0;
+  while (oldIndex < oldLines.length && newIndex < newLines.length) {
+    if (oldLines[oldIndex] === newLines[newIndex]) {
+      rows.push({
+        kind: "same",
+        oldLine: oldIndex + 1,
+        newLine: newIndex + 1,
+        text: oldLines[oldIndex],
+      });
+      oldIndex += 1;
+      newIndex += 1;
+    } else if (dp[oldIndex + 1][newIndex] >= dp[oldIndex][newIndex + 1]) {
+      rows.push({ kind: "remove", oldLine: oldIndex + 1, text: oldLines[oldIndex] });
+      oldIndex += 1;
+    } else {
+      rows.push({ kind: "add", newLine: newIndex + 1, text: newLines[newIndex] });
+      newIndex += 1;
+    }
+  }
+  while (oldIndex < oldLines.length) {
+    rows.push({ kind: "remove", oldLine: oldIndex + 1, text: oldLines[oldIndex] });
+    oldIndex += 1;
+  }
+  while (newIndex < newLines.length) {
+    rows.push({ kind: "add", newLine: newIndex + 1, text: newLines[newIndex] });
+    newIndex += 1;
+  }
+  return rows;
+}
+
+function versionLabel(version: FileVersion | FilePreview["version"] | null | undefined) {
+  if (!version) return "当前版本";
+  const parts = [`v${version.versionNumber}`];
+  if (version.isCurrent) parts.push("当前");
+  if (version.isLatestApproved) parts.push("已通过");
+  return parts.join(" · ");
+}
 
 function formatDuration(seconds: number | null | undefined) {
   if (seconds === null || seconds === undefined) return "未设置";
@@ -1995,6 +2091,14 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
   const [selectedFile, setSelectedFile] = useState<FileEntity | null>(null);
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
+  const [previewFile, setPreviewFile] = useState<FileEntity | null>(null);
+  const [previewVersions, setPreviewVersions] = useState<FileVersion[]>([]);
+  const [previewData, setPreviewData] = useState<FilePreview | null>(null);
+  const [previewVersionId, setPreviewVersionId] = useState("");
+  const [compareVersionId, setCompareVersionId] = useState("none");
+  const [compareData, setCompareData] = useState<FilePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [compareLoading, setCompareLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const currentProjectRole = isSupervisor
@@ -2024,6 +2128,15 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
     if (typeFilter !== "all" && f.type !== typeFilter) return false;
     return true;
   });
+  const diffRows = useMemo(() => {
+    if (previewData?.kind !== "text" || compareData?.kind !== "text") {
+      return [];
+    }
+    return buildLineDiff(compareData.text ?? "", previewData.text ?? "");
+  }, [compareData, previewData]);
+  const previewTextLineCount = previewData?.kind === "text"
+    ? splitPreviewLines(previewData.text ?? "").length
+    : 0;
 
   useEffect(() => {
     if (uploadTypeOptions.length > 0 && !uploadTypeOptions.some((option) => option.value === uploadType)) {
@@ -2098,6 +2211,82 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
     }
   };
 
+  const resetPreviewState = () => {
+    setPreviewFile(null);
+    setPreviewVersions([]);
+    setPreviewData(null);
+    setPreviewVersionId("");
+    setCompareVersionId("none");
+    setCompareData(null);
+    setPreviewLoading(false);
+    setCompareLoading(false);
+  };
+
+  const handleOpenPreview = async (file: FileEntity) => {
+    if (file.assetKind === "link" && file.url) {
+      window.open(file.url, "_blank");
+      return;
+    }
+
+    setPreviewFile(file);
+    setPreviewVersions([]);
+    setPreviewData(null);
+    setCompareData(null);
+    setCompareVersionId("none");
+    setPreviewLoading(true);
+    try {
+      const [versionItems, preview] = await Promise.all([
+        fileApi.getVersions(file.id),
+        fileApi.getPreview(file.id),
+      ]);
+      setPreviewVersions(versionItems);
+      setPreviewData(preview);
+      setPreviewVersionId(preview.version?.id || file.currentVersionId || "");
+    } catch (error) {
+      toast.error("加载预览失败: " + getErrorMessage(error));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handlePreviewVersionChange = async (versionId: string) => {
+    if (!previewFile) return;
+    setPreviewVersionId(versionId);
+    setPreviewData(null);
+    setCompareVersionId("none");
+    setCompareData(null);
+    setPreviewLoading(true);
+    try {
+      const preview = await fileApi.getPreview(previewFile.id, versionId);
+      setPreviewData(preview);
+      setPreviewVersionId(preview.version?.id || versionId);
+    } catch (error) {
+      toast.error("切换预览版本失败: " + getErrorMessage(error));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleCompareVersionChange = async (versionId: string) => {
+    if (!previewFile) return;
+    setCompareVersionId(versionId);
+    setCompareData(null);
+    if (versionId === "none") return;
+
+    setCompareLoading(true);
+    try {
+      const preview = await fileApi.getPreview(previewFile.id, versionId);
+      if (preview.kind !== "text") {
+        toast.error("选择的版本不支持文本 diff");
+      }
+      setCompareData(preview);
+    } catch (error) {
+      toast.error("加载对比版本失败: " + getErrorMessage(error));
+    } finally {
+      setCompareLoading(false);
+    }
+  };
+
   const handleDownloadVersion = async (fileId: string, versionId: string) => {
     try {
       const url = await fileApi.downloadVersion(fileId, versionId);
@@ -2168,6 +2357,7 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
                 <FileListItem
                   key={file.id}
                   file={file}
+                  onPreview={() => handleOpenPreview(file)}
                   onDownload={() => handleDownload(file)}
                   onViewHistory={() => setSelectedFile(file)}
                 />
@@ -2272,6 +2462,172 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Preview Sheet */}
+      <Sheet open={!!previewFile} onOpenChange={(open) => !open && resetPreviewState()}>
+        <SheetContent className="!w-[94vw] !max-w-[94vw] overflow-y-auto p-0 sm:!max-w-[1200px]">
+          <SheetHeader className="border-b border-gray-200 px-6 py-5">
+            <div className="min-w-0 pr-8">
+              <SheetTitle className="text-xl">在线预览</SheetTitle>
+              {previewFile && (
+                <p className={cn("mt-1 text-sm text-gray-500", breakableTextClass)}>
+                  {previewFile.name}
+                </p>
+              )}
+            </div>
+          </SheetHeader>
+
+          <div className="space-y-5 px-6 py-5">
+            {previewFile && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                <Badge variant="outline">{getFileTypeLabel(previewFile.type)}</Badge>
+                {previewData?.version && <Badge variant="secondary">{versionLabel(previewData.version)}</Badge>}
+                {previewData && <span>{formatFileSize(previewData.size)}</span>}
+                {previewData?.mimeType && <span className={breakableTextClass}>{previewData.mimeType}</span>}
+              </div>
+            )}
+
+            {previewLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-6 w-6 animate-spin text-primary-500" />
+              </div>
+            ) : previewData ? (
+              <>
+                {previewVersions.length > 0 && previewData.version && (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-gray-500">预览版本</label>
+                      <Select
+                        value={previewVersionId || previewData.version.id}
+                        onValueChange={handlePreviewVersionChange}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {previewVersions.map((version) => (
+                            <SelectItem key={version.id} value={version.id}>
+                              {versionLabel(version)} · {new Date(version.createdAt).toLocaleString("zh-CN")}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {previewData.kind === "text" && previewVersions.length > 1 && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-gray-500">对比版本</label>
+                        <Select value={compareVersionId} onValueChange={handleCompareVersionChange}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">不对比，仅查看当前文本</SelectItem>
+                            {previewVersions
+                              .filter((version) => version.id !== (previewVersionId || previewData.version?.id))
+                              .map((version) => (
+                                <SelectItem key={version.id} value={version.id}>
+                                  {versionLabel(version)} · {new Date(version.createdAt).toLocaleString("zh-CN")}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {previewData.kind === "video" && (
+                  <div className="space-y-3">
+                    <div className="overflow-hidden rounded-lg border border-gray-900 bg-black">
+                      <video
+                        className="aspect-video w-full bg-black"
+                        controls
+                        preload="metadata"
+                        src={previewData.url || previewData.downloadUrl}
+                      >
+                        当前浏览器不支持视频播放。
+                      </video>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => window.open(previewData.downloadUrl || previewData.url, "_blank")}
+                    >
+                      <ExternalLink className="mr-1.5 h-4 w-4" />
+                      打开播放地址
+                    </Button>
+                  </div>
+                )}
+
+                {previewData.kind === "text" && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
+                      <span>{previewTextLineCount} 行文本</span>
+                      {compareLoading && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          正在加载对比版本
+                        </span>
+                      )}
+                    </div>
+
+                    {compareData?.kind === "text" ? (
+                      <div className="space-y-2">
+                        <div className="text-xs text-gray-500">
+                          {versionLabel(compareData.version)} → {versionLabel(previewData.version)}
+                        </div>
+                        <div className="max-h-[65vh] overflow-auto rounded-lg border border-gray-200 bg-white font-mono text-xs leading-5">
+                          {diffRows.map((row, index) => (
+                            <div
+                              key={`${row.kind}-${row.oldLine ?? "x"}-${row.newLine ?? "x"}-${index}`}
+                              className={cn(
+                                "grid grid-cols-[3.5rem_3.5rem_2rem_minmax(0,1fr)] gap-2 border-b border-gray-100 px-3 py-1 last:border-0",
+                                row.kind === "add" && "bg-green-50 text-green-900",
+                                row.kind === "remove" && "bg-red-50 text-red-900",
+                                row.kind === "same" && "text-gray-700"
+                              )}
+                            >
+                              <span className="select-none text-right text-gray-400">{row.oldLine ?? ""}</span>
+                              <span className="select-none text-right text-gray-400">{row.newLine ?? ""}</span>
+                              <span className="select-none text-center text-gray-500">
+                                {row.kind === "add" ? "+" : row.kind === "remove" ? "-" : ""}
+                              </span>
+                              <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                                {row.text || " "}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <pre className="max-h-[65vh] overflow-auto rounded-lg bg-gray-950 p-4 text-xs leading-5 text-gray-100 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                        {previewData.text || ""}
+                      </pre>
+                    )}
+                  </div>
+                )}
+
+                {previewData.kind === "unsupported" && (
+                  <div className="space-y-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-6 text-center">
+                    <p className="text-sm font-medium text-gray-700">暂不支持在线预览</p>
+                    <p className="text-sm text-gray-500">{previewData.reason || "该文件类型需要下载后查看"}</p>
+                    {previewFile && (
+                      <Button variant="outline" size="sm" onClick={() => handleDownload(previewFile)}>
+                        下载文件
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">
+                单击文件后会在这里加载预览。
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* File History Sheet */}
       <Sheet open={!!selectedFile} onOpenChange={() => setSelectedFile(null)}>
