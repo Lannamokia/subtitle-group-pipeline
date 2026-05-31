@@ -106,6 +106,7 @@ import {
   Loader2,
   Plus,
   Upload,
+  Download,
   CheckCircle,
   Play,
   UserCheck,
@@ -308,6 +309,7 @@ export function ProjectDetailPage() {
           <TasksTab
             project={project}
             tasks={tasks}
+            files={files}
             selectedUnitId={selectedUnitId}
             onSelectUnit={setSelectedUnitId}
             onUpdate={fetchProject}
@@ -414,6 +416,24 @@ function getNextTranslationOrder(tasks: Task[], unitId: string | null) {
   return orders.length > 0 ? Math.max(...orders) + 1 : 1;
 }
 
+function isPipelineTaskRole(role: TaskRole): role is Exclude<TaskRole, "supervisor"> {
+  return TASK_PIPELINE_ROLES.includes(role as Exclude<TaskRole, "supervisor">);
+}
+
+function getProjectWorkflowRoles(project: Project): Exclude<TaskRole, "supervisor">[] {
+  const enabledRoles = new Set(
+    (project.workflowConfig ?? [])
+      .filter((entry) => entry.enabled !== false && isPipelineTaskRole(entry.role))
+      .map((entry) => entry.role as Exclude<TaskRole, "supervisor">)
+  );
+
+  if (enabledRoles.size === 0) {
+    return TASK_PIPELINE_ROLES;
+  }
+
+  return TASK_PIPELINE_ROLES.filter((role) => enabledRoles.has(role));
+}
+
 function getClaimStatusLabel(status: TranslationClaim["status"]) {
   const labels: Record<TranslationClaim["status"], string> = {
     pending: "排队中",
@@ -435,11 +455,19 @@ function getClaimStatusClass(status: TranslationClaim["status"]) {
   return "border-gray-200 bg-gray-50 text-gray-600";
 }
 
-function findPipelinePredecessor(tasks: Task[], unitId: string | null, role: TaskRole) {
-  const roleIndex = TASK_PIPELINE_ROLES.indexOf(role as Exclude<TaskRole, "supervisor">);
+function getPreviousWorkflowRole(project: Project, role: TaskRole) {
+  if (!isPipelineTaskRole(role)) return null;
+  const workflowRoles = getProjectWorkflowRoles(project);
+  const roleIndex = workflowRoles.indexOf(role);
+  return roleIndex > 0 ? workflowRoles[roleIndex - 1] : null;
+}
+
+function findPipelinePredecessor(project: Project, tasks: Task[], unitId: string | null, role: TaskRole) {
+  const workflowRoles = getProjectWorkflowRoles(project);
+  const roleIndex = workflowRoles.indexOf(role as Exclude<TaskRole, "supervisor">);
   if (roleIndex <= 0) return null;
 
-  const previousRoles = TASK_PIPELINE_ROLES.slice(0, roleIndex).reverse();
+  const previousRoles = workflowRoles.slice(0, roleIndex).reverse();
   for (const previousRole of previousRoles) {
     const candidate = tasks
       .filter((task) => task.unitId === unitId && task.role === previousRole)
@@ -447,6 +475,32 @@ function findPipelinePredecessor(tasks: Task[], unitId: string | null, role: Tas
     if (candidate) return candidate;
   }
   return null;
+}
+
+function filterPreviousResultFiles(
+  candidates: FileEntity[],
+  currentTask: Task,
+  previousRole: TaskRole,
+  tasks: Task[]
+) {
+  const unitId = currentTask.unitId ?? null;
+  const completedPreviousTaskIds = new Set(
+    tasks
+      .filter((task) => (task.unitId ?? null) === unitId && task.role === previousRole && isCompletedTask(task))
+      .map((task) => task.id)
+  );
+
+  if (completedPreviousTaskIds.size === 0) {
+    return [];
+  }
+
+  return candidates
+    .filter((file) => {
+      if ((file.unitId ?? null) !== unitId) return false;
+      if (file.role !== previousRole) return false;
+      return file.taskId ? completedPreviousTaskIds.has(file.taskId) : true;
+    })
+    .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 }
 
 function getTaskTemplateValue(role: Exclude<TaskRole, "supervisor">, title: string) {
@@ -718,12 +772,14 @@ function EpisodeListView({
 function TasksTab({
   project,
   tasks,
+  files,
   selectedUnitId,
   onSelectUnit,
   onUpdate,
 }: {
   project: Project;
   tasks: Task[];
+  files: FileEntity[];
   selectedUnitId: string | null;
   onSelectUnit: (unitId: string | null) => void;
   onUpdate: () => void | Promise<void>;
@@ -766,6 +822,8 @@ function TasksTab({
   const [taskLinkDescription, setTaskLinkDescription] = useState("");
   const [sourceEpisodeLength, setSourceEpisodeLength] = useState<number | "">("");
   const [taskUploading, setTaskUploading] = useState(false);
+  const [previousResultFiles, setPreviousResultFiles] = useState<FileEntity[]>([]);
+  const [previousResultsLoading, setPreviousResultsLoading] = useState(false);
   const [taskDragOver, setTaskDragOver] = useState(false);
   const [segmentStart, setSegmentStart] = useState<number | "">("");
   const [segmentEnd, setSegmentEnd] = useState<number | "">("");
@@ -828,6 +886,9 @@ function TasksTab({
     () => selectedTask ? getPolicyAwareTaskDeliveryRule(selectedTask.role, project.uploadPolicy) : null,
     [project.uploadPolicy, selectedTask?.id, selectedTask?.role]
   );
+  const selectedTaskPreviousRole = selectedTask
+    ? getPreviousWorkflowRole(project, selectedTask.role)
+    : null;
   const selectedTaskAllowsLink = Boolean(
     selectedTask && ["source", "encoding"].includes(selectedTask.role)
   );
@@ -872,6 +933,47 @@ function TasksTab({
     setSegmentEnd("");
     setAbandoningClaimId(null);
   }, [selectedTask?.id]);
+
+  useEffect(() => {
+    if (!selectedTask || !selectedTaskPreviousRole) {
+      setPreviousResultFiles([]);
+      setPreviousResultsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const localResults = filterPreviousResultFiles(files, selectedTask, selectedTaskPreviousRole, tasks);
+    setPreviousResultFiles(localResults);
+    setPreviousResultsLoading(true);
+
+    fileApi
+      .getFiles({
+        projectId: project.id,
+        unitId: selectedTask.unitId || undefined,
+        role: selectedTaskPreviousRole,
+        pageSize: 100,
+      })
+      .then((result) => {
+        if (cancelled) return;
+        setPreviousResultFiles(
+          filterPreviousResultFiles(result.items, selectedTask, selectedTaskPreviousRole, tasks)
+        );
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          toast.error("加载上一流程结果失败: " + getErrorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPreviousResultsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files, project.id, selectedTask, selectedTaskPreviousRole, tasks]);
 
   const refreshTaskDetail = async (taskId: string) => {
     const freshTask = await taskApi.getTask(taskId);
@@ -1039,7 +1141,7 @@ function TasksTab({
         createPayload.translationOrder = Number(newTaskTranslationOrder);
       }
       const createdTask = await taskApi.createTask(createPayload as Partial<Task>);
-      const predecessor = findPipelinePredecessor(tasks, taskUnitId, newTaskRole);
+      const predecessor = findPipelinePredecessor(project, tasks, taskUnitId, newTaskRole);
       if (predecessor && predecessor.id !== createdTask.id) {
         await taskApi.createDependency(createdTask.id, predecessor.id);
       }
@@ -1161,6 +1263,24 @@ function TasksTab({
       toast.error("提交网盘链接失败: " + getErrorMessage(error));
     } finally {
       setTaskUploading(false);
+    }
+  };
+
+  const handleDownloadPreviousResult = async (file: FileEntity) => {
+    try {
+      if (file.assetKind === "link" && file.url) {
+        window.open(file.url, "_blank");
+        return;
+      }
+
+      const url = file.latestApprovedVersionId
+        ? await fileApi.downloadVersion(file.id, file.latestApprovedVersionId)
+        : await fileApi.downloadFile(file.id);
+      if (url) {
+        window.open(url, "_blank");
+      }
+    } catch (error) {
+      toast.error("获取上一流程下载链接失败: " + getErrorMessage(error));
     }
   };
 
@@ -1638,6 +1758,66 @@ function TasksTab({
                       <p className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-md px-3 py-2">
                         前置任务未完成，后续领取或开始会被依赖规则阻止。
                       </p>
+                    )}
+                  </div>
+                )}
+
+                {selectedTaskPreviousRole && (
+                  <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-medium text-gray-700">上一流程结果</h4>
+                        <p className="mt-1 text-xs text-gray-500">
+                          来自{getRoleLabel(selectedTaskPreviousRole)}已完成任务，可直接下载继续当前流程。
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 bg-white text-[10px]">
+                        {previousResultsLoading ? "加载中" : `${previousResultFiles.length} 个`}
+                      </Badge>
+                    </div>
+                    {previousResultFiles.length > 0 ? (
+                      <div className="space-y-2">
+                        {previousResultFiles.map((file) => {
+                          const isLink = file.assetKind === "link" && Boolean(file.url);
+                          return (
+                            <div key={`${file.assetKind ?? "file"}:${file.id}`} className="flex min-w-0 items-center gap-3 rounded-md bg-white px-3 py-2 text-xs">
+                              <div className="shrink-0 rounded-md bg-gray-100 p-1.5 text-gray-500">
+                                {isLink ? <ExternalLink className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className={cn("font-medium text-gray-700", breakableTextClass)}>{file.name}</p>
+                                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-gray-500">
+                                  <span>{isLink ? "网盘链接" : getFileTypeLabel(file.type)}</span>
+                                  {!isLink && file.latestApprovedVersionId && <span>已通过版本</span>}
+                                  {!isLink && !file.latestApprovedVersionId && <span>当前版本</span>}
+                                  <span>{formatRelativeTime(file.updatedAt)}</span>
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 shrink-0"
+                                onClick={() => handleDownloadPreviousResult(file)}
+                              >
+                                {isLink ? <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
+                                {isLink ? "打开" : "下载"}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-gray-200 bg-white py-5 text-center text-xs text-gray-400">
+                        {previousResultsLoading ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            正在加载上一流程结果
+                          </span>
+                        ) : (
+                          "暂无上一流程可下载结果"
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

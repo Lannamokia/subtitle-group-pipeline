@@ -1731,7 +1731,17 @@ async function multipartReplaceFile(fileId: string, file: File, data?: ReplaceUp
 }
 
 export const fileApi = {
-  getFiles: (params?: { projectId?: string; taskId?: string; type?: string; search?: string; tag?: string; role?: string }) =>
+  getFiles: (params?: {
+    projectId?: string;
+    taskId?: string;
+    unitId?: string;
+    type?: string;
+    search?: string;
+    tag?: string;
+    role?: string;
+    page?: number;
+    pageSize?: number;
+  }) =>
     api.get<ApiResponse<unknown>>('/files', { params }).then((response) =>
       unwrapPaginated(response, normalizeFile)
     ),

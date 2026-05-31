@@ -215,6 +215,7 @@ export interface TestTaskData {
   title?: string;
   description?: string;
   role?: "source" | "timing" | "translation" | "post_production" | "encoding" | "release" | "supervisor";
+  translation_order?: number | null;
   status?: "pending_publish" | "claimable" | "assigned" | "in_progress" | "submitted" | "review_approved" | "review_rejected" | "completed" | "overdue" | "frozen";
   assignee_id?: string;
   creator_id: string;
@@ -232,6 +233,7 @@ export async function createTestTask(data: TestTaskData) {
       title: data.title || `Test Task ${suffix}`,
       description: data.description || "A test task",
       role: data.role || "translation",
+      translation_order: data.translation_order ?? null,
       status: data.status || "claimable",
       assignee_id: data.assignee_id || null,
       creator_id: data.creator_id,

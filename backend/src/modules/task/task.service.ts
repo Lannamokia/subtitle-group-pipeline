@@ -504,6 +504,73 @@ async function isTranslationCoverageComplete(task: {
   return (await getTranslationCoverageSeconds(task)) >= task.unit.episode_length;
 }
 
+async function areAllTranslationTasksApproved(
+  task: {
+    id: string;
+    project_id: string;
+    unit_id: string | null;
+  }
+) {
+  const translationTasks = await prisma.task.findMany({
+    where: {
+      project_id: task.project_id,
+      unit_id: task.unit_id,
+      role: TaskRole.translation,
+    },
+    select: {
+      id: true,
+      status: true,
+    },
+  });
+
+  if (translationTasks.length === 0) {
+    return false;
+  }
+
+  return translationTasks.every((item) =>
+    item.id === task.id ||
+    item.status === "review_approved" ||
+    item.status === "completed"
+  );
+}
+
+async function completeTranslationStage(
+  task: {
+    id: string;
+    project_id: string;
+    unit_id: string | null;
+    role: TaskRole;
+  },
+  actorId?: string
+) {
+  const translationTasks = await prisma.task.findMany({
+    where: {
+      project_id: task.project_id,
+      unit_id: task.unit_id,
+      role: TaskRole.translation,
+    },
+    select: { id: true },
+  });
+  const taskIds = translationTasks.map((item) => item.id);
+
+  if (taskIds.length === 0) {
+    return prisma.task.findUniqueOrThrow({ where: { id: task.id } });
+  }
+
+  const now = new Date();
+  await prisma.task.updateMany({
+    where: { id: { in: taskIds } },
+    data: {
+      status: "completed",
+      completed_at: now,
+    },
+  });
+
+  await unlockDownstreamTasksIfReady(task, actorId);
+
+  return prisma.task.findUniqueOrThrow({ where: { id: task.id } });
+}
+
 function parseMetadata(metadata: string | null | undefined): Record<string, unknown> {
   if (!metadata) {
     return {};
@@ -2439,17 +2506,11 @@ export async function approveTask(
     const nextClaim = await activateNextTranslationClaim(task);
     if (nextClaim) {
       updated = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
-    } else if (await isTranslationCoverageComplete(task)) {
-      updated = await prisma.task.update({
-        where: { id: taskId },
-        data: {
-          status: "completed",
-          assignee_id: null,
-          completed_at: new Date(),
-        },
-      });
-
-      await unlockDownstreamTasksIfReady(task, reviewerId);
+    } else if (
+      await isTranslationCoverageComplete(task) ||
+      await areAllTranslationTasksApproved(task)
+    ) {
+      updated = await completeTranslationStage(task, reviewerId);
     } else {
       updated = await prisma.task.update({
         where: { id: taskId },

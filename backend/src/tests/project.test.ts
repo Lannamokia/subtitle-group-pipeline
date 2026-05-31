@@ -24,6 +24,58 @@ describe("Project & Workflow Tests", () => {
     await cleanDatabase();
   });
 
+  async function seedTranslationClaimFile({
+    projectId,
+    taskId,
+    unitId,
+    userId,
+    segmentStart = 0,
+    segmentEnd = 60,
+    status = "active",
+  }: {
+    projectId: string;
+    taskId: string;
+    unitId: string;
+    userId: string;
+    segmentStart?: number;
+    segmentEnd?: number;
+    status?: "active" | "submitted" | "approved";
+  }) {
+    const claim = await prisma.translationClaim.create({
+      data: {
+        task_id: taskId,
+        unit_id: unitId,
+        user_id: userId,
+        segment_start: segmentStart,
+        segment_end: segmentEnd,
+        status,
+        submitted_at: status === "submitted" || status === "approved" ? new Date() : null,
+        approved_at: status === "approved" ? new Date() : null,
+      },
+    });
+    const { version } = await createTestFile({
+      project_id: projectId,
+      uploader_id: userId,
+      name: `${taskId}.ass`,
+      metadata: JSON.stringify({ task_id: taskId, unit_id: unitId, role: "translation" }),
+    });
+
+    if (status === "submitted" || status === "approved") {
+      await prisma.translationSubmission.create({
+        data: {
+          task_id: taskId,
+          user_id: userId,
+          claim_id: claim.id,
+          file_version_id: version.id,
+          content: "",
+          line_count: null,
+        },
+      });
+    }
+
+    return { claim, version };
+  }
+
   describe("Project Listing", () => {
     it("should expose members and assigned users for participated project filtering", async () => {
       const { user: owner, token } = await createTestUser();
@@ -1934,6 +1986,12 @@ describe("Project & Workflow Tests", () => {
         assignee_id: translator.id,
         creator_id: owner.id,
       });
+      await seedTranslationClaimFile({
+        projectId: project.id,
+        taskId: task.id,
+        unitId: unit.id,
+        userId: translator.id,
+      });
 
       // Translator submits
       const submitRes = await post(
@@ -1963,6 +2021,13 @@ describe("Project & Workflow Tests", () => {
         status: "submitted",
         assignee_id: translator.id,
         creator_id: owner.id,
+      });
+      await seedTranslationClaimFile({
+        projectId: project.id,
+        taskId: task1.id,
+        unitId: unit.id,
+        userId: translator.id,
+        status: "submitted",
       });
 
       const task2 = await createTestTask({
@@ -1997,6 +2062,86 @@ describe("Project & Workflow Tests", () => {
       // Downstream should be claimable
       const downstreamTask = await prisma.task.findUnique({ where: { id: task2.id } });
       expect(downstreamTask!.status).toBe("claimable");
+    });
+
+    it("should complete all translation tasks and unlock post-production when all translation work is approved", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: translatorOne } = await createTestUser();
+      const { user: translatorTwo } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 10_000 });
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            { role: "translation", enabled: true, slotCount: 2, assignmentStrategy: "open_claim" },
+            { role: "post_production", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+          ]),
+        },
+      });
+
+      const translationOne = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "review_approved",
+        assignee_id: translatorOne.id,
+        creator_id: owner.id,
+        translation_order: 1,
+      });
+      await seedTranslationClaimFile({
+        projectId: project.id,
+        taskId: translationOne.id,
+        unitId: unit.id,
+        userId: translatorOne.id,
+        segmentStart: 0,
+        segmentEnd: 100,
+        status: "approved",
+      });
+      const translationTwo = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "submitted",
+        assignee_id: translatorTwo.id,
+        creator_id: owner.id,
+        translation_order: 2,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "pending_publish",
+        creator_id: owner.id,
+      });
+
+      await seedTranslationClaimFile({
+        projectId: project.id,
+        taskId: translationTwo.id,
+        unitId: unit.id,
+        userId: translatorTwo.id,
+        segmentStart: 100,
+        segmentEnd: 200,
+        status: "submitted",
+      });
+
+      const approveRes = await post(
+        app,
+        `/api/v1/tasks/${translationTwo.id}/approve`,
+        { approved: true, comments: "OK" },
+        ownerToken
+      );
+
+      expectSuccess(approveRes, 200);
+
+      const completedTranslations = await prisma.task.findMany({
+        where: { id: { in: [translationOne.id, translationTwo.id] } },
+        orderBy: { translation_order: "asc" },
+      });
+      const unlockedDownstream = await prisma.task.findUnique({ where: { id: downstream.id } });
+      expect(completedTranslations.map((task) => task.status)).toEqual(["completed", "completed"]);
+      expect(unlockedDownstream!.status).toBe("claimable");
     });
 
     it("should complete source and timing submissions without review and unlock downstream", async () => {
@@ -2062,6 +2207,14 @@ describe("Project & Workflow Tests", () => {
           assignee_id: worker.id,
           creator_id: owner.id,
         });
+        if (role === "translation") {
+          await seedTranslationClaimFile({
+            projectId: project.id,
+            taskId: task.id,
+            unitId: unit.id,
+            userId: worker.id,
+          });
+        }
 
         const submitRes = await post(
           app,
