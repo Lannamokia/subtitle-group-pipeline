@@ -2169,40 +2169,43 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
 
       {/* File History Sheet */}
       <Sheet open={!!selectedFile} onOpenChange={() => setSelectedFile(null)}>
-        <SheetContent className="overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>版本历史</SheetTitle>
+        <SheetContent className="overflow-y-auto p-0 sm:max-w-lg">
+          <SheetHeader className="border-b border-gray-200 px-6 py-5">
+            <SheetTitle className="text-xl">版本历史</SheetTitle>
           </SheetHeader>
           {selectedFile && (
-            <div className="mt-6 space-y-3">
+            <div className="space-y-5 px-6 py-5">
               {selectedFile.assetKind === "link" ? (
                 <LinkHistoryList file={selectedFile} />
               ) : (
                 <>
-                  <div className="text-sm">
-                    <p className="font-medium">{selectedFile.name}</p>
-                    <p className="text-gray-500">共 {selectedFile.versionCount} 个版本</p>
+                  <div className="space-y-1">
+                    <p className="break-words text-base font-semibold leading-6 text-gray-900">{selectedFile.name}</p>
+                    <p className="text-sm text-gray-500">共 {selectedFile.versionCount} 个版本</p>
                   </div>
                   {versionsLoading ? (
                     <div className="flex justify-center py-8">
                       <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
                     </div>
                   ) : versions.length > 0 ? (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {versions.map((version) => (
-                        <div key={version.id} className="rounded-md border border-gray-200 p-3 text-sm space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium">v{version.versionNumber}</div>
-                            <div className="flex items-center gap-1">
+                        <div key={version.id} className="space-y-4 rounded-lg border border-gray-200 bg-white p-4 text-sm shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="text-lg font-semibold leading-none text-gray-900">v{version.versionNumber}</div>
+                            <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                               {version.isCurrent && <Badge variant="default" className="text-[10px]">当前</Badge>}
                               {version.isLatest && <Badge variant="outline" className="text-[10px]">最新</Badge>}
                               {version.isLatestApproved && <Badge variant="outline" className="text-[10px]">已锁版</Badge>}
                             </div>
                           </div>
-                          <p className="text-xs text-gray-500">
-                            {version.changeSummary || "无变更说明"} · {new Date(version.createdAt).toLocaleString("zh-CN")}
-                          </p>
-                          <div className="flex gap-2">
+                          <div className="space-y-1.5">
+                            <p className="break-words text-sm leading-5 text-gray-700">
+                              {version.changeSummary || "无变更说明"}
+                            </p>
+                            <p className="text-xs text-gray-500">{new Date(version.createdAt).toLocaleString("zh-CN")}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
                             <Button size="sm" variant="outline" onClick={() => handleDownloadVersion(selectedFile.id, version.id)}>
                               下载此版本
                             </Button>
