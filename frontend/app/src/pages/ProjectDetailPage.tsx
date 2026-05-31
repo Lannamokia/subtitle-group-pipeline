@@ -984,16 +984,19 @@ function TasksTab({
     setCreating(true);
     try {
       const taskUnitId = newTaskUnitId === UNASSIGNED_UNIT_SELECT_VALUE ? null : newTaskUnitId;
-      const createdTask = await taskApi.createTask({
+      const createPayload: Record<string, unknown> = {
         project_id: project.id,
         unit_id: taskUnitId,
         title: newTaskTitle.trim(),
         role: newTaskRole,
-        translationOrder: newTaskRole === "translation" ? Number(newTaskTranslationOrder) : null,
         assignee_id: newTaskAssigneeId || null,
         due_date: newTaskDueDate ? new Date(newTaskDueDate).toISOString() : null,
         description: newTaskDescription.trim() || null,
-      } as Partial<Task> & Record<string, unknown>);
+      };
+      if (newTaskRole === "translation") {
+        createPayload.translationOrder = Number(newTaskTranslationOrder);
+      }
+      const createdTask = await taskApi.createTask(createPayload as Partial<Task>);
       const predecessor = findPipelinePredecessor(tasks, taskUnitId, newTaskRole);
       if (predecessor && predecessor.id !== createdTask.id) {
         await taskApi.createDependency(createdTask.id, predecessor.id);
