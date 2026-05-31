@@ -25,8 +25,23 @@ import {
   VIDEO_MIME_TYPES,
 } from "../../utils/defaultUploadPolicy";
 import { normalizeUploadPolicyJson } from "../../utils/uploadPolicy";
+import * as storageService from "../storage/storage.service";
 
 // ============ Upload Policy ============
+
+const TEXT_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
+const TEXT_PREVIEW_EXTENSIONS = new Set([
+  ".ass",
+  ".ssa",
+  ".srt",
+  ".vtt",
+  ".txt",
+  ".log",
+  ".json",
+  ".xml",
+  ".csv",
+  ".md",
+]);
 
 function defaultUploadPolicyRecord() {
   return {
@@ -1702,6 +1717,219 @@ async function assertFileViewPermission(file: {
   }
 }
 
+async function assertSensitiveFileAccess(file: {
+  project_id: string;
+  tags: string | null;
+}, userId: string, userRole: UserRole): Promise<void> {
+  const tags = parseTagList(file.tags);
+  const isSensitive = tags.includes("sensitive");
+  if (!isSensitive) return;
+
+  const allowedRoles: UserRole[] = ["super_admin", "group_admin", "supervisor"];
+  const membership = await prisma.projectMember.findFirst({
+    where: {
+      project_id: file.project_id,
+      user_id: userId,
+      left_at: null,
+    },
+  });
+
+  const memberRole = membership?.role as TaskRole | undefined;
+  const sensitiveAllowedRoles: TaskRole[] = ["source", "encoding", "supervisor"];
+
+  const hasSensitiveAccess =
+    allowedRoles.includes(userRole) ||
+    (memberRole !== undefined && sensitiveAllowedRoles.includes(memberRole));
+
+  if (!hasSensitiveAccess) {
+    throw new AppError(
+      "Insufficient permissions to access sensitive files",
+      "FORBIDDEN",
+      403
+    );
+  }
+}
+
+function getPreviewExtension(file: {
+  name: string;
+  original_name: string;
+  storage_path: string;
+}): string {
+  return path.extname(file.name || file.original_name || file.storage_path).toLowerCase();
+}
+
+function isTextPreviewable(file: {
+  name: string;
+  original_name: string;
+  storage_path: string;
+  file_type: FileType;
+  mime_type: string;
+}): boolean {
+  const ext = getPreviewExtension(file);
+  return file.file_type === FileType.subtitle ||
+    file.mime_type.startsWith("text/") ||
+    TEXT_PREVIEW_EXTENSIONS.has(ext);
+}
+
+function isVideoPreviewable(file: { file_type: FileType; mime_type: string }): boolean {
+  return file.file_type === FileType.video || file.mime_type.startsWith("video/");
+}
+
+function previewVersionPayload(version: {
+  id: string;
+  file_id: string;
+  version_number: number;
+  size_bytes: number | bigint;
+  checksum: string | null;
+  change_summary: string | null;
+  is_current: boolean;
+  is_latest: boolean;
+  is_latest_approved: boolean;
+  created_at: Date;
+}) {
+  return {
+    id: version.id,
+    file_id: version.file_id,
+    version_number: version.version_number,
+    size_bytes: toNumber(version.size_bytes),
+    checksum: version.checksum,
+    change_summary: version.change_summary,
+    is_current: version.is_current,
+    is_latest: version.is_latest,
+    is_latest_approved: version.is_latest_approved,
+    created_at: version.created_at,
+  };
+}
+
+function resolvePreviewVersion<T extends {
+  id: string;
+  is_current: boolean;
+  is_latest: boolean;
+  is_latest_approved: boolean;
+  version_number: number;
+}>(versions: T[], versionId?: string): T | undefined {
+  if (versionId) {
+    return versions.find((version) => version.id === versionId);
+  }
+
+  return versions.find((version) => version.is_current) ||
+    versions.find((version) => version.is_latest_approved) ||
+    versions.find((version) => version.is_latest) ||
+    [...versions].sort((a, b) => b.version_number - a.version_number)[0];
+}
+
+export async function getFilePreview(
+  fileId: string,
+  userId: string,
+  userRole: UserRole,
+  versionId?: string
+) {
+  const file = await prisma.fileEntity.findUnique({
+    where: { id: fileId },
+    include: {
+      project: {
+        select: {
+          owner_id: true,
+          storage_backend_id: true,
+        },
+      },
+      versions: {
+        orderBy: { version_number: "desc" },
+      },
+    },
+  });
+
+  if (!file) {
+    throw new AppError("File not found", "NOT_FOUND", 404);
+  }
+
+  if (file.is_deleted) {
+    throw new AppError("File has been deleted", "GONE", 410);
+  }
+
+  await assertFileViewPermission(file, userId, userRole);
+  await assertSensitiveFileAccess(file, userId, userRole);
+
+  const metadata = parseMetadata(file.metadata);
+  if (getMetadataStringValue(metadata, "asset_kind", "assetKind") === "link") {
+    return {
+      kind: "unsupported" as const,
+      reason: "网盘链接请直接打开链接查看",
+      fileId: file.id,
+      fileName: file.name,
+      mimeType: file.mime_type,
+      size: toNumber(file.size_bytes),
+      version: null,
+    };
+  }
+
+  const targetVersion = resolvePreviewVersion(file.versions, versionId);
+  if (!targetVersion) {
+    throw new AppError(
+      versionId ? "File version not found" : "No previewable version available",
+      "NOT_FOUND",
+      404
+    );
+  }
+
+  const versionSize = toNumber(targetVersion.size_bytes);
+  const base = {
+    fileId: file.id,
+    fileName: file.name,
+    mimeType: file.mime_type,
+    size: versionSize,
+    version: previewVersionPayload(targetVersion),
+  };
+
+  if (isTextPreviewable(file)) {
+    if (versionSize > TEXT_PREVIEW_MAX_BYTES) {
+      return {
+        kind: "unsupported" as const,
+        ...base,
+        reason: `文本预览仅支持 ${TEXT_PREVIEW_MAX_BYTES} 字节以内的文件`,
+      };
+    }
+
+    const storageBackendId = file.storage_backend_id || file.project.storage_backend_id;
+    if (!storageBackendId) {
+      return {
+        kind: "unsupported" as const,
+        ...base,
+        reason: "文件缺少存储后端，无法在线预览",
+      };
+    }
+
+    const buffer = await storageService.downloadStoredFile(
+      storageBackendId,
+      targetVersion.storage_path
+    );
+
+    return {
+      kind: "text" as const,
+      ...base,
+      text: buffer.toString("utf8"),
+      encoding: "utf-8",
+    };
+  }
+
+  if (isVideoPreviewable(file)) {
+    const link = await getDownloadLink(file.id, userId, userRole, 3600, targetVersion.id);
+    return {
+      kind: "video" as const,
+      ...base,
+      url: link.url,
+      downloadUrl: link.downloadUrl,
+      expiresAt: link.expiresAt,
+    };
+  }
+
+  return {
+    kind: "unsupported" as const,
+    ...base,
+    reason: "该文件类型暂不支持在线预览",
+  };
+}
+
 export async function getDownloadLink(
   fileId: string,
   userId: string,
@@ -1733,36 +1961,7 @@ export async function getDownloadLink(
   }
 
   await assertFileViewPermission(file, userId, userRole);
-
-  // Check sensitive file access
-  const tags: string[] = file.tags ? JSON.parse(file.tags) : [];
-  const isSensitive = tags.includes("sensitive");
-  if (isSensitive) {
-    // Only source, encoding, supervisor roles can download sensitive files
-    const allowedRoles: UserRole[] = ["super_admin", "group_admin", "supervisor"];
-    // Also check project membership for source/encoding roles
-    const membership = await prisma.projectMember.findFirst({
-      where: {
-        project_id: file.project_id,
-        user_id: userId,
-      },
-    });
-
-    const memberRole = membership?.role as TaskRole | undefined;
-    const sensitiveAllowedRoles: TaskRole[] = ["source", "encoding", "supervisor"];
-
-    const hasSensitiveAccess =
-      allowedRoles.includes(userRole) ||
-      (memberRole !== undefined && sensitiveAllowedRoles.includes(memberRole));
-
-    if (!hasSensitiveAccess) {
-      throw new AppError(
-        "Insufficient permissions to download sensitive files",
-        "FORBIDDEN",
-        403
-      );
-    }
-  }
+  await assertSensitiveFileAccess(file, userId, userRole);
 
   const targetVersion = file.versions[0];
   if (!targetVersion) {

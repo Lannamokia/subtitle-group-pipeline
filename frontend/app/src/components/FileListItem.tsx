@@ -11,6 +11,7 @@ import {
 
 interface FileListItemProps {
   file: FileEntity;
+  onPreview?: () => void;
   onDownload?: () => void;
   onViewHistory?: () => void;
   onDelete?: () => void;
@@ -26,18 +27,34 @@ const fileTypeIcons: Record<string, React.ReactNode> = {
   other: <File className="w-4 h-4 text-gray-500" />,
 };
 
-export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVersion = true, className }: FileListItemProps) {
+export function FileListItem({ file, onPreview, onDownload, onViewHistory, onDelete, showVersion = true, className }: FileListItemProps) {
   const isLink = file.assetKind === "link" || Boolean(file.url && file.size === 0);
   const historyCount = isLink ? file.linkHistory?.length ?? file.versionCount : file.versionCount;
   const canShowHistory = showVersion && Boolean(onViewHistory) && historyCount > 1;
+  const runAction = (handler?: () => void) => (event: React.MouseEvent) => {
+    event.stopPropagation();
+    handler?.();
+  };
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!onPreview) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onPreview();
+    }
+  };
 
   return (
     <div
       className={cn(
         "flex items-center gap-4 py-3 px-4 border-b border-gray-100 last:border-0",
         "hover:bg-gray-50 transition-colors",
+        onPreview && "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2",
         className
       )}
+      role={onPreview ? "button" : undefined}
+      tabIndex={onPreview ? 0 : undefined}
+      onClick={onPreview}
+      onKeyDown={handleKeyDown}
     >
       {/* File icon */}
       <div className="shrink-0">
@@ -82,7 +99,7 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
           variant="ghost"
           size="sm"
           className="h-8 w-8 p-0"
-          onClick={onDownload}
+          onClick={runAction(onDownload)}
           title={isLink ? "打开网盘链接" : "下载当前版本"}
           aria-label={isLink ? "打开网盘链接" : "下载当前版本"}
         >
@@ -93,7 +110,7 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
             variant="ghost"
             size="sm"
             className="h-8 w-8 p-0"
-            onClick={onViewHistory}
+            onClick={runAction(onViewHistory)}
             title="版本历史"
             aria-label="版本历史"
           >
@@ -102,23 +119,23 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
         )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(event) => event.stopPropagation()}>
               <MoreHorizontal className="w-4 h-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onDownload}>
+            <DropdownMenuItem onClick={runAction(onDownload)}>
               {isLink ? <Link2 className="w-4 h-4 mr-2" /> : <Download className="w-4 h-4 mr-2" />}
               {isLink ? "打开链接" : "下载"}
             </DropdownMenuItem>
             {canShowHistory && (
-              <DropdownMenuItem onClick={onViewHistory}>
+              <DropdownMenuItem onClick={runAction(onViewHistory)}>
                 <History className="w-4 h-4 mr-2" />
                 版本历史
               </DropdownMenuItem>
             )}
             {onDelete && (
-              <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={onDelete}>
+              <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={runAction(onDelete)}>
                 <Trash2 className="w-4 h-4 mr-2" />
                 删除
               </DropdownMenuItem>

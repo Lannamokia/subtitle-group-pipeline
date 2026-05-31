@@ -755,6 +755,28 @@ export async function getFileVersions(
   }
 }
 
+// GET /files/:fileId/preview - Online preview for current or requested version
+export async function getFilePreview(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const queryVersionId = req.query.version_id ?? req.query.versionId;
+    const versionId = getParam(req, "versionId") ||
+      (typeof queryVersionId === "string" ? queryVersionId : undefined);
+    const result = await fileService.getFilePreview(
+      getParam(req, "fileId"),
+      req.user!.id,
+      req.user!.role as "super_admin" | "group_admin" | "supervisor" | "member",
+      versionId
+    );
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 // POST /files/:fileId/versions/:versionId/approve - Approve version
 export async function approveVersion(
   req: AuthenticatedRequest,

@@ -273,6 +273,36 @@ export interface FileVersion {
   createdAt: string;
 }
 
+export type FilePreviewKind = 'text' | 'video' | 'unsupported';
+
+export interface FilePreviewVersion {
+  id: string;
+  fileId: string;
+  versionNumber: number;
+  size: number;
+  hash?: string;
+  isCurrent?: boolean;
+  isLatest?: boolean;
+  isLatestApproved?: boolean;
+  changeSummary?: string;
+  createdAt: string;
+}
+
+export interface FilePreview {
+  kind: FilePreviewKind;
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  version: FilePreviewVersion | null;
+  text?: string;
+  encoding?: string;
+  url?: string;
+  downloadUrl?: string;
+  expiresAt?: string;
+  reason?: string;
+}
+
 export interface LinkAsset {
   id: string;
   projectId: string;

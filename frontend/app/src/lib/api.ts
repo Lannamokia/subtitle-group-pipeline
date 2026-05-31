@@ -25,6 +25,7 @@ import type {
   TaskComment,
   FileEntity,
   FileVersion,
+  FilePreview,
   LinkAsset,
   Notification,
   NotificationPreference,
@@ -469,6 +470,37 @@ export function normalizeFileVersion(raw: AnyRecord): FileVersion {
     isLatestApproved: raw.isLatestApproved ?? raw.is_latest_approved,
     changeSummary: raw.changeSummary ?? raw.change_summary,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
+  };
+}
+
+export function normalizeFilePreview(raw: AnyRecord): FilePreview {
+  const rawVersion = raw.version && typeof raw.version === "object" ? raw.version as AnyRecord : null;
+  return {
+    kind: raw.kind ?? "unsupported",
+    fileId: raw.fileId ?? raw.file_id,
+    fileName: raw.fileName ?? raw.file_name ?? raw.name ?? "未命名文件",
+    mimeType: raw.mimeType ?? raw.mime_type ?? "application/octet-stream",
+    size: raw.size ?? raw.size_bytes ?? rawVersion?.size_bytes ?? 0,
+    version: rawVersion
+      ? {
+          id: rawVersion.id,
+          fileId: rawVersion.fileId ?? rawVersion.file_id,
+          versionNumber: rawVersion.versionNumber ?? rawVersion.version_number ?? 1,
+          size: rawVersion.size ?? rawVersion.size_bytes ?? 0,
+          hash: rawVersion.hash ?? rawVersion.checksum,
+          isCurrent: rawVersion.isCurrent ?? rawVersion.is_current,
+          isLatest: rawVersion.isLatest ?? rawVersion.is_latest,
+          isLatestApproved: rawVersion.isLatestApproved ?? rawVersion.is_latest_approved,
+          changeSummary: rawVersion.changeSummary ?? rawVersion.change_summary,
+          createdAt: rawVersion.createdAt ?? rawVersion.created_at ?? "",
+        }
+      : null,
+    text: typeof raw.text === "string" ? raw.text : undefined,
+    encoding: typeof raw.encoding === "string" ? raw.encoding : undefined,
+    url: toBackendAssetUrl(raw.url),
+    downloadUrl: toBackendAssetUrl(raw.downloadUrl ?? raw.download_url),
+    expiresAt: raw.expiresAt ?? raw.expires_at,
+    reason: raw.reason,
   };
 }
 
@@ -1714,6 +1746,11 @@ export const fileApi = {
     api.get<ApiResponse<unknown[]>>(`/files/${fileId}/versions`).then((response) =>
       response.data.data.map((version) => normalizeFileVersion(version as AnyRecord))
     ),
+
+  getPreview: (fileId: string, versionId?: string) =>
+    api.get<ApiResponse<unknown>>(`/files/${fileId}/preview`, {
+      params: versionId ? { version_id: versionId } : undefined,
+    }).then((response) => normalizeFilePreview(response.data.data as AnyRecord)),
 
   approveVersion: (fileId: string, versionId: string) =>
     api.post<ApiResponse<unknown>>(`/files/${fileId}/versions/${versionId}/approve`).then((response) =>

@@ -197,11 +197,29 @@ router.get(
   controller.getFileVersions
 );
 
+router.get(
+  "/files/:fileId/preview",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  validateQuery(z.object({
+    version_id: z.string().uuid("Invalid version ID").optional(),
+    versionId: z.string().uuid("Invalid version ID").optional(),
+  })),
+  controller.getFilePreview
+);
+
 router.post(
   "/files/:fileId/versions/:versionId/approve",
   authenticate,
   validateParams(versionIdParamSchema),
   controller.approveVersion
+);
+
+router.get(
+  "/files/:fileId/versions/:versionId/preview",
+  authenticate,
+  validateParams(versionIdParamSchema),
+  controller.getFilePreview
 );
 
 router.get(
@@ -253,11 +271,29 @@ router.get(
   controller.getFileVersions
 );
 
+router.get(
+  "/:fileId/preview",
+  authenticate,
+  validateParams(fileIdParamSchema),
+  validateQuery(z.object({
+    version_id: z.string().uuid("Invalid version ID").optional(),
+    versionId: z.string().uuid("Invalid version ID").optional(),
+  })),
+  controller.getFilePreview
+);
+
 router.post(
   "/:fileId/versions/:versionId/approve",
   authenticate,
   validateParams(versionIdParamSchema),
   controller.approveVersion
+);
+
+router.get(
+  "/:fileId/versions/:versionId/preview",
+  authenticate,
+  validateParams(versionIdParamSchema),
+  controller.getFilePreview
 );
 
 router.get(
