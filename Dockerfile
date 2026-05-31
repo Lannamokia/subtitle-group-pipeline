@@ -11,10 +11,13 @@ RUN npm run build
 
 FROM node:22-bookworm-slim AS backend-build
 WORKDIR /src/backend
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
 COPY backend/package*.json ./
 RUN npm ci
 COPY backend ./
-RUN npm run build && npm prune --omit=dev
+RUN node scripts/generate-prisma-client.cjs && npm run build && npm prune --omit=dev
 
 FROM caddy:2 AS caddy-bin
 
