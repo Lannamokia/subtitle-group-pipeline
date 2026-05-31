@@ -2229,6 +2229,40 @@ describe("Project & Workflow Tests", () => {
         expect(submittedTask!.completed_at).toBeNull();
       }
     );
+
+    it("should prevent assignees from approving or rejecting their own submitted tasks", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: worker, token: workerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "submitted",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+
+      const approveRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/approve`,
+        { approved: true, comments: "self approve" },
+        workerToken
+      );
+      const rejectRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/reject`,
+        { approved: false, comments: "self reject" },
+        workerToken
+      );
+
+      expectError(approveRes, 403, "FORBIDDEN");
+      expectError(rejectRes, 403, "FORBIDDEN");
+      expect(await prisma.review.count({ where: { task_id: task.id } })).toBe(0);
+      const unchanged = await prisma.task.findUnique({ where: { id: task.id } });
+      expect(unchanged!.status).toBe("submitted");
+    });
   });
 
   describe("Supervisory Overrides", () => {

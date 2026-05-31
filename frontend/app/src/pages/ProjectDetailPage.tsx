@@ -2034,7 +2034,7 @@ function TasksTab({
                   </div>
                 )}
 
-                {selectedTask.status === "submitted" && (
+                {canManageTasks && selectedTask.status === "submitted" && (
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-gray-700">审核意见</h4>
                     <Textarea
@@ -2226,7 +2226,7 @@ function TasksTab({
                         提交
                       </Button>
                     )}
-                    {selectedTask.status === "submitted" && (
+                    {canManageTasks && selectedTask.status === "submitted" && (
                       <>
                         <Button
                           size="sm"

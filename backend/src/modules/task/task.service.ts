@@ -2461,6 +2461,10 @@ export async function approveTask(
     throw new AppError("Cannot approve task in archived/deleted project", "BAD_REQUEST", 400);
   }
 
+  if (!(await canManageProjectTasks(task.project_id, reviewerId))) {
+    throw new AppError("Only project supervisors can approve task reviews", "FORBIDDEN", 403);
+  }
+
   if (task.status !== "submitted") {
     throw new AppError(
       `Task cannot be approved. Current status: ${task.status}`,
@@ -2582,6 +2586,10 @@ export async function rejectTask(
 
   if (task.project.deleted_at || task.project.is_archived) {
     throw new AppError("Cannot reject task in archived/deleted project", "BAD_REQUEST", 400);
+  }
+
+  if (!(await canManageProjectTasks(task.project_id, reviewerId))) {
+    throw new AppError("Only project supervisors can reject task reviews", "FORBIDDEN", 403);
   }
 
   if (task.status !== "submitted") {
