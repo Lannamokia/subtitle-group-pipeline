@@ -79,6 +79,8 @@ function formatShortList(items: string[], max = 8) {
   return `${items.slice(0, max).join("、")} 等 ${items.length} 种`;
 }
 
+const breakableTextClass = "break-words [overflow-wrap:anywhere]";
+
 export function FileListPage() {
   const currentUser = useAuthStore((state) => state.user);
   const isSupervisor = useAuthStore((state) => state.isSupervisor());
@@ -623,7 +625,7 @@ export function FileListPage() {
                 </SelectContent>
               </Select>
             )}
-            <p className="text-xs leading-5 text-gray-500">
+            <p className={cn("text-xs leading-5 text-gray-500", breakableTextClass)}>
               当前上传策略允许：{uploadProfile.fileTypes.map((type) => getFileTypeLabel(type)).join("、")}
               {uploadProfile.formats.length > 0 ? `；格式：${formatShortList(uploadProfile.formats, 8)}` : ""}
             </p>
@@ -640,7 +642,7 @@ export function FileListPage() {
           </div>
           <div
             className={cn(
-              "border-2 border-dashed rounded-lg p-8 text-center transition-colors",
+              "min-w-0 overflow-hidden rounded-lg border-2 border-dashed p-5 text-center transition-colors sm:p-8",
               dragOver ? "border-primary-500 bg-primary-50" : "border-gray-300"
             )}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}

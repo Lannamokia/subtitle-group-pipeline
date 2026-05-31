@@ -357,14 +357,14 @@ export function ProjectCreatePage() {
                     onClick={() => handleSelectTemplate(template)}
                   >
                     <CardContent className="p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          {template.type === "anime" && <Monitor className="w-4 h-4 text-gray-400" />}
-                          {template.type === "movie" && <Film className="w-4 h-4 text-gray-400" />}
-                          {(template.type === "collection" || template.type === "other") && <FolderOpen className="w-4 h-4 text-gray-400" />}
-                          <span className="font-medium text-gray-800">{template.name}</span>
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          {template.type === "anime" && <Monitor className="h-4 w-4 shrink-0 text-gray-400" />}
+                          {template.type === "movie" && <Film className="h-4 w-4 shrink-0 text-gray-400" />}
+                          {(template.type === "collection" || template.type === "other") && <FolderOpen className="h-4 w-4 shrink-0 text-gray-400" />}
+                          <span className="min-w-0 break-words font-medium text-gray-800 [overflow-wrap:anywhere]">{template.name}</span>
                         </div>
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
                           {template.type === "anime"
                             ? "番剧"
                             : template.type === "movie"

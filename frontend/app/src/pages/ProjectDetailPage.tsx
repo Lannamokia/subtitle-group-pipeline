@@ -416,6 +416,8 @@ function formatShortList(items: string[], max = 8) {
   return `${items.slice(0, max).join("、")} 等 ${items.length} 种`;
 }
 
+const breakableTextClass = "break-words [overflow-wrap:anywhere]";
+
 function formatDuration(seconds: number | null | undefined) {
   if (seconds === null || seconds === undefined) return "未设置";
   const safeSeconds = Math.max(0, seconds);
@@ -448,13 +450,13 @@ function ProductOutputRequirement({
   ];
 
   return (
-    <div className="rounded-md bg-white px-3 py-2">
+    <div className="min-w-0 overflow-hidden rounded-md bg-white px-3 py-2">
       <p className="text-xs font-semibold text-gray-700">{title}</p>
       <div className="mt-2 grid gap-1.5 text-xs sm:grid-cols-2">
         {items.map((item) => (
-          <div key={item.label} className="flex justify-between gap-2 rounded bg-gray-50 px-2 py-1.5">
-            <span className="text-gray-500">{item.label}</span>
-            <span className="text-right text-gray-700">{item.value || "-"}</span>
+          <div key={item.label} className="flex min-w-0 justify-between gap-2 rounded bg-gray-50 px-2 py-1.5">
+            <span className="shrink-0 text-gray-500">{item.label}</span>
+            <span className={cn("min-w-0 text-right text-gray-700", breakableTextClass)}>{item.value || "-"}</span>
           </div>
         ))}
       </div>
@@ -1197,9 +1199,9 @@ function TasksTab({
                       <p className="text-[10px] text-gray-500">完成</p>
                     </div>
                   </div>
-                  <div className="rounded-md bg-white px-2 py-2 text-[11px] text-gray-500">
+                  <div className="min-w-0 overflow-hidden rounded-md bg-white px-2 py-2 text-[11px] text-gray-500">
                     <p className="font-medium text-gray-600">可提交</p>
-                    <p className="mt-1 leading-5">{formatShortList(step.formats, 5)}</p>
+                    <p className={cn("mt-1 leading-5", breakableTextClass)}>{formatShortList(step.formats, 5)}</p>
                   </div>
                   <div className="space-y-2">
                     {roleTasks.map((task) => (
@@ -1232,9 +1234,9 @@ function TasksTab({
                 <SheetTitle className="break-words text-xl">{selectedTask.name}</SheetTitle>
               </SheetHeader>
               <div className="mt-6 min-w-0 space-y-6">
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-3">
                   <StatusBadge status={selectedTask.status} size="md" showIcon />
-                  <span className={cn("text-caption px-2 py-0.5 rounded border", getRoleColor(selectedTask.role))}>
+                  <span className={cn("text-caption rounded border px-2 py-0.5", getRoleColor(selectedTask.role))}>
                     {getRoleLabel(selectedTask.role)}
                   </span>
                 </div>
@@ -1252,23 +1254,29 @@ function TasksTab({
                       <h4 className="text-sm font-medium text-gray-700">岗位交付要求</h4>
                       <p className="mt-1 text-xs leading-5 text-gray-500">{selectedTaskDeliveryRule.guidance}</p>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex min-w-0 flex-wrap gap-1.5">
                       {selectedTaskDeliveryRule.deliverables.map((item) => (
-                        <Badge key={item} variant="outline" className="bg-white text-[10px] font-normal">
+                        <Badge
+                          key={item}
+                          variant="outline"
+                          className={cn("max-w-full whitespace-normal bg-white text-center text-[10px] font-normal", breakableTextClass)}
+                        >
                           {item}
                         </Badge>
                       ))}
                     </div>
                     <div className="grid gap-2 text-xs sm:grid-cols-2">
-                      <div className="rounded-md bg-white px-3 py-2">
+                      <div className="min-w-0 overflow-hidden rounded-md bg-white px-3 py-2">
                         <p className="font-medium text-gray-600">文件类别</p>
-                        <p className="mt-1 text-gray-500">
+                        <p className={cn("mt-1 text-gray-500", breakableTextClass)}>
                           {selectedTaskDeliveryRule.fileTypes.map((type) => getFileTypeLabel(type)).join("、")}
                         </p>
                       </div>
-                      <div className="rounded-md bg-white px-3 py-2">
+                      <div className="min-w-0 overflow-hidden rounded-md bg-white px-3 py-2">
                         <p className="font-medium text-gray-600">常用格式</p>
-                        <p className="mt-1 text-gray-500">{formatShortList(selectedTaskDeliveryRule.formats, 6)}</p>
+                        <p className={cn("mt-1 text-gray-500", breakableTextClass)}>
+                          {formatShortList(selectedTaskDeliveryRule.formats, 6)}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -1478,7 +1486,7 @@ function TasksTab({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <h4 className="text-sm font-medium text-gray-700">提交任务文件</h4>
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="shrink-0 text-[10px]">
                         {getRoleLabel(selectedTask.role)}
                       </Badge>
                     </div>
@@ -1508,7 +1516,7 @@ function TasksTab({
                     />
                     <div
                       className={cn(
-                        "rounded-lg border-2 border-dashed p-5 text-center transition-colors",
+                        "min-w-0 overflow-hidden rounded-lg border-2 border-dashed p-4 text-center transition-colors sm:p-5",
                         taskDragOver ? "border-primary-500 bg-primary-50" : "border-gray-300 bg-white"
                       )}
                       onDragOver={(event) => {
@@ -1524,7 +1532,7 @@ function TasksTab({
                     >
                       <Upload className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                       <p className="text-sm text-gray-600">拖拽符合岗位要求的文件到此处</p>
-                      <p className="mt-1 text-xs text-gray-400">
+                      <p className={cn("mx-auto mt-1 max-w-full text-xs leading-5 text-gray-400", breakableTextClass)}>
                         支持：{formatShortList(selectedTaskDeliveryRule.formats, 8)}
                       </p>
                       <label className="mt-3 inline-block">
@@ -1961,7 +1969,7 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
                 </SelectContent>
               </Select>
             )}
-            <p className="text-xs leading-5 text-gray-500">
+            <p className={cn("text-xs leading-5 text-gray-500", breakableTextClass)}>
               当前上传策略允许：{uploadProfile.fileTypes.map((type) => getFileTypeLabel(type)).join("、")}
               {uploadProfile.formats.length > 0 ? `；格式：${formatShortList(uploadProfile.formats, 8)}` : ""}
             </p>
@@ -1978,7 +1986,7 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
           </div>
           <div
             className={cn(
-              "border-2 border-dashed rounded-lg p-8 text-center transition-colors",
+              "min-w-0 overflow-hidden rounded-lg border-2 border-dashed p-5 text-center transition-colors sm:p-8",
               dragOver ? "border-primary-500 bg-primary-50" : "border-gray-300"
             )}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}

@@ -1091,6 +1091,8 @@ function ProductOutputFields({
   );
 }
 
+const breakableTextClass = "break-words [overflow-wrap:anywhere]";
+
 function ProductOutputSummary({
   title,
   output,
@@ -1111,17 +1113,17 @@ function ProductOutputSummary({
   ];
 
   return (
-    <div className="rounded-lg border bg-gray-50/50 p-3">
+    <div className="min-w-0 overflow-hidden rounded-lg border bg-gray-50/50 p-3">
       <h5 className="mb-2 text-sm font-semibold text-gray-800">{title}</h5>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid gap-2 sm:grid-cols-2">
         {items.map((item) => (
-          <div key={item.label} className="flex justify-between gap-3 rounded bg-white px-3 py-2">
-            <span className="text-gray-500">{item.label}</span>
-            <span className="text-right">{item.value || "-"}</span>
+          <div key={item.label} className="flex min-w-0 justify-between gap-3 rounded bg-white px-3 py-2">
+            <span className="shrink-0 text-gray-500">{item.label}</span>
+            <span className={cn("min-w-0 text-right", breakableTextClass)}>{item.value || "-"}</span>
           </div>
         ))}
         {output.extraParams && (
-          <div className="col-span-2 rounded bg-white px-3 py-2">
+          <div className="rounded bg-white px-3 py-2 sm:col-span-2">
             <div className="mb-1 text-gray-500">额外参数</div>
             <div className="break-all font-mono text-xs text-gray-700">{output.extraParams}</div>
           </div>
@@ -1221,9 +1223,9 @@ function TemplateDetailDialog({
           <div>
             <h4 className="text-sm font-medium text-gray-700 mb-2">成品配置</h4>
             <div className="space-y-3 text-sm">
-              <div className="flex justify-between gap-3 px-3 py-2 bg-gray-50 rounded">
-                <span className="text-gray-500">命名规则</span>
-                <span className="font-mono text-right">{productConfig.namingRule}</span>
+              <div className="flex min-w-0 justify-between gap-3 rounded bg-gray-50 px-3 py-2">
+                <span className="shrink-0 text-gray-500">命名规则</span>
+                <span className={cn("min-w-0 text-right font-mono", breakableTextClass)}>{productConfig.namingRule}</span>
               </div>
               <ProductOutputSummary title="内封成品" output={productConfig.outputs.muxed} />
               <ProductOutputSummary title="内嵌成品" output={productConfig.outputs.burned} />
