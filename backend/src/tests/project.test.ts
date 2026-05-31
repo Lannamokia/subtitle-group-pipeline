@@ -2403,6 +2403,86 @@ describe("Project & Workflow Tests", () => {
       expect(resetDownstream!.submitted_at).toBeNull();
     });
 
+    it("should reopen approved translation claims when resetting completed translation tasks", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: translator, token: translatorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "completed",
+        creator_id: owner.id,
+        completed_at: new Date(),
+      });
+      const claim = await prisma.translationClaim.create({
+        data: {
+          task_id: task.id,
+          unit_id: unit.id,
+          user_id: translator.id,
+          segment_start: 0,
+          segment_end: 120,
+          status: "approved",
+          submitted_at: new Date("2026-01-01T00:00:00.000Z"),
+          approved_at: new Date("2026-01-01T00:10:00.000Z"),
+        },
+      });
+      const { version: oldVersion } = await createTestFile({
+        project_id: project.id,
+        uploader_id: translator.id,
+        name: "translation_old.ass",
+        metadata: JSON.stringify({ task_id: task.id, unit_id: unit.id, role: "translation" }),
+      });
+      await prisma.translationSubmission.create({
+        data: {
+          task_id: task.id,
+          user_id: translator.id,
+          claim_id: claim.id,
+          file_version_id: oldVersion.id,
+          content: "",
+          line_count: null,
+          submitted_at: new Date("2026-01-01T00:00:00.000Z"),
+        },
+      });
+
+      const resetRes = await post(app, `/api/v1/tasks/${task.id}/reset`, { reason: "翻译返工" }, ownerToken);
+      expectSuccess(resetRes, 200);
+
+      const resetTask = await prisma.task.findUnique({ where: { id: task.id } });
+      const resetClaim = await prisma.translationClaim.findUnique({ where: { id: claim.id } });
+      expect(resetTask!.status).toBe("in_progress");
+      expect(resetTask!.assignee_id).toBe(translator.id);
+      expect(resetClaim!.status).toBe("active");
+      expect(resetClaim!.submitted_at).toBeNull();
+      expect(resetClaim!.approved_at).toBeNull();
+
+      const { version: newVersion } = await createTestFile({
+        project_id: project.id,
+        uploader_id: translator.id,
+        name: "translation_new.ass",
+        metadata: JSON.stringify({ task_id: task.id, unit_id: unit.id, role: "translation" }),
+      });
+      await prisma.fileVersion.update({
+        where: { id: oldVersion.id },
+        data: { created_at: new Date("2026-01-01T00:00:00.000Z") },
+      });
+      await prisma.fileVersion.update({
+        where: { id: newVersion.id },
+        data: { created_at: new Date("2026-01-01T01:00:00.000Z") },
+      });
+
+      const submitRes = await post(app, `/api/v1/tasks/${task.id}/submit`, {}, translatorToken);
+      expectSuccess(submitRes, 200);
+
+      const updatedSubmission = await prisma.translationSubmission.findFirst({
+        where: { claim_id: claim.id },
+        orderBy: { submitted_at: "desc" },
+      });
+      expect(updatedSubmission!.file_version_id).toBe(newVersion.id);
+    });
+
     it("should prevent non-supervisors from manually resetting project tasks", async () => {
       const { user: owner } = await createTestUser();
       const { token: workerToken } = await createTestUser();

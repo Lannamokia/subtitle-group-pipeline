@@ -976,7 +976,7 @@ async function ensureTranslationSubmissionForClaim(
   const uploaded = await findLatestUploadedTranslationVersionForClaim(task, claim);
 
   if (existing) {
-    if (!existing.file_version_id && uploaded?.version?.id) {
+    if (uploaded?.version?.id && existing.file_version_id !== uploaded.version.id) {
       return prisma.translationSubmission.update({
         where: { id: existing.id },
         data: { file_version_id: uploaded.version.id },
@@ -1062,6 +1062,37 @@ async function getSubmittedTranslationClaimForApproval(task: {
       submitted_at: new Date(),
     },
   });
+}
+
+async function getTranslationClaimForReset(task: {
+  id: string;
+  assignee_id: string | null;
+}) {
+  const claims = await prisma.translationClaim.findMany({
+    where: {
+      task_id: task.id,
+      status: { in: ["active", "submitted", "approved"] },
+    },
+    include: {
+      task: {
+        select: {
+          translation_order: true,
+          created_at: true,
+        },
+      },
+    },
+  });
+
+  if (claims.length === 0) {
+    return null;
+  }
+
+  const sorted = claims.sort(compareTranslationClaims);
+  if (task.assignee_id) {
+    return [...sorted].reverse().find((claim) => claim.user_id === task.assignee_id) ?? sorted[sorted.length - 1];
+  }
+
+  return sorted[sorted.length - 1];
 }
 
 async function discardReleaseArtifacts(
@@ -2640,6 +2671,9 @@ export async function resetTask(
 
   const prerequisiteState = await getTaskPrerequisiteState(task);
   const resetStatus: TaskStatus = prerequisiteState.workflow.missing ? "pending_publish" : "in_progress";
+  const translationClaimForReset = task.role === TaskRole.translation && resetStatus === "in_progress"
+    ? await getTranslationClaimForReset(task)
+    : null;
   const updateData: Record<string, unknown> = {
     status: resetStatus,
     started_at: resetStatus === "in_progress" ? task.started_at || (task.assignee_id ? new Date() : null) : null,
@@ -2648,6 +2682,11 @@ export async function resetTask(
     cancelled_at: null,
     frozen_at: null,
   };
+
+  if (translationClaimForReset) {
+    updateData.assignee_id = translationClaimForReset.user_id;
+    updateData.started_at = task.started_at || new Date();
+  }
 
   // For release role, discard uploaded artifacts
   if (task.role === "release") {
@@ -2658,6 +2697,17 @@ export async function resetTask(
     where: { id: taskId },
     data: updateData,
   });
+
+  if (translationClaimForReset) {
+    await prisma.translationClaim.update({
+      where: { id: translationClaimForReset.id },
+      data: {
+        status: "active",
+        submitted_at: null,
+        approved_at: null,
+      },
+    });
+  }
 
   // Cascade reset downstream tasks whose inputs are invalidated.
   await cascadeResetDownstream(taskId, actorId);
