@@ -1,6 +1,6 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
-import { TaskStatus, TaskRole, TimelineEventType, ReviewStatus, ClaimStatus } from "@prisma/client";
+import { TaskStatus, TaskRole, TimelineEventType, ReviewStatus, ClaimStatus, FileType } from "@prisma/client";
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
@@ -241,6 +241,16 @@ function parseMetadata(metadata: string | null | undefined): Record<string, unkn
   } catch {
     return {};
   }
+}
+
+function metadataStringValue(metadata: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
@@ -559,6 +569,139 @@ async function notifyUnlockedDownstreamTask(
       reason: "依赖任务已完成，开放任务可领取",
     });
   }
+}
+
+async function findLatestUploadedTranslationVersionForClaim(
+  task: { id: string; project_id: string; unit_id: string | null },
+  claim: { user_id: string }
+) {
+  const files = await prisma.fileEntity.findMany({
+    where: {
+      project_id: task.project_id,
+      uploader_id: claim.user_id,
+      file_type: FileType.subtitle,
+      is_deleted: false,
+    },
+    include: {
+      versions: {
+        orderBy: { version_number: "desc" },
+        take: 1,
+      },
+    },
+    orderBy: { created_at: "desc" },
+  });
+
+  return files
+    .filter((file) => {
+      const metadata = parseMetadata(file.metadata);
+      const taskId = metadataStringValue(metadata, "task_id", "taskId");
+      const unitId = metadataStringValue(metadata, "unit_id", "unitId");
+      const role = metadataStringValue(metadata, "role", "task_role");
+      return (
+        taskId === task.id ||
+        (Boolean(task.unit_id) && unitId === task.unit_id && role === TaskRole.translation)
+      );
+    })
+    .map((file) => ({
+      file,
+      version: file.versions[0],
+    }))
+    .filter((item) => Boolean(item.version))
+    .sort((a, b) => {
+      const aTime = a.version!.created_at?.getTime?.() ?? a.file.created_at.getTime();
+      const bTime = b.version!.created_at?.getTime?.() ?? b.file.created_at.getTime();
+      return bTime - aTime;
+    })[0] || null;
+}
+
+async function ensureTranslationSubmissionForClaim(
+  task: { id: string; project_id: string; unit_id: string | null },
+  claim: { id: string; user_id: string }
+) {
+  const existing = await prisma.translationSubmission.findFirst({
+    where: { claim_id: claim.id },
+    orderBy: { submitted_at: "desc" },
+  });
+
+  const uploaded = await findLatestUploadedTranslationVersionForClaim(task, claim);
+
+  if (existing) {
+    if (!existing.file_version_id && uploaded?.version?.id) {
+      return prisma.translationSubmission.update({
+        where: { id: existing.id },
+        data: { file_version_id: uploaded.version.id },
+      });
+    }
+    return existing;
+  }
+
+  if (!uploaded?.version?.id) {
+    throw new AppError("请先上传当前翻译分段的字幕文件后再提交审核", "VALIDATION_ERROR", 400);
+  }
+
+  return prisma.translationSubmission.create({
+    data: {
+      task_id: task.id,
+      user_id: claim.user_id,
+      claim_id: claim.id,
+      file_version_id: uploaded.version.id,
+      content: "",
+      line_count: null,
+    },
+  });
+}
+
+async function getSubmittedTranslationClaimForApproval(task: {
+  id: string;
+  project_id: string;
+  unit_id: string | null;
+  assignee_id: string | null;
+  status: TaskStatus;
+}) {
+  const submittedClaim = await prisma.translationClaim.findFirst({
+    where: {
+      task: translationClaimScope(task),
+      status: "submitted",
+    },
+    orderBy: [
+      { segment_start: "asc" },
+      { submitted_at: "asc" },
+    ],
+  });
+
+  if (submittedClaim) {
+    await ensureTranslationSubmissionForClaim(task, submittedClaim);
+    return submittedClaim;
+  }
+
+  if (task.status !== "submitted") {
+    return null;
+  }
+
+  const activeClaim = await prisma.translationClaim.findFirst({
+    where: {
+      task: translationClaimScope(task),
+      status: "active",
+      ...(task.assignee_id ? { user_id: task.assignee_id } : {}),
+    },
+    orderBy: [
+      { segment_start: "asc" },
+      { claimed_at: "asc" },
+    ],
+  });
+
+  if (!activeClaim) {
+    return null;
+  }
+
+  await ensureTranslationSubmissionForClaim(task, activeClaim);
+  return prisma.translationClaim.update({
+    where: { id: activeClaim.id },
+    data: {
+      status: "submitted",
+      submitted_at: new Date(),
+    },
+  });
 }
 
 async function discardReleaseArtifacts(
@@ -1623,7 +1766,7 @@ export async function submitTask(
     throw new AppError("Only the assigned member can submit this task", "FORBIDDEN", 403);
   }
 
-  let activeTranslationClaim: { id: string } | null = null;
+  let activeTranslationClaim: { id: string; user_id: string } | null = null;
   if (task.role === TaskRole.translation) {
     activeTranslationClaim = await prisma.translationClaim.findFirst({
       where: {
@@ -1631,7 +1774,7 @@ export async function submitTask(
         user_id: userId,
         status: "active",
       },
-      select: { id: true },
+      select: { id: true, user_id: true },
     });
 
     if (!activeTranslationClaim) {
@@ -1641,6 +1784,8 @@ export async function submitTask(
         403
       );
     }
+
+    await ensureTranslationSubmissionForClaim(task, activeTranslationClaim);
   }
 
   const requiresReview = REVIEW_REQUIRED_ROLES.includes(task.role);
@@ -1797,6 +1942,7 @@ export async function approveTask(
     where: { id: taskId },
     include: {
       project: { select: { is_archived: true, deleted_at: true } },
+      unit: { select: { episode_length: true } },
     },
   });
 
@@ -1816,6 +1962,14 @@ export async function approveTask(
     );
   }
 
+  const submittedTranslationClaim = task.role === TaskRole.translation
+    ? await getSubmittedTranslationClaimForApproval(task)
+    : null;
+
+  if (task.role === TaskRole.translation && !submittedTranslationClaim) {
+    throw new AppError("No submitted translation segment is waiting for approval", "BAD_REQUEST", 400);
+  }
+
   // Create review record
   const review = await prisma.review.create({
     data: {
@@ -1832,20 +1986,7 @@ export async function approveTask(
 
   let updated;
   if (task.role === TaskRole.translation) {
-    const submittedClaim = await prisma.translationClaim.findFirst({
-      where: {
-        task: translationClaimScope(task),
-        status: "submitted",
-      },
-      orderBy: [
-        { segment_start: "asc" },
-        { submitted_at: "asc" },
-      ],
-    });
-
-    if (!submittedClaim) {
-      throw new AppError("No submitted translation segment is waiting for approval", "BAD_REQUEST", 400);
-    }
+    const submittedClaim = submittedTranslationClaim!;
 
     await prisma.translationClaim.update({
       where: { id: submittedClaim.id },
@@ -2494,6 +2635,7 @@ export async function submitTranslation(
     );
   }
 
+  const submittedAt = new Date();
   const submission = await prisma.translationSubmission.create({
     data: {
       task_id: taskId,
@@ -2511,7 +2653,16 @@ export async function submitTranslation(
     },
     data: {
       status: "submitted",
-      submitted_at: new Date(),
+      submitted_at: submittedAt,
+    },
+  });
+
+  await prisma.task.update({
+    where: { id: taskId },
+    data: {
+      status: "submitted",
+      assignee_id: userId,
+      submitted_at: submittedAt,
     },
   });
 
