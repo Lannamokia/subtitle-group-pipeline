@@ -1,6 +1,7 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
 import { TaskStatus, TaskRole, TimelineEventType, ReviewStatus, ClaimStatus, FileType } from "@prisma/client";
+import { randomUUID } from "crypto";
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
@@ -67,6 +68,28 @@ const TASK_DOWNSTREAM_RESET_STATUSES: TaskStatus[] = [
 const RESERVED_TRANSLATION_CLAIM_STATUSES: ClaimStatus[] = ["pending", "active", "submitted"];
 const ACTIVE_TRANSLATION_CLAIM_STATUSES: ClaimStatus[] = ["pending", "active"];
 
+type TaskPrerequisiteSubject = {
+  id: string;
+  project_id: string;
+  unit_id: string | null;
+  role: TaskRole;
+};
+
+type WorkflowPredecessorState = {
+  configured: boolean;
+  required: boolean;
+  ready: boolean;
+  missing: boolean;
+  predecessorRole?: TaskRole;
+  predecessorTaskIds: string[];
+};
+
+type TaskPrerequisiteState = {
+  ready: boolean;
+  dependenciesMet: boolean;
+  workflow: WorkflowPredecessorState;
+};
+
 /**
  * Check if all dependencies for a task are completed
  */
@@ -81,6 +104,133 @@ async function checkDependenciesMet(taskId: string): Promise<boolean> {
   return dependencies.every(
     (dep) => dep.depends_on.status === "completed"
   );
+}
+
+function workflowEntriesFromConfig(value: string | null | undefined): Array<Record<string, unknown>> {
+  const arrayEntries = parseJsonArray(value)
+    .filter((entry): entry is Record<string, unknown> =>
+      Boolean(entry) && typeof entry === "object" && !Array.isArray(entry)
+    );
+  if (arrayEntries.length > 0) {
+    return arrayEntries.map((entry) => ({ ...entry }));
+  }
+
+  const objectConfig = parseJsonObject(value);
+  return Object.entries(objectConfig)
+    .filter(([, config]) => config && typeof config === "object" && !Array.isArray(config))
+    .map(([role, config]) => ({
+      ...(config as Record<string, unknown>),
+      role: (config as Record<string, unknown>).role ?? role,
+    }));
+}
+
+function isPipelineRole(value: unknown): value is TaskRole {
+  return typeof value === "string" && ROLE_PIPELINE.includes(value as TaskRole);
+}
+
+function enabledPipelineRolesFromEntries(entries: Array<Record<string, unknown>>): TaskRole[] {
+  const enabled = new Set<TaskRole>();
+  for (const entry of entries) {
+    if (entry.enabled === false || !isPipelineRole(entry.role)) {
+      continue;
+    }
+    enabled.add(entry.role);
+  }
+  return ROLE_PIPELINE.filter((role) => enabled.has(role));
+}
+
+async function getConfiguredPipelineRoles(projectId: string): Promise<TaskRole[]> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      workflow_config: true,
+      template: { select: { roles: true } },
+    },
+  });
+
+  const projectRoles = enabledPipelineRolesFromEntries(
+    workflowEntriesFromConfig(project?.workflow_config)
+  );
+  if (projectRoles.length > 0) {
+    return projectRoles;
+  }
+
+  return enabledPipelineRolesFromEntries(
+    workflowEntriesFromConfig(project?.template?.roles)
+  );
+}
+
+async function getWorkflowPredecessorState(
+  task: TaskPrerequisiteSubject
+): Promise<WorkflowPredecessorState> {
+  const configuredRoles = await getConfiguredPipelineRoles(task.project_id);
+  if (configuredRoles.length === 0) {
+    return { configured: false, required: false, ready: true, missing: false, predecessorTaskIds: [] };
+  }
+
+  const roleIndex = configuredRoles.indexOf(task.role);
+  if (roleIndex <= 0) {
+    return { configured: roleIndex === 0, required: false, ready: true, missing: false, predecessorTaskIds: [] };
+  }
+
+  const predecessorRole = configuredRoles[roleIndex - 1];
+  const predecessors = await prisma.task.findMany({
+    where: {
+      project_id: task.project_id,
+      unit_id: task.unit_id,
+      role: predecessorRole,
+      id: { not: task.id },
+    },
+    select: {
+      id: true,
+      status: true,
+    },
+  });
+
+  if (predecessors.length === 0) {
+    return {
+      required: true,
+      configured: true,
+      ready: false,
+      missing: true,
+      predecessorRole,
+      predecessorTaskIds: [],
+    };
+  }
+
+  return {
+    required: true,
+    configured: true,
+    ready: predecessors.every((predecessor) => predecessor.status === "completed"),
+    missing: false,
+    predecessorRole,
+    predecessorTaskIds: predecessors.map((predecessor) => predecessor.id),
+  };
+}
+
+async function getTaskPrerequisiteState(
+  task: TaskPrerequisiteSubject
+): Promise<TaskPrerequisiteState> {
+  const [dependenciesMet, workflow] = await Promise.all([
+    checkDependenciesMet(task.id),
+    getWorkflowPredecessorState(task),
+  ]);
+
+  return {
+    ready: dependenciesMet && workflow.ready,
+    dependenciesMet,
+    workflow,
+  };
+}
+
+function getTaskPrerequisiteErrorMessage(action: string, state: TaskPrerequisiteState): string {
+  if (state.workflow.missing) {
+    return `Cannot ${action}: workflow predecessor task is missing`;
+  }
+  if (!state.workflow.ready) {
+    return `Cannot ${action}: workflow predecessor tasks are not completed`;
+  }
+  return `Cannot ${action}: dependencies not met`;
 }
 
 function getUnlockedTaskStatus(task: { assignee_id: string | null }): TaskStatus {
@@ -99,6 +249,43 @@ async function getDownstreamTasks(taskId: string) {
   });
 
   return dependents.map((d) => d.task);
+}
+
+async function getWorkflowDownstreamTasks(task: TaskPrerequisiteSubject) {
+  const configuredRoles = await getConfiguredPipelineRoles(task.project_id);
+  const roleIndex = configuredRoles.indexOf(task.role);
+  if (roleIndex < 0 || roleIndex >= configuredRoles.length - 1) {
+    return [];
+  }
+
+  return prisma.task.findMany({
+    where: {
+      project_id: task.project_id,
+      unit_id: task.unit_id,
+      role: configuredRoles[roleIndex + 1],
+      id: { not: task.id },
+    },
+  });
+}
+
+function dedupeTasks<T extends { id: string }>(tasks: T[]): T[] {
+  const seen = new Set<string>();
+  return tasks.filter((task) => {
+    if (seen.has(task.id)) {
+      return false;
+    }
+    seen.add(task.id);
+    return true;
+  });
+}
+
+async function getDownstreamTasksForWorkflow(task: TaskPrerequisiteSubject) {
+  const [explicitDownstream, workflowDownstream] = await Promise.all([
+    getDownstreamTasks(task.id),
+    getWorkflowDownstreamTasks(task),
+  ]);
+
+  return dedupeTasks([...explicitDownstream, ...workflowDownstream]);
 }
 
 function translationClaimScope(task: { id: string; project_id: string; unit_id: string | null }) {
@@ -664,6 +851,7 @@ async function unlockPendingTaskIfReady(
   task: {
     id: string;
     project_id: string;
+    unit_id: string | null;
     title: string;
     role: TaskRole;
     assignee_id: string | null;
@@ -672,7 +860,7 @@ async function unlockPendingTaskIfReady(
   actorId?: string
 ): Promise<boolean> {
   if (task.status !== "pending_publish") return false;
-  if (!(await checkDependenciesMet(task.id))) return false;
+  if (!(await getTaskPrerequisiteState(task)).ready) return false;
 
   await prisma.task.update({
     where: { id: task.id },
@@ -682,12 +870,23 @@ async function unlockPendingTaskIfReady(
   return true;
 }
 
+async function unlockDownstreamTasksIfReady(
+  task: TaskPrerequisiteSubject,
+  actorId?: string
+): Promise<void> {
+  const downstream = await getDownstreamTasksForWorkflow(task);
+  for (const downTask of downstream) {
+    await unlockPendingTaskIfReady(downTask, actorId);
+  }
+}
+
 async function reconcileTaskDependencyState(taskId: string, actorId?: string): Promise<void> {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
       id: true,
       project_id: true,
+      unit_id: true,
       title: true,
       role: true,
       assignee_id: true,
@@ -701,10 +900,15 @@ async function reconcileTaskDependencyState(taskId: string, actorId?: string): P
 
   if (await unlockPendingTaskIfReady(task, actorId)) return;
 
-  const depsMet = await checkDependenciesMet(task.id);
-  if (depsMet) return;
+  const prerequisiteState = await getTaskPrerequisiteState(task);
+  if (prerequisiteState.ready) return;
 
-  if (task.status === "claimable" || task.status === "assigned") {
+  const shouldDemote =
+    task.status === "claimable" ||
+    task.status === "assigned" ||
+    (prerequisiteState.workflow.missing && TASK_DOWNSTREAM_RESET_STATUSES.includes(task.status));
+
+  if (shouldDemote) {
     await prisma.task.update({
       where: { id: task.id },
       data: {
@@ -1060,9 +1264,19 @@ export async function createTask(creatorId: string, data: CreateTaskInput) {
     data.role,
     requestedTranslationOrder
   );
+  const taskId = randomUUID();
+  const prerequisiteState = await getTaskPrerequisiteState({
+    id: taskId,
+    project_id: data.project_id,
+    unit_id: data.unit_id ?? null,
+    role: data.role,
+  });
+  const shouldUnlockOnCreate =
+    prerequisiteState.ready && (Boolean(data.assignee_id) || prerequisiteState.workflow.configured);
 
   const task = await prisma.task.create({
     data: {
+      id: taskId,
       project_id: data.project_id,
       unit_id: data.unit_id,
       title: data.title,
@@ -1072,7 +1286,9 @@ export async function createTask(creatorId: string, data: CreateTaskInput) {
       assignee_id: data.assignee_id,
       creator_id: creatorId,
       due_date: data.due_date ? new Date(data.due_date) : null,
-      status: data.assignee_id ? "assigned" : "pending_publish",
+      status: shouldUnlockOnCreate
+        ? getUnlockedTaskStatus({ assignee_id: data.assignee_id ?? null })
+        : "pending_publish",
       started_at: data.assignee_id ? null : null,
     },
     include: {
@@ -1456,7 +1672,11 @@ export async function deleteTask(taskId: string, actorId?: string) {
     throw new AppError("Only project supervisors or admins can delete tasks", "FORBIDDEN", 403);
   }
 
-  const dependentTaskIds = existing.dependents.map((dependent) => dependent.task_id);
+  const workflowDependents = await getWorkflowDownstreamTasks(existing);
+  const dependentTaskIds = Array.from(new Set([
+    ...existing.dependents.map((dependent) => dependent.task_id),
+    ...workflowDependents.map((dependent) => dependent.id),
+  ]));
 
   if (dependentTaskIds.length > 0) {
     await cascadeResetDownstream(taskId, actorId);
@@ -1481,31 +1701,6 @@ export async function deleteTask(taskId: string, actorId?: string) {
       where: { id: taskId },
     });
 
-    for (const dependentTaskId of dependentTaskIds) {
-      const blockingDependency = await tx.taskDependency.findFirst({
-        where: {
-          task_id: dependentTaskId,
-          depends_on: {
-            status: { not: "completed" },
-          },
-        },
-        select: { id: true },
-      });
-
-      if (!blockingDependency) {
-        const dependentTask = await tx.task.findUnique({
-          where: { id: dependentTaskId },
-          select: { status: true, assignee_id: true },
-        });
-        if (dependentTask?.status === "pending_publish") {
-          await tx.task.update({
-            where: { id: dependentTaskId },
-            data: { status: getUnlockedTaskStatus(dependentTask) },
-          });
-        }
-      }
-    }
-
     await tx.timelineEvent.create({
       data: {
         project_id: existing.project_id,
@@ -1524,6 +1719,10 @@ export async function deleteTask(taskId: string, actorId?: string) {
       },
     });
   });
+
+  for (const dependentTaskId of dependentTaskIds) {
+    await reconcileTaskDependencyState(dependentTaskId, actorId);
+  }
 
   await auditService.log({
     user_id: actorId,
@@ -1579,11 +1778,11 @@ export async function claimTask(
     );
   }
 
-  // Check dependencies
-  const depsMet = await checkDependenciesMet(taskId);
-  if (!depsMet) {
+  // Check dependencies and configured workflow predecessor stage.
+  const prerequisiteState = await getTaskPrerequisiteState(task);
+  if (!prerequisiteState.ready) {
     throw new AppError(
-      "Cannot claim task: dependencies not met",
+      getTaskPrerequisiteErrorMessage("claim task", prerequisiteState),
       "DEPENDENCY_NOT_MET",
       400
     );
@@ -1692,16 +1891,17 @@ export async function assignTask(
     );
   }
 
-  // Check dependencies
-  const depsMet = await checkDependenciesMet(taskId);
+  // Check dependencies and configured workflow predecessor stage.
+  const prerequisiteState = await getTaskPrerequisiteState(task);
+  const depsMet = prerequisiteState.ready;
   const hasOverrideReason = Boolean(overrideReason?.trim());
   let appliesOverride = false;
 
-  if (!depsMet && (task.status !== "pending_publish" || hasOverrideReason)) {
+  if (!depsMet && !prerequisiteState.workflow.missing && (task.status !== "pending_publish" || hasOverrideReason)) {
     const canOverride = await canSupervisorOverride(task.project_id, actorId);
     if (!canOverride) {
       throw new AppError(
-        "Cannot assign task: dependencies not met",
+        getTaskPrerequisiteErrorMessage("assign task", prerequisiteState),
         "DEPENDENCY_NOT_MET",
         400
       );
@@ -1719,7 +1919,10 @@ export async function assignTask(
   }
 
   const previousAssigneeId = task.assignee_id;
-  const nextStatus: TaskStatus = depsMet || appliesOverride ? "assigned" : "pending_publish";
+  const nextStatus: TaskStatus =
+    !prerequisiteState.workflow.missing && (depsMet || appliesOverride)
+      ? "assigned"
+      : "pending_publish";
 
   const updated = await prisma.task.update({
     where: { id: taskId },
@@ -1886,11 +2089,11 @@ export async function startTask(
     );
   }
 
-  // Check dependencies
-  const depsMet = await checkDependenciesMet(taskId);
-  if (!depsMet) {
+  // Check dependencies and configured workflow predecessor stage.
+  const prerequisiteState = await getTaskPrerequisiteState(task);
+  if (!prerequisiteState.ready) {
     throw new AppError(
-      "Cannot start task: dependencies not met",
+      getTaskPrerequisiteErrorMessage("start task", prerequisiteState),
       "DEPENDENCY_NOT_MET",
       400
     );
@@ -2061,10 +2264,7 @@ export async function submitTask(
       });
     }
   } else {
-    const downstream = await getDownstreamTasks(taskId);
-    for (const downTask of downstream) {
-      await unlockPendingTaskIfReady(downTask, userId);
-    }
+    await unlockDownstreamTasksIfReady(task, userId);
   }
 
   await auditService.log({
@@ -2218,10 +2418,7 @@ export async function approveTask(
         },
       });
 
-      const downstream = await getDownstreamTasks(taskId);
-      for (const downTask of downstream) {
-        await unlockPendingTaskIfReady(downTask, reviewerId);
-      }
+      await unlockDownstreamTasksIfReady(task, reviewerId);
     } else {
       updated = await prisma.task.update({
         where: { id: taskId },
@@ -2241,11 +2438,7 @@ export async function approveTask(
       },
     });
 
-    // Unlock next stage: make the next task in pipeline claimable if dependencies are met
-    const downstream = await getDownstreamTasks(taskId);
-    for (const downTask of downstream) {
-      await unlockPendingTaskIfReady(downTask, reviewerId);
-    }
+    await unlockDownstreamTasksIfReady(task, reviewerId);
   }
 
   if (task.assignee_id && task.assignee_id !== reviewerId) {
@@ -2445,9 +2638,11 @@ export async function resetTask(
     );
   }
 
+  const prerequisiteState = await getTaskPrerequisiteState(task);
+  const resetStatus: TaskStatus = prerequisiteState.workflow.missing ? "pending_publish" : "in_progress";
   const updateData: Record<string, unknown> = {
-    status: "in_progress",
-    started_at: task.started_at || (task.assignee_id ? new Date() : null),
+    status: resetStatus,
+    started_at: resetStatus === "in_progress" ? task.started_at || (task.assignee_id ? new Date() : null) : null,
     completed_at: null,
     submitted_at: null,
     cancelled_at: null,
@@ -2471,7 +2666,7 @@ export async function resetTask(
     project_id: task.project_id,
     event_type: TimelineEventType.task_reset,
     title: "Task reset",
-    description: `Task "${task.title}" was reset to in_progress${data?.reason ? `: ${data.reason}` : ""}`,
+    description: `Task "${task.title}" was reset to ${resetStatus}${data?.reason ? `: ${data.reason}` : ""}`,
     actor_id: actorId,
     metadata: { task_id: taskId, reason: data?.reason },
   });
@@ -2558,9 +2753,10 @@ export async function claimTranslationSegment(
     );
   }
 
-  if (!(await checkDependenciesMet(taskId))) {
+  const prerequisiteState = await getTaskPrerequisiteState(task);
+  if (!prerequisiteState.ready) {
     throw new AppError(
-      "Cannot claim translation segment: dependencies not met",
+      getTaskPrerequisiteErrorMessage("claim translation segment", prerequisiteState),
       "DEPENDENCY_NOT_MET",
       400
     );

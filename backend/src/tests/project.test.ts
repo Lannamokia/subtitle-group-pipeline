@@ -1333,6 +1333,44 @@ describe("Project & Workflow Tests", () => {
       expect(updatedDownstream!.status).toBe("claimable");
     });
 
+    it("should not unlock downstream tasks when the deleted task was the configured predecessor stage", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+            { role: "timing", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+          ]),
+        },
+      });
+
+      const upstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "completed",
+        creator_id: owner.id,
+      });
+      const downstream = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "in_progress",
+        creator_id: owner.id,
+      });
+
+      const deleteRes = await del(app, `/api/v1/tasks/${upstream.id}`, ownerToken);
+      expectSuccess(deleteRes, 200);
+
+      const updatedDownstream = await prisma.task.findUnique({ where: { id: downstream.id } });
+      expect(updatedDownstream!.status).toBe("pending_publish");
+      expect(updatedDownstream!.started_at).toBeNull();
+    });
+
     it("should allow supervisors to delete active tasks and reset downstream tasks", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
       const { user: worker } = await createTestUser();
@@ -1650,6 +1688,82 @@ describe("Project & Workflow Tests", () => {
       expectSuccess(assignRes, 200);
       expect(assignRes.body.data.status).toBe("pending_publish");
       expect(assignRes.body.data.assignee_id).toBe(worker.id);
+    });
+
+    it("should keep configured downstream tasks blocked when the predecessor stage has no tasks", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker, token: workerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+            { role: "timing", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+          ]),
+        },
+      });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: worker.id, role: "timing" },
+      });
+
+      const createRes = await post(
+        app,
+        "/api/v1/tasks",
+        {
+          project_id: project.id,
+          unit_id: unit.id,
+          title: "时轴制作",
+          role: "timing",
+          assignee_id: worker.id,
+        },
+        ownerToken
+      );
+      expectSuccess(createRes, 201);
+      expect(createRes.body.data.status).toBe("pending_publish");
+
+      const strayTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+      const claimRes = await post(app, `/api/v1/tasks/${strayTask.id}/claim`, {}, workerToken);
+      expectError(claimRes, 400, "DEPENDENCY_NOT_MET");
+    });
+
+    it("should make the first configured source task claimable without a predecessor", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            { role: "source", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+            { role: "timing", enabled: true, slotCount: 1, assignmentStrategy: "manual" },
+          ]),
+        },
+      });
+
+      const createRes = await post(
+        app,
+        "/api/v1/tasks",
+        {
+          project_id: project.id,
+          unit_id: unit.id,
+          title: "片源整理",
+          role: "source",
+        },
+        ownerToken
+      );
+
+      expectSuccess(createRes, 201);
+      expect(createRes.body.data.status).toBe("claimable");
     });
 
     it("should prevent claiming task when dependencies not met", async () => {
