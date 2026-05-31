@@ -1107,7 +1107,7 @@ function TasksTab({
         <CardContent className="space-y-5 px-4 pb-4">
           <div className="overflow-x-auto pb-2">
             <div className="min-w-[860px]">
-              <div className="grid grid-cols-6 items-center" role="list" aria-label="制作流水线进度">
+              <div className="grid grid-cols-6" role="list" aria-label="制作流水线进度">
                 {workflowSummaries.map((summary, index) => {
                   const isHighlighted = index === highlightedStepIndex;
                   const isDone = summary.isComplete;
@@ -1120,9 +1120,13 @@ function TasksTab({
                         : "w-0"
                     : "w-0";
                   return (
-                    <div key={summary.step.role} className="relative flex justify-center" role="listitem">
+                    <div
+                      key={summary.step.role}
+                      className="relative flex min-w-0 flex-col items-center text-center"
+                      role="listitem"
+                    >
                       {index > 0 && (
-                        <div className="absolute right-1/2 top-1/2 h-1 w-full -translate-y-1/2 rounded-full bg-gray-200">
+                        <div className="absolute right-1/2 top-6 h-1 w-full -translate-y-1/2 rounded-full bg-gray-200 md:top-7">
                           <div
                             className={cn(
                               "h-full rounded-full bg-primary-500 transition-all duration-500 ease-out",
@@ -1142,35 +1146,24 @@ function TasksTab({
                       >
                         {index + 1}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-5 grid grid-cols-6 gap-4 text-center">
-                {workflowSummaries.map((summary, index) => {
-                  const isHighlighted = index === highlightedStepIndex;
-                  const isDone = summary.isComplete;
-                  return (
-                    <div
-                      key={summary.step.role}
-                      className="min-w-0 text-center"
-                    >
-                      <p
-                        className={cn(
-                          "truncate text-base font-semibold",
-                          isDone || isHighlighted ? "text-gray-900" : "text-gray-400"
-                        )}
-                      >
-                        {getRoleLabel(summary.step.role)}
-                      </p>
-                      <p
-                        className={cn(
-                          "mt-1 truncate text-xs",
-                          isDone || isHighlighted ? "text-gray-600" : "text-gray-400"
-                        )}
-                      >
-                        {summary.step.deliverables[0]}
-                      </p>
+                      <div className="mt-5 min-w-0 max-w-[132px]">
+                        <p
+                          className={cn(
+                            "text-base font-semibold",
+                            isDone || isHighlighted ? "text-gray-900" : "text-gray-400"
+                          )}
+                        >
+                          {getRoleLabel(summary.step.role)}
+                        </p>
+                        <p
+                          className={cn(
+                            "mt-1 text-xs leading-5",
+                            isDone || isHighlighted ? "text-gray-600" : "text-gray-400"
+                          )}
+                        >
+                          {summary.step.deliverables[0]}
+                        </p>
+                      </div>
                     </div>
                   );
                 })}
