@@ -2,7 +2,7 @@ const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-require("dotenv").config();
+require("dotenv").config({ path: process.env.ENV_FILE_PATH || undefined });
 
 const rootDir = process.cwd();
 const schemaPath = path.join(rootDir, "prisma", "schema.prisma");

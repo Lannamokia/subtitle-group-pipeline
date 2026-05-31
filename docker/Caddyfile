@@ -1,0 +1,33 @@
+{
+  admin off
+}
+
+{$CADDY_SITE_ADDRESS::80} {
+  encode zstd gzip
+
+  handle /api/v1/* {
+    reverse_proxy {$BACKEND_UPSTREAM:127.0.0.1:3000}
+  }
+
+  handle /download/* {
+    reverse_proxy {$BACKEND_UPSTREAM:127.0.0.1:3000}
+  }
+
+  handle /uploads/* {
+    reverse_proxy {$BACKEND_UPSTREAM:127.0.0.1:3000}
+  }
+
+  handle /webhook/* {
+    reverse_proxy {$BACKEND_UPSTREAM:127.0.0.1:3000}
+  }
+
+  handle /health {
+    reverse_proxy {$BACKEND_UPSTREAM:127.0.0.1:3000}
+  }
+
+  handle {
+    root * /srv/frontend
+    try_files {path} /index.html
+    file_server
+  }
+}

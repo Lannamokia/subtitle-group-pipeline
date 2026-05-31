@@ -13,7 +13,7 @@ import type { CompleteSetupInput } from "./setup.schema";
 import { setupState } from "./setup.state";
 
 const execFileAsync = promisify(execFile);
-const ENV_PATH = path.resolve(process.cwd(), ".env");
+const ENV_PATH = path.resolve(process.env.ENV_FILE_PATH || path.join(process.cwd(), ".env"));
 const SCHEMA_PATH = path.resolve(process.cwd(), "prisma/schema.prisma");
 const SCHEMA_DIR = path.dirname(SCHEMA_PATH);
 const MIGRATIONS_DIR = path.join(SCHEMA_DIR, "migrations");
@@ -35,6 +35,7 @@ function prismaProvider(provider: string): "sqlite" | "mysql" | "postgresql" {
 }
 
 function updateEnvFile(updates: Record<string, string>) {
+  fs.mkdirSync(path.dirname(ENV_PATH), { recursive: true });
   const existing = fs.existsSync(ENV_PATH) ? fs.readFileSync(ENV_PATH, "utf8") : "";
   const lines = existing.split(/\r?\n/);
   const seen = new Set<string>();

@@ -1,0 +1,87 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    image: subtitle-platform-app:local
+    restart: unless-stopped
+    ports:
+      - "${APP_HTTP_PORT:-8080}:80"
+      # Enable this together with CADDY_SITE_ADDRESS=1.xyz for automatic HTTPS.
+      # - "${APP_HTTPS_PORT:-443}:443"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      API_PREFIX: /api/v1
+      ENV_FILE_PATH: /app/config/backend.env
+      DATABASE_URL: ${DATABASE_URL:-}
+      UPLOAD_DIR: /app/uploads
+      UPLOAD_MAX_SIZE: ${UPLOAD_MAX_SIZE:-536870912000}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-127.0.0.1:3000}
+      FRONTEND_API_BASE_URL: ${FRONTEND_API_BASE_URL:-/api/v1}
+      DATABASE_AUTO_UPGRADE: ${DATABASE_AUTO_UPGRADE:-true}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      SETUP_RESTART_DELAY_MS: ${SETUP_RESTART_DELAY_MS:-1500}
+      SETUP_RESTART_CHILD_DELAY_MS: ${SETUP_RESTART_CHILD_DELAY_MS:-1500}
+      QQ_BRIDGE_TOKEN: ${QQ_BRIDGE_TOKEN:-}
+      NONEBOT_HTTP_API: ${NONEBOT_HTTP_API:-http://qqbot:8095}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes:
+      - app-config:/app/config
+      - app-uploads:/app/uploads
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      qqbot:
+        condition: service_started
+
+  qqbot:
+    build:
+      context: ./nonebot-bridge
+      dockerfile: Dockerfile
+    image: subtitle-platform-qqbot:local
+    restart: unless-stopped
+    environment:
+      DRIVER: ~fastapi+~httpx
+      HOST: 0.0.0.0
+      PORT: 8095
+      BACKEND_API_BASE: http://app:3000/api/v1
+      QQ_BRIDGE_TOKEN: ${QQ_BRIDGE_TOKEN:-}
+      HEARTBEAT_INTERVAL_SECONDS: ${HEARTBEAT_INTERVAL_SECONDS:-30}
+      LOG_LEVEL: ${QQBOT_LOG_LEVEL:-INFO}
+    ports:
+      - "${QQ_BRIDGE_PORT:-8095}:8095"
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-subtitle}
+      POSTGRES_USER: ${POSTGRES_USER:-subtitle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-subtitle}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-subtitle} -d ${POSTGRES_DB:-subtitle}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  app-config:
+  app-uploads:
+  caddy-data:
+  caddy-config:
+  postgres-data:

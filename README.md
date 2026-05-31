@@ -278,6 +278,148 @@ cd frontend/app
 npm run preview
 ```
 
+## Docker Compose 部署
+
+当前仓库提供一套两镜像应用拆分方式：
+
+```text
+subtitle-platform-app     # 前端静态资源 + 后端 API + Caddy 反向代理
+subtitle-platform-qqbot   # NoneBot QQ 桥接器
+postgres/mysql 可选       # 数据库服务，可以使用 compose 内置 postgres profile，也可以连接外部数据库
+onebot 协议端可选         # NapCat / Lagrange 等协议端，需要自行部署并连接 QQ 桥接器
+```
+
+对应文件：
+
+```text
+Dockerfile                    # app 镜像，构建前端和后端，并内置 Caddy
+docker/Caddyfile              # Caddy 静态托管和 API 反代规则
+docker/entrypoint.sh          # 写入前端运行时配置并启动后端 + Caddy
+nonebot-bridge/Dockerfile     # QQ 桥接器镜像
+compose.yml                   # Compose 编排
+.env.compose.example          # Compose 环境变量模板
+```
+
+### 快速启动
+
+```bash
+cp .env.compose.example .env
+docker compose up -d --build
+```
+
+默认访问：
+
+```text
+平台入口：http://localhost:8080
+后端健康检查：http://localhost:8080/health
+QQ 桥接器：http://localhost:8095
+OneBot 反向 WebSocket：ws://localhost:8095/onebot/v11/ws
+```
+
+第一次进入平台时仍然走图形化初始化页。Compose 不强制预置数据库连接串；初始化页会把数据库连接参数和 JWT Secret 写入 `app-config` volume 中的 `/app/config/backend.env`，容器重启后继续使用。
+
+### 使用内置 PostgreSQL
+
+如果希望 Compose 同时启动 PostgreSQL：
+
+```bash
+cp .env.compose.example .env
+docker compose --profile postgres up -d --build
+```
+
+初始化页面中的 PostgreSQL 连接串填写：
+
+```text
+postgresql://subtitle:subtitle@postgres:5432/subtitle?schema=public
+```
+
+这里的 `postgres` 是 Compose 网络里的服务名，不是宿主机地址。如果改了 `.env` 里的 `POSTGRES_DB`、`POSTGRES_USER` 或 `POSTGRES_PASSWORD`，连接串也要同步修改。
+
+### 使用外部数据库
+
+外部 PostgreSQL / MySQL / MariaDB 不需要启用 `postgres` profile。直接启动应用和 QQ 桥接器：
+
+```bash
+docker compose up -d --build
+```
+
+然后在初始化页面填写外部数据库连接串。容器内访问宿主机数据库时，Docker Desktop 可以用 `host.docker.internal`；Linux 服务器建议直接使用数据库服务器的内网 IP 或同一 Docker 网络中的服务名。
+
+### 域名和 Caddy
+
+默认 `APP_HTTP_PORT=8080`，适合本地测试。如果域名是 `1.xyz`，希望公网直接访问：
+
+1. 修改 `.env`：
+
+```env
+CADDY_SITE_ADDRESS=1.xyz
+CORS_ORIGIN=https://1.xyz
+FRONTEND_API_BASE_URL=/api/v1
+```
+
+2. 在 `compose.yml` 中开放 80/443：
+
+```yaml
+ports:
+  - "80:80"
+  - "443:443"
+```
+
+这样 `https://1.xyz/api/v1/*` 会被 Caddy 反向代理到 app 容器内部的 `127.0.0.1:3000/api/v1/*`，前端路由由 Caddy 从 `/srv/frontend` 托管。
+
+### 环境变量注入
+
+Compose 会读取项目根目录的 `.env` 做变量注入。常用变量：
+
+```env
+APP_HTTP_PORT=8080
+CADDY_SITE_ADDRESS=:80
+CORS_ORIGIN=http://localhost:8080
+FRONTEND_API_BASE_URL=/api/v1
+BACKEND_UPSTREAM=127.0.0.1:3000
+
+DATABASE_URL=
+DATABASE_AUTO_UPGRADE=true
+UPLOAD_MAX_SIZE=536870912000
+JWT_SECRET=
+JWT_EXPIRES_IN=24h
+JWT_REFRESH_EXPIRES_IN=7d
+BCRYPT_ROUNDS=12
+
+QQ_BRIDGE_TOKEN=change-this-to-a-long-random-secret
+QQ_BRIDGE_PORT=8095
+HEARTBEAT_INTERVAL_SECONDS=30
+QQBOT_LOG_LEVEL=INFO
+
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
+```
+
+说明：
+
+- `FRONTEND_API_BASE_URL` 会在容器启动时写入 `/srv/frontend/config.js`，属于前端运行时配置，不需要重新构建镜像。
+- `DATABASE_URL` 和 `JWT_SECRET` 留空时不会覆盖初始化页已经写入的 `/app/config/backend.env`；填入非空值时会作为容器环境变量优先生效。
+- `BACKEND_UPSTREAM` 默认是 `127.0.0.1:3000`，因为 Caddy 和后端在同一个 app 容器内。
+- `QQ_BRIDGE_TOKEN` 需要同时给 app 和 qqbot 使用，系统设置里的 QQ bot secret 也应保持一致。
+- `SMTP_*` 可以通过环境变量注入，也可以后续在系统设置的通知渠道页面维护。
+
+### OneBot 协议端连接
+
+`subtitle-platform-qqbot` 只负责 NoneBot 桥接，不包含 QQ 协议端。NapCat / Lagrange 等 OneBot V11 协议端需要连接到：
+
+```text
+ws://<服务器地址>:8095/onebot/v11/ws
+```
+
+如果协议端也在同一个 Compose 网络里，可以使用：
+
+```text
+ws://qqbot:8095/onebot/v11/ws
+```
+
 ## 生产部署
 
 一种常见部署方式：
