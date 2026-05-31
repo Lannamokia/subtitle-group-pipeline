@@ -13,12 +13,31 @@ export interface AssEventRecord {
   rawLine: string;
 }
 
+export type AegisubSectionKind = "project_garbage" | "extradata" | "other";
+
 export interface AssSectionRecord {
   name: string;
   headerLineIndex: number;
   startLineIndex: number;
   endLineIndex: number;
   isAegisubSection: boolean;
+  aegisubKind: AegisubSectionKind | null;
+}
+
+export interface AssAegisubProjectGarbageEntry {
+  key: string;
+  value: string;
+  lineIndex: number;
+  rawLine: string;
+}
+
+export interface AssAegisubExtradataEntry {
+  id: number;
+  key: string;
+  encoding: "inline" | "uuencode" | "unknown";
+  value: string;
+  lineIndex: number;
+  rawLine: string;
 }
 
 export interface AssDocument {
@@ -27,6 +46,8 @@ export interface AssDocument {
   lines: string[];
   sections: AssSectionRecord[];
   aegisubSections: AssSectionRecord[];
+  aegisubProjectGarbage: AssAegisubProjectGarbageEntry[];
+  aegisubExtradata: AssAegisubExtradataEntry[];
   events: AssEventRecord[];
 }
 
@@ -51,6 +72,15 @@ function normalizedField(field: string): string {
 
 function fieldIndex(fields: string[], name: string): number {
   return fields.findIndex((field) => normalizedField(field) === name.toLowerCase());
+}
+
+function fieldIndexAny(fields: string[], names: string[]): number {
+  const candidates = names.map((name) => name.toLowerCase());
+  return fields.findIndex((field) => candidates.includes(normalizedField(field)));
+}
+
+function fieldValue(fields: string[], index: number): string {
+  return index === -1 ? "" : fields[index]?.trim() ?? "";
 }
 
 function splitEventFields(body: string, fieldCount: number): string[] {
@@ -83,13 +113,12 @@ function buildIdentityKey(
   eventType: string,
   occurrence: number
 ): string {
-  const start = fields[fieldIndex(formatFields, "start")]?.trim() ?? "";
-  const end = fields[fieldIndex(formatFields, "end")]?.trim() ?? "";
-  const layer = fields[fieldIndex(formatFields, "layer")]?.trim() ?? "";
-  const style = fields[fieldIndex(formatFields, "style")]?.trim() ?? "";
-  const name = fields[fieldIndex(formatFields, "name")]?.trim() ?? "";
-  const effect = fields[fieldIndex(formatFields, "effect")]?.trim() ?? "";
-  return [eventType, start, end, layer, style, name, effect, occurrence].join("|");
+  const start = fieldValue(fields, fieldIndex(formatFields, "start"));
+  const end = fieldValue(fields, fieldIndex(formatFields, "end"));
+  const layer = fieldValue(fields, fieldIndex(formatFields, "layer"));
+  const style = fieldValue(fields, fieldIndex(formatFields, "style"));
+  const name = fieldValue(fields, fieldIndexAny(formatFields, ["name", "actor"]));
+  return [eventType, start, end, layer, style, name, occurrence].join("|");
 }
 
 function structureSignature(event: AssEventRecord): string {
@@ -105,16 +134,70 @@ function isEventLine(line: string): boolean {
   return /^Dialogue\s*:/i.test(line) || /^Comment\s*:/i.test(line);
 }
 
+function getAegisubSectionKind(sectionName: string): AegisubSectionKind | null {
+  const normalized = sectionName.trim().replace(/\s+/g, " ").toLowerCase();
+  if (normalized === "aegisub project garbage") return "project_garbage";
+  if (normalized === "aegisub extradata") return "extradata";
+  if (normalized.startsWith("aegisub ")) return "other";
+  return null;
+}
+
+function parseAegisubProjectGarbageLine(
+  rawLine: string,
+  lineIndex: number
+): AssAegisubProjectGarbageEntry | null {
+  const colon = rawLine.indexOf(":");
+  if (colon === -1) return null;
+  const key = rawLine.slice(0, colon).trim();
+  if (!key) return null;
+  return {
+    key,
+    value: rawLine.slice(colon + 1).trim(),
+    lineIndex,
+    rawLine,
+  };
+}
+
+function parseAegisubExtradataLine(
+  rawLine: string,
+  lineIndex: number
+): AssAegisubExtradataEntry | null {
+  const dataMatch = rawLine.match(/^Data\s*:\s*(.*)$/i);
+  if (!dataMatch) return null;
+
+  const body = dataMatch[1];
+  const firstComma = body.indexOf(",");
+  const secondComma = firstComma === -1 ? -1 : body.indexOf(",", firstComma + 1);
+  if (firstComma === -1 || secondComma === -1) return null;
+
+  const id = Number.parseInt(body.slice(0, firstComma).trim(), 10);
+  if (Number.isNaN(id)) return null;
+
+  const encodedValue = body.slice(secondComma + 1);
+  const marker = encodedValue[0];
+  return {
+    id,
+    key: body.slice(firstComma + 1, secondComma),
+    encoding: marker === "e" ? "inline" : marker === "u" ? "uuencode" : "unknown",
+    value: marker === "e" || marker === "u" ? encodedValue.slice(1) : encodedValue,
+    lineIndex,
+    rawLine,
+  };
+}
+
 export function parseAssDocument(content: string): AssDocument {
   const newline = detectNewline(content);
   const lines = content.split(/\r?\n/);
   const events: AssEventRecord[] = [];
   const sections: AssSectionRecord[] = [];
+  const aegisubProjectGarbage: AssAegisubProjectGarbageEntry[] = [];
+  const aegisubExtradata: AssAegisubExtradataEntry[] = [];
   const occurrence = new Map<string, number>();
 
   let inEvents = false;
   let formatFields: string[] = [];
   let currentSectionIndex: number | null = null;
+  let currentAegisubKind: AegisubSectionKind | null = null;
 
   lines.forEach((rawLine, lineIndex) => {
     const trimmed = rawLine.trim();
@@ -124,15 +207,28 @@ export function parseAssDocument(content: string): AssDocument {
         sections[currentSectionIndex].endLineIndex = lineIndex - 1;
       }
       const name = sectionMatch[1].trim();
+      const aegisubKind = getAegisubSectionKind(name);
       sections.push({
         name,
         headerLineIndex: lineIndex,
         startLineIndex: lineIndex + 1,
         endLineIndex: lines.length - 1,
-        isAegisubSection: /^aegisub\s+/i.test(name),
+        isAegisubSection: aegisubKind !== null,
+        aegisubKind,
       });
       currentSectionIndex = sections.length - 1;
+      currentAegisubKind = aegisubKind;
       inEvents = /^events$/i.test(name);
+      return;
+    }
+    if (currentAegisubKind === "project_garbage") {
+      const entry = parseAegisubProjectGarbageLine(rawLine, lineIndex);
+      if (entry) aegisubProjectGarbage.push(entry);
+      return;
+    }
+    if (currentAegisubKind === "extradata") {
+      const entry = parseAegisubExtradataLine(rawLine, lineIndex);
+      if (entry) aegisubExtradata.push(entry);
       return;
     }
     if (!inEvents) return;
@@ -187,6 +283,8 @@ export function parseAssDocument(content: string): AssDocument {
     lines,
     sections,
     aegisubSections: sections.filter((section) => section.isAegisubSection),
+    aegisubProjectGarbage,
+    aegisubExtradata,
     events,
   };
 }
