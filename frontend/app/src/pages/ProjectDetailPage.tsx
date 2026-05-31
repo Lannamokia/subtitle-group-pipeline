@@ -380,15 +380,15 @@ function getUnitTitle(unit: ProjectUnit) {
 }
 
 function isCompletedTask(task: Task) {
-  return task.status === "completed" || task.status === "review_approved";
+  return task.status === "completed" || (task.status === "review_approved" && task.role !== "translation");
 }
 
 function isActiveTask(task: Task) {
-  return ["assigned", "in_progress", "submitted"].includes(task.status);
+  return ["assigned", "in_progress", "submitted", "review_approved"].includes(task.status);
 }
 
 function isPipelineActiveTask(task: Task) {
-  return ["claimable", "assigned", "in_progress", "submitted", "review_rejected", "overdue"].includes(task.status);
+  return ["claimable", "assigned", "in_progress", "submitted", "review_approved", "review_rejected", "overdue"].includes(task.status);
 }
 
 function sortTasksByCreatedAtDesc(a: Task, b: Task) {
@@ -498,9 +498,9 @@ function EpisodeListView({
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {units.map((unit) => {
           const unitTasks = tasks.filter((task) => task.unitId === unit.id);
-          const completed = unitTasks.filter((task) => ["completed", "review_approved"].includes(task.status)).length;
+          const completed = unitTasks.filter(isCompletedTask).length;
           const progress = unitTasks.length > 0 ? Math.round((completed / unitTasks.length) * 100) : unit.progress;
-          const activeCount = unitTasks.filter((task) => ["assigned", "in_progress", "submitted"].includes(task.status)).length;
+          const activeCount = unitTasks.filter(isActiveTask).length;
 
           return (
             <button
@@ -611,7 +611,7 @@ function TasksTab({
     task.dependencies
       .map((depId) => taskById.get(depId))
       .filter((dep): dep is Task => Boolean(dep))
-      .filter((dep) => !["review_approved", "completed"].includes(dep.status));
+      .filter((dep) => !isCompletedTask(dep));
   const returnableStatuses: TaskStatus[] = ["assigned", "in_progress", "review_rejected", "overdue"];
   const resettableStatuses: TaskStatus[] = [
     "assigned",
@@ -1392,7 +1392,7 @@ function TasksTab({
                     <div className="space-y-2">
                       {selectedTask.dependencies.map((depId) => {
                         const dep = taskById.get(depId);
-                        const done = dep ? ["review_approved", "completed"].includes(dep.status) : false;
+                        const done = dep ? isCompletedTask(dep) : false;
                         return (
                           <div key={depId} className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2 text-xs">
                             <span className="text-gray-600 truncate">{dep?.name ?? depId}</span>
@@ -1473,7 +1473,7 @@ function TasksTab({
                         还没有人认领时间段
                       </div>
                     )}
-                    {["claimable", "assigned", "in_progress", "submitted"].includes(selectedTask.status) && (
+                    {["claimable", "assigned", "in_progress", "submitted", "review_approved"].includes(selectedTask.status) && (
                       <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                         <Input
                           type="number"

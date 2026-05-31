@@ -2024,9 +2024,8 @@ export async function approveTask(
       updated = await prisma.task.update({
         where: { id: taskId },
         data: {
-          status: "claimable",
-          assignee_id: null,
-          submitted_at: null,
+          status: "review_approved",
+          assignee_id: submittedClaim.user_id,
           completed_at: null,
         },
       });
@@ -2351,7 +2350,7 @@ export async function claimTranslationSegment(
     );
   }
 
-  if (!["claimable", "assigned", "in_progress", "submitted"].includes(task.status)) {
+  if (!["claimable", "assigned", "in_progress", "submitted", "review_approved"].includes(task.status)) {
     throw new AppError(
       `Translation segments cannot be claimed. Current status: ${task.status}`,
       "BAD_REQUEST",

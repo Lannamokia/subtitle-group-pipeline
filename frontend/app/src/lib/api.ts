@@ -381,7 +381,7 @@ export function normalizeTask(raw: AnyRecord): Task {
 export function normalizeProjectUnit(raw: AnyRecord, tasks: Task[] = []): ProjectUnit {
   const id = String(raw.id);
   const unitTasks = tasks.filter((task) => task.unitId === id);
-  const completed = unitTasks.filter((task) => ["completed", "review_approved"].includes(task.status)).length;
+  const completed = unitTasks.filter(isProjectProgressCompletedTask).length;
   const taskCount = unitTasks.length || raw.taskCount || raw._count?.tasks || 0;
 
   return {
@@ -843,12 +843,16 @@ function normalizeRoleTagApplication(raw: AnyRecord): RoleTagApplication {
   };
 }
 
+function isProjectProgressCompletedTask(task: Task): boolean {
+  return task.status === "completed" || (task.status === "review_approved" && task.role !== "translation");
+}
+
 export function normalizeProject(raw: AnyRecord): Project {
   const tasks = Array.isArray(raw.tasks) ? raw.tasks.map(normalizeTask) : [];
   const units = Array.isArray(raw.units)
     ? raw.units.map((unit) => normalizeProjectUnit(unit as AnyRecord, tasks))
     : [];
-  const completed = tasks.filter((task) => ["completed", "review_approved"].includes(task.status)).length;
+  const completed = tasks.filter(isProjectProgressCompletedTask).length;
   const taskCount = tasks.length || raw._count?.tasks || 0;
   const productConfigSource = raw.productConfig ?? raw.product_config ?? raw.template?.product_config;
   const uploadPolicySource =
