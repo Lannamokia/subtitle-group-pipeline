@@ -66,7 +66,9 @@ export function TaskCard({ task, onClick, draggable = false, showProject = false
           {task.assignee ? (
             <>
               <UserAvatar user={task.assignee} size="xs" />
-              <span className="min-w-0 truncate text-xs text-gray-500">{task.assignee.username}</span>
+              <span className="min-w-0 truncate text-xs text-gray-500">
+                {task.assignee.nickname || task.assignee.username}
+              </span>
             </>
           ) : (
             <span className="text-xs text-gray-400 italic">待认领</span>

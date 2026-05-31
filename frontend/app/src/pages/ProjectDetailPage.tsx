@@ -1368,7 +1368,7 @@ function TasksTab({
                       {selectedTask.assignee ? (
                         <>
                           <UserAvatar user={selectedTask.assignee} size="sm" />
-                          <span>{selectedTask.assignee.username}</span>
+                          <span>{selectedTask.assignee.nickname || selectedTask.assignee.username}</span>
                         </>
                       ) : (
                         <span className="text-gray-400 italic">待认领</span>
