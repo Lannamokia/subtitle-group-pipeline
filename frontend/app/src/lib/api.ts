@@ -1,6 +1,11 @@
 import axios, { AxiosError, type AxiosInstance } from 'axios';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/authStore';
+import {
+  API_BASE_URL,
+  getApiRequestPath,
+  toBackendAssetUrl,
+} from '@/lib/runtimeConfig';
 import type {
   User,
   LoginCredentials,
@@ -45,14 +50,6 @@ import type {
   PaginatedResponse,
 } from '@/types';
 
-const API_BASE_URL = 'http://localhost:3000/api/v1';
-const API_ORIGIN = (() => {
-  try {
-    return new URL(API_BASE_URL).origin;
-  } catch {
-    return '';
-  }
-})();
 const LARGE_FILE_UPLOAD_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const SESSION_EXPIRED_ERROR_CODES = new Set(["TOKEN_EXPIRED", "INVALID_TOKEN"]);
 const SESSION_AUTH_MESSAGES = new Set([
@@ -67,18 +64,6 @@ const PUBLIC_AUTH_PATHS = new Set([
   "/auth/request-password-reset",
   "/auth/confirm-password-reset",
 ]);
-
-function getApiRequestPath(url?: string) {
-  if (!url) return "";
-  try {
-    const pathname = new URL(url, API_BASE_URL).pathname;
-    return pathname.startsWith("/api/v1")
-      ? pathname.slice("/api/v1".length)
-      : pathname;
-  } catch {
-    return url;
-  }
-}
 
 function shouldForceLogoutOnUnauthorized(error: AxiosError) {
   if (error.response?.status !== 401) return false;
@@ -305,13 +290,7 @@ export function normalizeUser(raw: AnyRecord): User {
   };
 }
 
-export function toBackendAssetUrl(value?: string | null): string | undefined {
-  if (!value) return undefined;
-  if (/^(https?:|data:|blob:)/.test(value)) return value;
-  if (!API_ORIGIN) return value;
-  if (value.startsWith("/")) return `${API_ORIGIN}${value}`;
-  return value;
-}
+export { API_BASE_URL, toBackendAssetUrl };
 
 export function normalizeAvatarUrl(value?: string | null, userId?: string): string | undefined {
   if (!value) return undefined;

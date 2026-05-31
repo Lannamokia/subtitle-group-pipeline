@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { systemApi } from "@/lib/api";
+import { toBackendAssetUrl } from "@/lib/runtimeConfig";
 import type { SystemBrandingSettings } from "@/types";
 
 const DEFAULT_BRANDING: SystemBrandingSettings = {
@@ -16,9 +17,7 @@ interface BrandingState {
 }
 
 function resolveLogoUrl(logoUrl?: string | null) {
-  if (!logoUrl) return null;
-  if (/^https?:\/\//.test(logoUrl)) return logoUrl;
-  return `http://localhost:3000${logoUrl}`;
+  return toBackendAssetUrl(logoUrl) ?? null;
 }
 
 function applyDocumentBranding(branding: SystemBrandingSettings) {
