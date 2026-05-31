@@ -109,13 +109,17 @@ export const api: AxiosInstance = axios.create({
 api.interceptors.request.use(
   (config) => {
     try {
-      const storage = localStorage.getItem('auth-storage');
-      if (storage) {
-        const parsed = JSON.parse(storage);
-        const token = parsed.state?.user?.token;
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
+      const memoryToken = useAuthStore.getState().user?.token;
+      if (memoryToken) {
+        config.headers.Authorization = `Bearer ${memoryToken}`;
+        return config;
+      }
+
+      const storage = localStorage.getItem("auth-storage");
+      const parsed = storage ? JSON.parse(storage) : null;
+      const token = parsed?.state?.user?.token;
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
     } catch {
       // ignore parse error

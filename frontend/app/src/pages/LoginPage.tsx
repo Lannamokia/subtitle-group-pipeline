@@ -46,7 +46,7 @@ type AuthView = "login" | "register" | "verification";
 
 // Login schema
 const loginSchema = z.object({
-  username: z.string().min(1, "用户名不能为空"),
+  username: z.string().trim().min(1, "用户名不能为空"),
   password: z.string().min(1, "密码不能为空"),
 });
 
@@ -76,7 +76,7 @@ const registerSchema = z
 type RegisterFormData = z.infer<typeof registerSchema>;
 
 const resetRequestSchema = z.object({
-  username: z.string().min(1, "用户名不能为空"),
+  username: z.string().trim().min(1, "用户名不能为空"),
 });
 
 const resetConfirmSchema = z

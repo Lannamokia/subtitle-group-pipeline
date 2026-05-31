@@ -53,7 +53,7 @@ export const registerSchema = z.object({
 });
 
 export const loginSchema = z.object({
-  username: z.string().min(1, "Username is required"),
+  username: z.string().trim().min(1, "Username is required"),
   password: z.string().min(1, "Password is required"),
 });
 
@@ -97,11 +97,11 @@ export const updateRegistrationPolicySchema = z.object({
 });
 
 export const requestPasswordResetSchema = z.object({
-  username: z.string().min(1, "Username is required"),
+  username: z.string().trim().min(1, "Username is required"),
 });
 
 export const confirmPasswordResetSchema = z.object({
-  username: z.string().min(1, "Username is required"),
+  username: z.string().trim().min(1, "Username is required"),
   code: z.string().min(1, "Reset code is required"),
   password: strongPasswordSchema,
 });

@@ -727,6 +727,27 @@ describe("Auth & Registration Tests", () => {
       expect(res.body.data.token).toBeDefined();
       expect(res.body.data.refreshToken).toBeDefined();
       expect(res.body.data.user.username).toBe("loginuser");
+      expect(res.body.data.user.status).toBe("active");
+    });
+
+    it("should trim username when logging in", async () => {
+      await prisma.registrationPolicy.create({
+        data: { mode: "open", auto_approve: true },
+      });
+
+      await post(app, "/api/v1/auth/register", {
+        username: "trimlogin",
+        password: "Password123!",
+        nickname: "Trim Login",
+      });
+
+      const res = await post(app, "/api/v1/auth/login", {
+        username: " trimlogin ",
+        password: "Password123!",
+      });
+
+      expectSuccess(res, 200);
+      expect(res.body.data.user.username).toBe("trimlogin");
     });
 
     it("should reject login with wrong password", async () => {
