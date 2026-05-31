@@ -36,6 +36,7 @@ export const updateProjectSchema = z.object({
   delivery_checklist: z.array(deliveryItemSchema).optional(),
   download_link_ttl_seconds: z.number().int().min(90).optional().nullable(),
   wiki_approval_required: z.boolean().optional().nullable(),
+  translation_max_segment_length: z.number().int().min(1).optional().nullable(),
   qq_group_id: z.string().trim().min(1).max(50).optional().nullable(),
 });
 

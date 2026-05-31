@@ -876,6 +876,62 @@ describe("Project & Workflow Tests", () => {
       expectError(overflowRes, 400, "BAD_REQUEST");
     });
 
+    it("should allow project supervisors to override translation claim duration in project settings", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: translator, token: translatorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 1200 });
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            { role: "translation", maxSegmentLength: 900 },
+          ]),
+        },
+      });
+
+      const updateRes = await put(
+        app,
+        `/api/v1/projects/${project.id}`,
+        { translation_max_segment_length: 500 },
+        ownerToken
+      );
+      expectSuccess(updateRes, 200);
+
+      const updatedProject = await prisma.project.findUnique({ where: { id: project.id } });
+      const workflow = JSON.parse(updatedProject!.workflow_config || "[]");
+      expect(workflow.find((entry: { role?: string }) => entry.role === "translation").maxSegmentLength).toBe(500);
+
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: translator.id, role: "translation" },
+      });
+
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      const allowedRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 0, segment_end: 400 },
+        translatorToken
+      );
+      expectSuccess(allowedRes, 201);
+
+      const overflowRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 400, segment_end: 600 },
+        translatorToken
+      );
+      expectError(overflowRes, 400, "BAD_REQUEST");
+    });
+
     it("should validate segment within episode length", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
       const { user: translator, token: translatorToken } = await createTestUser();

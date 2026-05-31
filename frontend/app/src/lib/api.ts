@@ -29,6 +29,7 @@ import type {
   Notification,
   NotificationPreference,
   ProjectTemplate,
+  TemplateRoleConfig,
   ProductConfig,
   TimelineEvent,
   SubtitleConflict,
@@ -128,6 +129,55 @@ function parseJsonRecord(value: unknown): AnyRecord {
   } catch {
     return {};
   }
+}
+
+function parseJsonArray(value: unknown): unknown[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeWorkflowConfig(value: unknown): TemplateRoleConfig[] {
+  const arrayEntries = parseJsonArray(value)
+    .filter((entry): entry is AnyRecord => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    .map((entry) => ({
+      role: (entry.role ?? "translation") as TaskRole,
+      enabled: entry.enabled ?? true,
+      slotCount: entry.slotCount ?? entry.slot_count ?? 1,
+      assignmentStrategy: (entry.assignmentStrategy ?? entry.assignment_strategy ?? "manual") as "manual" | "open_claim",
+      maxSegmentLength: entry.maxSegmentLength ?? entry.max_segment_length,
+      requiredTagIds: Array.isArray(entry.requiredTagIds ?? entry.required_tag_ids)
+        ? (entry.requiredTagIds ?? entry.required_tag_ids).filter((id: unknown): id is string => typeof id === "string")
+        : undefined,
+    }));
+  if (arrayEntries.length > 0) return arrayEntries;
+
+  return Object.entries(parseJsonRecord(value))
+    .filter(([, entry]) => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    .map(([role, entry]) => {
+      const record = entry as AnyRecord;
+      return {
+        role: (record.role ?? role) as TaskRole,
+        enabled: record.enabled ?? true,
+        slotCount: record.slotCount ?? record.slot_count ?? 1,
+        assignmentStrategy: (record.assignmentStrategy ?? record.assignment_strategy ?? "manual") as "manual" | "open_claim",
+        maxSegmentLength: record.maxSegmentLength ?? record.max_segment_length,
+        requiredTagIds: Array.isArray(record.requiredTagIds ?? record.required_tag_ids)
+          ? (record.requiredTagIds ?? record.required_tag_ids).filter((id: unknown): id is string => typeof id === "string")
+          : undefined,
+      };
+    });
+}
+
+function findRoleMaxSegmentLength(roles: TemplateRoleConfig[], role: TaskRole): number | null {
+  const value = roles.find((entry) => entry.role === role)?.maxSegmentLength;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function normalizeProductConfig(rawConfig: unknown): ProductConfig {
@@ -695,6 +745,7 @@ function toProjectPayload(data: Partial<Project>) {
     qq_group_id: data.qqGroupId,
     delivery_checklist: data.deliveryChecklist,
     download_link_ttl_seconds: data.downloadLinkTtlSeconds,
+    translation_max_segment_length: data.translationMaxSegmentLength,
     wiki_approval_required: data.wikiApprovalRequired,
   };
 }
@@ -806,6 +857,11 @@ export function normalizeProject(raw: AnyRecord): Project {
     raw.template?.uploadPolicy ??
     raw.template?.upload_policy;
   const uploadPolicy = parseJsonRecord(uploadPolicySource) as UploadPolicy;
+  const workflowConfig = normalizeWorkflowConfig(raw.workflowConfig ?? raw.workflow_config);
+  const templateWorkflowConfig = normalizeWorkflowConfig(raw.template?.roles);
+  const translationMaxSegmentLength =
+    findRoleMaxSegmentLength(workflowConfig, "translation") ??
+    findRoleMaxSegmentLength(templateWorkflowConfig, "translation");
 
   return {
     id: raw.id,
@@ -848,6 +904,8 @@ export function normalizeProject(raw: AnyRecord): Project {
     uploadPolicy: Object.keys(uploadPolicy).length > 0 ? uploadPolicy : undefined,
     releaseTaskType: raw.releaseTaskType ?? raw.release_task_type ?? raw.template?.release_task_type,
     downloadLinkTtlSeconds: raw.downloadLinkTtlSeconds ?? raw.download_link_ttl_seconds,
+    translationMaxSegmentLength,
+    workflowConfig,
     wikiApprovalRequired: raw.wikiApprovalRequired ?? raw.wiki_approval_required,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
     updatedAt: raw.updatedAt ?? raw.updated_at ?? "",

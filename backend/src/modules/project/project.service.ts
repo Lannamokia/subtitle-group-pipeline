@@ -46,6 +46,70 @@ function parseOptionalJsonObject(value: string | null | undefined): Record<strin
   return parseJsonObject(value);
 }
 
+function parseOptionalJsonArray(value: string | null | undefined): Array<Record<string, unknown>> {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item)
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function workflowEntriesFromConfig(value: string | null | undefined): Array<Record<string, unknown>> {
+  const arrayEntries = parseOptionalJsonArray(value);
+  if (arrayEntries.length > 0) {
+    return arrayEntries.map((entry) => ({ ...entry }));
+  }
+
+  const objectConfig = parseOptionalJsonObject(value);
+  return Object.entries(objectConfig)
+    .filter(([, config]) => config && typeof config === "object" && !Array.isArray(config))
+    .map(([role, config]) => ({
+      ...(config as Record<string, unknown>),
+      role: (config as Record<string, unknown>).role ?? role,
+    }));
+}
+
+function setRoleMaxSegmentLength(
+  workflowConfig: string | null | undefined,
+  role: string,
+  value: number | null
+): string | null {
+  const entries = workflowEntriesFromConfig(workflowConfig);
+  let roleEntry = entries.find((entry) => entry.role === role);
+
+  if (!roleEntry && value === null && entries.length === 0) {
+    return workflowConfig ?? null;
+  }
+
+  if (!roleEntry) {
+    roleEntry = {
+      role,
+      enabled: true,
+      assignmentStrategy: role === "translation" ? "open_claim" : "manual",
+    };
+    entries.push(roleEntry);
+  }
+
+  if (value === null) {
+    delete roleEntry.maxSegmentLength;
+    delete roleEntry.max_segment_length;
+  } else {
+    roleEntry.maxSegmentLength = value;
+    delete roleEntry.max_segment_length;
+  }
+
+  return JSON.stringify(entries);
+}
+
 function metadataStringValue(metadata: Record<string, unknown>, ...keys: string[]): string | undefined {
   for (const key of keys) {
     const value = metadata[key];
@@ -119,6 +183,39 @@ async function getProjectSupervisorRecipientIds(projectId: string, actorId?: str
       ...supervisors.map((member) => member.user_id),
     ]),
   ].filter((userId) => userId !== actorId);
+}
+
+async function canManageProjectSettings(projectId: string, actorId?: string): Promise<boolean> {
+  if (!actorId) {
+    return false;
+  }
+
+  const [actor, project, membership] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: actorId },
+      select: { role: true },
+    }),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: { owner_id: true },
+    }),
+    prisma.projectMember.findFirst({
+      where: {
+        project_id: projectId,
+        user_id: actorId,
+        left_at: null,
+      },
+      select: { role: true },
+    }),
+  ]);
+
+  return Boolean(
+    actor?.role === "super_admin" ||
+      actor?.role === "group_admin" ||
+      actor?.role === "supervisor" ||
+      project?.owner_id === actorId ||
+      membership?.role === "supervisor"
+  );
 }
 
 function booleanFromPolicy(policy: Record<string, unknown>, ...keys: string[]): boolean | undefined {
@@ -531,6 +628,10 @@ export async function updateProject(
     throw new AppError("Cannot update a deleted project", "BAD_REQUEST", 400);
   }
 
+  if (!(await canManageProjectSettings(projectId, actorId))) {
+    throw new AppError("Only project supervisors or administrators can update project settings", "FORBIDDEN", 403);
+  }
+
   const updateData: Record<string, unknown> = {
     name: data.name,
     description: data.description,
@@ -546,6 +647,13 @@ export async function updateProject(
   }
   if (data.wiki_approval_required !== undefined) {
     updateData.wiki_approval_required = data.wiki_approval_required;
+  }
+  if (data.translation_max_segment_length !== undefined) {
+    updateData.workflow_config = setRoleMaxSegmentLength(
+      existing.workflow_config,
+      "translation",
+      data.translation_max_segment_length
+    );
   }
 
   const project = await prisma.project.update({

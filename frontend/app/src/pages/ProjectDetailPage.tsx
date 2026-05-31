@@ -3165,12 +3165,22 @@ function getUnitDeletionErrorDetails(error: unknown): UnitDeletionImpact[] | nul
 }
 
 function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => void }) {
-  const isSupervisor = useAuthStore((s) => s.isSupervisor());
+  const currentUser = useAuthStore((s) => s.user);
+  const isGlobalSupervisor = useAuthStore((s) => s.isSupervisor());
+  const isProjectSupervisor = Boolean(
+    currentUser &&
+      (project.supervisorId === currentUser.id ||
+        project.members?.some((member) => member.user.id === currentUser.id && member.role === "supervisor"))
+  );
+  const isSupervisor = isGlobalSupervisor || isProjectSupervisor;
   const [name, setName] = useState(project.name);
   const [qqGroupId, setQqGroupId] = useState(project.qqGroupId ?? "");
   const [episodeCount, setEpisodeCount] = useState(project.episodes || project.units?.length || 1);
   const [deliveryChecklist, setDeliveryChecklist] = useState(project.deliveryChecklist ?? []);
   const [downloadLinkTtlSeconds, setDownloadLinkTtlSeconds] = useState(project.downloadLinkTtlSeconds ?? 300);
+  const [translationMaxSegmentLength, setTranslationMaxSegmentLength] = useState<number | "">(
+    project.translationMaxSegmentLength ?? ""
+  );
   const [wikiApprovalRequired, setWikiApprovalRequired] = useState(project.wikiApprovalRequired ?? false);
   const [unitDeleteDialogOpen, setUnitDeleteDialogOpen] = useState(false);
   const [pendingEpisodeCount, setPendingEpisodeCount] = useState<number | null>(null);
@@ -3189,10 +3199,16 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
     setEpisodeCount(project.episodes || project.units?.length || 1);
     setDeliveryChecklist(project.deliveryChecklist ?? []);
     setDownloadLinkTtlSeconds(project.downloadLinkTtlSeconds ?? 300);
+    setTranslationMaxSegmentLength(project.translationMaxSegmentLength ?? "");
     setWikiApprovalRequired(project.wikiApprovalRequired ?? false);
   }, [project]);
 
   const handleSave = async () => {
+    if (translationMaxSegmentLength !== "" && Number(translationMaxSegmentLength) < 1) {
+      toast.error("每人最大认领时长必须大于 0 秒");
+      return;
+    }
+
     setSaving(true);
     try {
       await projectApi.updateProject(project.id, {
@@ -3200,6 +3216,8 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
         qqGroupId: qqGroupId.trim(),
         deliveryChecklist,
         downloadLinkTtlSeconds,
+        translationMaxSegmentLength:
+          translationMaxSegmentLength === "" ? null : Number(translationMaxSegmentLength),
         wikiApprovalRequired,
       });
       toast.success("设置已保存");
@@ -3359,6 +3377,30 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
               onChange={setDeliveryChecklist}
               readOnly={!isSupervisor}
             />
+          </div>
+          <div className="rounded-lg border border-gray-200 p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-gray-800">翻译认领规则</h3>
+              <p className="mt-1 text-xs text-gray-500">
+                控制每个翻译在同一集翻译任务中可同时认领的总时长，修改后会立即影响新的认领校验。
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">每人最大认领时长（秒）</label>
+              <Input
+                type="number"
+                min={1}
+                value={translationMaxSegmentLength}
+                onChange={(event) =>
+                  setTranslationMaxSegmentLength(event.target.value === "" ? "" : Number(event.target.value))
+                }
+                placeholder="留空表示不限制"
+                disabled={!isSupervisor}
+              />
+              <p className="text-xs text-gray-500">
+                例如填 900 表示每名翻译最多同时认领 15 分钟片段；留空则不限制认领总时长。
+              </p>
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">

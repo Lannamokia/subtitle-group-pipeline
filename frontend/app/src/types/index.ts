@@ -96,6 +96,8 @@ export interface Project {
   productConfig?: ProductConfig;
   releaseTaskType?: string | null;
   downloadLinkTtlSeconds?: number;
+  translationMaxSegmentLength?: number | null;
+  workflowConfig?: TemplateRoleConfig[];
   wikiApprovalRequired?: boolean | null;
   uploadPolicy?: UploadPolicy;
   createdAt: string;
