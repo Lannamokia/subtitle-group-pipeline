@@ -25,6 +25,7 @@ import * as storageService from "../storage/storage.service";
 import * as notificationService from "../notification/notification.service";
 import { createHash, randomUUID } from "crypto";
 import type { ConflictType } from "@prisma/client";
+import { applyAssTextPatch, parseAssDocument, type AssPatchConflict } from "./ass-structured";
 
 // ==================== TRANSLATION CLAIMS ====================
 
@@ -475,6 +476,319 @@ export async function getSubmissionsByTask(taskId: string) {
   return submissions;
 }
 
+type MergeManifest = {
+  claimIds: string[];
+  fileVersionIds: string[];
+};
+
+function parseMergeManifest(inputFiles: string): MergeManifest {
+  const parsed = safeJsonParse<unknown>(inputFiles, []);
+  if (Array.isArray(parsed)) {
+    return {
+      claimIds: [],
+      fileVersionIds: parsed.filter((id): id is string => typeof id === "string"),
+    };
+  }
+  if (parsed && typeof parsed === "object") {
+    const record = parsed as Record<string, unknown>;
+    return {
+      claimIds: Array.isArray(record.claim_ids)
+        ? record.claim_ids.filter((id): id is string => typeof id === "string")
+        : [],
+      fileVersionIds: Array.isArray(record.file_version_ids)
+        ? record.file_version_ids.filter((id): id is string => typeof id === "string")
+        : [],
+    };
+  }
+  return { claimIds: [], fileVersionIds: [] };
+}
+
+async function ensureSubmissionFileVersion(submission: {
+  id: string;
+  task_id: string;
+  user_id: string;
+  file_version_id: string | null;
+  content: string;
+}, projectId: string, unitId: string | null) {
+  if (submission.file_version_id) {
+    const version = await prisma.fileVersion.findUnique({
+      where: { id: submission.file_version_id },
+      include: { file: true },
+    });
+    if (version) return version;
+  }
+
+  const size = Buffer.byteLength(submission.content || "", "utf-8");
+  const checksum = createHash("sha256").update(submission.content || "").digest("hex");
+  const file = await prisma.fileEntity.create({
+    data: {
+      project_id: projectId,
+      uploader_id: submission.user_id,
+      name: `translation_inline_${submission.id}.ass`,
+      original_name: `translation_inline_${submission.id}.ass`,
+      file_type: "subtitle",
+      mime_type: "application/x-ass",
+      size_bytes: size,
+      storage_path: `inline:${submission.id}`,
+      checksum,
+      metadata: JSON.stringify({
+        task_id: submission.task_id,
+        unit_id: unitId,
+        submission_id: submission.id,
+        asset_kind: "inline_translation",
+      }),
+    },
+  });
+  const version = await prisma.fileVersion.create({
+    data: {
+      file_id: file.id,
+      version_number: 1,
+      storage_path: file.storage_path,
+      size_bytes: size,
+      checksum,
+      change_summary: "Inline translation submission snapshot",
+      is_current: true,
+      is_latest: true,
+      is_latest_approved: false,
+    },
+    include: { file: true },
+  });
+  await prisma.translationSubmission.update({
+    where: { id: submission.id },
+    data: { file_version_id: version.id },
+  });
+  return version;
+}
+
+async function readSubmissionAssContent(submission: {
+  content: string;
+  file_version_id: string | null;
+}) {
+  if (submission.content) return submission.content;
+  if (!submission.file_version_id) return null;
+
+  const version = await prisma.fileVersion.findUnique({
+    where: { id: submission.file_version_id },
+    include: { file: true },
+  });
+  if (!version?.file.storage_backend_id || version.storage_path.startsWith("inline:")) {
+    return null;
+  }
+
+  const buffer = await storageService.downloadStoredFile(
+    version.file.storage_backend_id,
+    version.storage_path
+  );
+  return buffer.toString("utf-8");
+}
+
+async function processSerialTranslationMerge(job: {
+  id: string;
+  project_id: string;
+  unit_id: string | null;
+  input_files: string;
+}) {
+  const manifest = parseMergeManifest(job.input_files);
+  if (manifest.claimIds.length === 0) return null;
+
+  const claims = await prisma.translationClaim.findMany({
+    where: {
+      id: { in: manifest.claimIds },
+      unit_id: job.unit_id,
+      status: { in: ["submitted", "approved"] },
+    },
+    include: {
+      submissions: {
+        orderBy: { submitted_at: "desc" },
+      },
+    },
+    orderBy: [
+      { segment_start: "asc" },
+      { claimed_at: "asc" },
+    ],
+  });
+
+  if (claims.length === 0) {
+    throw new AppError("No submitted translation claims found for serial merge", "BAD_REQUEST", 400);
+  }
+
+  const inputs: Array<{
+    claim: typeof claims[number];
+    submission: NonNullable<typeof claims[number]["submissions"][number]>;
+    content: string;
+    fileId: string;
+  }> = [];
+
+  for (const claim of claims) {
+    const submission = claim.submissions[0];
+    if (!submission) continue;
+    const content = await readSubmissionAssContent(submission);
+    if (!content) continue;
+    const version = await ensureSubmissionFileVersion(
+      { ...submission, content },
+      job.project_id,
+      job.unit_id
+    );
+    inputs.push({
+      claim,
+      submission,
+      content,
+      fileId: version.file_id,
+    });
+  }
+
+  if (inputs.length === 0) {
+    throw new AppError("No readable ASS submissions found for serial merge", "VALIDATION_ERROR", 400);
+  }
+
+  let mergedContent = inputs[0].content;
+  const conflicts: Array<AssPatchConflict & { fileAId: string; fileBId: string }> = [];
+  let changedCount = parseAssDocument(mergedContent).events.length;
+
+  for (let index = 1; index < inputs.length; index++) {
+    const previous = inputs[index - 1];
+    const current = inputs[index];
+    const result = applyAssTextPatch(
+      previous.content,
+      mergedContent,
+      current.content,
+      {
+        startTime: current.claim.segment_start,
+        endTime: current.claim.segment_end,
+      }
+    );
+
+    changedCount += result.changedCount;
+    if (result.conflicts.length > 0) {
+      conflicts.push(
+        ...result.conflicts.map((conflict) => ({
+          ...conflict,
+          fileAId: previous.fileId,
+          fileBId: current.fileId,
+        }))
+      );
+    } else {
+      mergedContent = result.content;
+    }
+  }
+
+  if (conflicts.length > 0) {
+    for (const conflict of conflicts) {
+      await prisma.subtitleConflict.create({
+        data: {
+          project_id: job.project_id,
+          unit_id: job.unit_id,
+          conflict_type: conflict.type === "text_conflict" ? "content_mismatch" : "format_mismatch",
+          description: `${conflict.type}: ${conflict.currentText || conflict.baseText} vs ${conflict.theirsText}`,
+          affected_lines: JSON.stringify([conflict.startTime, conflict.endTime]),
+          file_a_id: conflict.fileAId,
+          file_b_id: conflict.fileBId,
+          resolution: "unresolved",
+        },
+      });
+    }
+
+    return prisma.mergeJob.update({
+      where: { id: job.id },
+      data: {
+        status: "waiting_conflict_resolution",
+        completed_at: new Date(),
+        log: JSON.stringify({
+          mode: "serial_ass_patch",
+          conflict_count: conflicts.length,
+          conflicts: conflicts.map((conflict) => ({
+            type: conflict.type,
+            event_key: conflict.eventKey,
+            start_time: conflict.startTime,
+            end_time: conflict.endTime,
+            message: conflict.message,
+          })),
+        }),
+      },
+    });
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: job.project_id },
+    select: {
+      name: true,
+      owner_id: true,
+      storage_backend_id: true,
+    },
+  });
+
+  if (!project) {
+    throw new AppError("Project not found", "NOT_FOUND", 404);
+  }
+
+  const backend = project.storage_backend_id
+    ? await prisma.storageBackend.findUnique({ where: { id: project.storage_backend_id } })
+    : await storageService.getDefaultBackend();
+
+  if (!backend || !backend.is_active) {
+    throw new AppError("No active storage backend configured", "CONFIG_ERROR", 500);
+  }
+
+  const mergedFileName = `translation_merged_${job.unit_id}_${Date.now()}.ass`;
+  const mergedUpload = await storageService.uploadFile(
+    backend.id,
+    job.project_id,
+    Buffer.from(mergedContent, "utf-8"),
+    mergedFileName,
+    "application/x-ass"
+  );
+
+  const mergedFile = await fileService.createFile(project.owner_id, {
+    project_id: job.project_id,
+    name: mergedFileName,
+    file_type: "subtitle",
+    mime_type: "application/x-ass",
+    size_bytes: mergedUpload.size,
+    storage_path: mergedUpload.storagePath,
+    storage_backend_id: backend.id,
+    checksum: createHash("sha256").update(mergedContent).digest("hex"),
+    metadata: JSON.stringify({
+      merge_job_id: job.id,
+      unit_id: job.unit_id,
+      merge_mode: "serial_ass_patch",
+      source_claim_ids: manifest.claimIds,
+      merged_event_count: parseAssDocument(mergedContent).events.length,
+      changed_event_count: changedCount,
+    }),
+  });
+
+  await notificationService.createBulkNotifications(
+    await notificationService.resolveRecipients("project_update", {
+      projectId: job.project_id,
+      actorId: project.owner_id,
+    }),
+    "project_update",
+    {
+      projectId: job.project_id,
+      actorId: project.owner_id,
+      projectName: project.name,
+      fileName: mergedFileName,
+      reason: "串行翻译 ASS patch 合并已完成",
+    }
+  );
+
+  return prisma.mergeJob.update({
+    where: { id: job.id },
+    data: {
+      status: "completed",
+      output_file_id: mergedFile.id,
+      completed_at: new Date(),
+      log: JSON.stringify({
+        mode: "serial_ass_patch",
+        input_claim_count: inputs.length,
+        merged_event_count: parseAssDocument(mergedContent).events.length,
+        changed_event_count: changedCount,
+        conflict_count: 0,
+      }),
+    },
+  });
+}
+
 // ==================== MERGE JOBS ====================
 
 export async function createMergeJob(
@@ -517,7 +831,8 @@ export async function createMergeJob(
     );
   }
 
-  // Collect file version IDs from submissions
+  // Collect file version IDs from submissions. The merge manifest keeps claim IDs
+  // as the primary input so serial translation can replay the approved order.
   const fileVersionIds: string[] = [];
   for (const claim of claims) {
     for (const sub of claim.submissions) {
@@ -532,7 +847,10 @@ export async function createMergeJob(
     data: {
       project_id: unit.project_id,
       unit_id: projectUnitId,
-      input_files: JSON.stringify(fileVersionIds),
+      input_files: JSON.stringify({
+        claim_ids: claimIds,
+        file_version_ids: fileVersionIds,
+      }),
       status: "pending",
     },
   });
@@ -568,7 +886,12 @@ export async function processMergeJob(jobId: string) {
   });
 
   try {
-    const fileVersionIds: string[] = JSON.parse(job.input_files);
+    const serialJob = await processSerialTranslationMerge(job);
+    if (serialJob) {
+      return serialJob;
+    }
+
+    const fileVersionIds = parseMergeManifest(job.input_files).fileVersionIds;
     const allLines: Array<ASSLine & { sourceFileId: string }> = [];
     const conflicts: Array<{
       type: "exact_duplicate" | "text_conflict" | "overlap";

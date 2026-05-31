@@ -87,6 +87,7 @@ export interface Project {
   qqGroupId?: string;
   members: ProjectMember[];
   assignedUserIds?: string[];
+  openClaimRoles?: TaskRole[];
   units?: ProjectUnit[];
   tasks?: Task[];
   progress: number;

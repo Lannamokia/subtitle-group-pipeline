@@ -478,7 +478,22 @@ export async function getProjects(query: ProjectQueryInput, userId?: string) {
         },
         tasks: {
           select: {
+            id: true,
             assignee_id: true,
+            role: true,
+            status: true,
+            unit: {
+              select: {
+                episode_length: true,
+              },
+            },
+            claims: {
+              select: {
+                status: true,
+                segment_start: true,
+                segment_end: true,
+              },
+            },
           },
         },
       },
@@ -487,16 +502,52 @@ export async function getProjects(query: ProjectQueryInput, userId?: string) {
   ]);
 
   return {
-    projects: projects.map(({ tasks, ...project }) => ({
-      ...project,
-      assigned_user_ids: Array.from(
-        new Set(
-          tasks
-            .map((task) => task.assignee_id)
-            .filter((id): id is string => Boolean(id))
-        )
-      ),
-    })),
+    projects: projects.map(({ tasks, ...project }) => {
+      const openClaimRoles = new Set<string>();
+      for (const task of tasks) {
+        if (task.status === "claimable") {
+          openClaimRoles.add(task.role);
+          continue;
+        }
+        if (
+          task.role === "translation" &&
+          ["assigned", "in_progress", "submitted"].includes(task.status)
+        ) {
+          const episodeLength = task.unit?.episode_length ?? null;
+          if (!episodeLength) continue;
+          const covered = task.claims
+            .filter((claim) => ["pending", "active", "submitted", "approved"].includes(claim.status))
+            .sort((a, b) => a.segment_start - b.segment_start)
+            .reduce((state, claim) => {
+              if (claim.segment_start <= state.lastEnd) {
+                return {
+                  covered: state.covered + Math.max(0, claim.segment_end - state.lastEnd),
+                  lastEnd: Math.max(state.lastEnd, claim.segment_end),
+                };
+              }
+              return {
+                covered: state.covered + claim.segment_end - claim.segment_start,
+                lastEnd: claim.segment_end,
+              };
+            }, { covered: 0, lastEnd: 0 }).covered;
+          if (covered < episodeLength) {
+            openClaimRoles.add(task.role);
+          }
+        }
+      }
+
+      return {
+        ...project,
+        assigned_user_ids: Array.from(
+          new Set(
+            tasks
+              .map((task) => task.assignee_id)
+              .filter((id): id is string => Boolean(id))
+          )
+        ),
+        open_claim_roles: Array.from(openClaimRoles),
+      };
+    }),
     meta: {
       page,
       pageSize,

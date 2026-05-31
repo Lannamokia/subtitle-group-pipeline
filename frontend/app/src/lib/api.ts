@@ -887,6 +887,11 @@ export function normalizeProject(raw: AnyRecord): Project {
       : Array.isArray(raw.assigned_user_ids)
         ? raw.assigned_user_ids
         : [],
+    openClaimRoles: Array.isArray(raw.openClaimRoles)
+      ? raw.openClaimRoles
+      : Array.isArray(raw.open_claim_roles)
+        ? raw.open_claim_roles
+        : [],
     units,
     tasks,
     progress: raw.progress ?? (taskCount > 0 ? Math.round((completed / taskCount) * 100) : 0),

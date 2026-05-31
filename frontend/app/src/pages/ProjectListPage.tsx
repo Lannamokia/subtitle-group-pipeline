@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
+import { TASK_ROLE_MAP } from "@/lib/utils";
 import { projectApi } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,9 +16,10 @@ import {
   Layers,
   Search,
   ArrowRight,
+  Megaphone,
 } from "lucide-react";
 
-type ProjectStatus = "all" | "active" | "completed" | "archived";
+type ProjectStatus = "all" | "recruiting" | "active" | "completed" | "archived";
 
 export function ProjectListPage() {
   const navigate = useNavigate();
@@ -35,7 +37,8 @@ export function ProjectListPage() {
 
   const filteredProjects = projects.filter((p) => {
     if (searchQuery && !p.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    if (statusFilter !== "all" && p.status !== statusFilter) return false;
+    if (statusFilter === "recruiting" && (p.openClaimRoles?.length ?? 0) === 0) return false;
+    if (statusFilter !== "all" && statusFilter !== "recruiting" && p.status !== statusFilter) return false;
     if (scope === "mine") {
       return (
         p.members.some((m) => m.user.id === currentUser?.id) ||
@@ -51,7 +54,7 @@ export function ProjectListPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-display text-gray-800">项目</h1>
+          <h1 className="text-display text-gray-800">任务广场</h1>
           <p className="text-sm text-gray-500 mt-1">共 {filteredProjects.length} 个项目</p>
         </div>
         <div className="flex items-center gap-3">
@@ -80,15 +83,15 @@ export function ProjectListPage() {
 
         <div className="flex items-center bg-white rounded-md border border-gray-200 p-0.5">
           <FilterTab active={scope === "mine"} onClick={() => setScope("mine")}>
-            我参与的
+            我参与的项目
           </FilterTab>
           <FilterTab active={scope === "all"} onClick={() => setScope("all")}>
-            全部
+            全部项目
           </FilterTab>
         </div>
 
         <div className="flex items-center gap-1">
-          {(["all", "active", "completed", "archived"] as ProjectStatus[]).map((s) => (
+          {(["recruiting", "all", "active", "completed", "archived"] as ProjectStatus[]).map((s) => (
             <Button
               key={s}
               variant={statusFilter === s ? "default" : "ghost"}
@@ -99,7 +102,7 @@ export function ProjectListPage() {
               )}
               onClick={() => setStatusFilter(s)}
             >
-              {s === "all" ? "全部" : s === "active" ? "进行中" : s === "completed" ? "已完成" : "已归档"}
+              {s === "recruiting" ? "招募中项目" : s === "all" ? "全部" : s === "active" ? "进行中" : s === "completed" ? "已完成" : "已归档"}
             </Button>
           ))}
         </div>
@@ -161,6 +164,22 @@ function ProjectCard({ project }: { project: Project }) {
           第{project.season}季 · {project.episodes}集
         </p>
 
+        {(project.openClaimRoles?.length ?? 0) > 0 && (
+          <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2">
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-blue-700">
+              <Megaphone className="h-3.5 w-3.5" />
+              开放认领
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {project.openClaimRoles!.map((role) => (
+                <Badge key={role} variant="outline" className="border-blue-200 bg-white text-[10px] text-blue-700">
+                  {TASK_ROLE_MAP[role]?.label || role}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Progress */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs">
@@ -216,7 +235,7 @@ function EmptyProjectState({ onCreate }: { onCreate: () => void }) {
         <FolderKanban className="w-8 h-8 text-gray-300" />
       </div>
       <p className="text-sm text-gray-500">暂无项目</p>
-      <p className="text-xs text-gray-400 mt-1">创建你的首个项目开始协作</p>
+      <p className="text-xs text-gray-400 mt-1">有开放认领任务的项目会显示在任务广场</p>
       <Button className="mt-4" onClick={onCreate}>
         创建项目
       </Button>

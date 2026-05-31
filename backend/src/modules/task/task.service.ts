@@ -64,6 +64,7 @@ const TASK_DOWNSTREAM_RESET_STATUSES: TaskStatus[] = [
   "frozen",
 ];
 
+const RESERVED_TRANSLATION_CLAIM_STATUSES: ClaimStatus[] = ["pending", "active", "submitted"];
 const ACTIVE_TRANSLATION_CLAIM_STATUSES: ClaimStatus[] = ["pending", "active"];
 
 /**
@@ -94,6 +95,137 @@ async function getDownstreamTasks(taskId: string) {
   });
 
   return dependents.map((d) => d.task);
+}
+
+function translationClaimScope(task: { id: string; project_id: string; unit_id: string | null }) {
+  return task.unit_id
+    ? { project_id: task.project_id, unit_id: task.unit_id, role: TaskRole.translation }
+    : { id: task.id };
+}
+
+async function activateNextTranslationClaim(task: {
+  id: string;
+  project_id: string;
+  unit_id: string | null;
+  title: string;
+}) {
+  const activeOrSubmitted = await prisma.translationClaim.findFirst({
+    where: {
+      task: translationClaimScope(task),
+      status: { in: ["active", "submitted"] },
+    },
+    orderBy: [
+      { segment_start: "asc" },
+      { claimed_at: "asc" },
+    ],
+  });
+
+  if (activeOrSubmitted) {
+    return activeOrSubmitted;
+  }
+
+  const next = await prisma.translationClaim.findFirst({
+    where: {
+      task: translationClaimScope(task),
+      status: "pending",
+    },
+    orderBy: [
+      { segment_start: "asc" },
+      { claimed_at: "asc" },
+    ],
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+        },
+      },
+    },
+  });
+
+  if (!next) {
+    return null;
+  }
+
+  const activated = await prisma.translationClaim.update({
+    where: { id: next.id },
+    data: { status: "active" },
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+        },
+      },
+    },
+  });
+
+  await prisma.task.updateMany({
+    where: translationClaimScope(task),
+    data: {
+      status: "assigned",
+      assignee_id: next.user_id,
+      started_at: null,
+      submitted_at: null,
+      completed_at: null,
+    },
+  });
+
+  await notificationService.createNotification(next.user_id, "task_assigned", {
+    projectId: task.project_id,
+    taskId: task.id,
+    taskName: task.title,
+    reason: "上一段翻译已通过，请下载最新通过版本继续下一段翻译",
+  });
+
+  return activated;
+}
+
+async function getTranslationCoverageSeconds(task: {
+  id: string;
+  project_id: string;
+  unit_id: string | null;
+}) {
+  const claims = await prisma.translationClaim.findMany({
+    where: {
+      task: translationClaimScope(task),
+      status: { in: ["pending", "active", "submitted", "approved"] },
+    },
+    select: {
+      segment_start: true,
+      segment_end: true,
+    },
+    orderBy: { segment_start: "asc" },
+  });
+
+  let covered = 0;
+  let lastEnd = 0;
+  for (const claim of claims) {
+    if (claim.segment_start <= lastEnd) {
+      covered += Math.max(0, claim.segment_end - lastEnd);
+      lastEnd = Math.max(lastEnd, claim.segment_end);
+    } else {
+      covered += claim.segment_end - claim.segment_start;
+      lastEnd = claim.segment_end;
+    }
+  }
+
+  return covered;
+}
+
+async function isTranslationCoverageComplete(task: {
+  id: string;
+  project_id: string;
+  unit_id: string | null;
+  unit?: { episode_length: number | null } | null;
+}) {
+  if (!task.unit?.episode_length) {
+    return false;
+  }
+
+  return (await getTranslationCoverageSeconds(task)) >= task.unit.episode_length;
 }
 
 function parseMetadata(metadata: string | null | undefined): Record<string, unknown> {
@@ -1405,6 +1537,24 @@ export async function startTask(
     );
   }
 
+  if (task.role === TaskRole.translation) {
+    const activeClaim = await prisma.translationClaim.findFirst({
+      where: {
+        task: translationClaimScope(task),
+        user_id: userId,
+        status: "active",
+      },
+    });
+
+    if (!activeClaim) {
+      throw new AppError(
+        "Only the currently active translator can start this translation segment",
+        "FORBIDDEN",
+        403
+      );
+    }
+  }
+
   // If claimable, auto-assign to the user starting it
   const updateData: Record<string, unknown> = {
     status: "in_progress",
@@ -1473,6 +1623,26 @@ export async function submitTask(
     throw new AppError("Only the assigned member can submit this task", "FORBIDDEN", 403);
   }
 
+  let activeTranslationClaim: { id: string } | null = null;
+  if (task.role === TaskRole.translation) {
+    activeTranslationClaim = await prisma.translationClaim.findFirst({
+      where: {
+        task: translationClaimScope(task),
+        user_id: userId,
+        status: "active",
+      },
+      select: { id: true },
+    });
+
+    if (!activeTranslationClaim) {
+      throw new AppError(
+        "Only the active translation segment can be submitted",
+        "FORBIDDEN",
+        403
+      );
+    }
+  }
+
   const requiresReview = REVIEW_REQUIRED_ROLES.includes(task.role);
   const updated = await prisma.task.update({
     where: { id: taskId },
@@ -1482,6 +1652,16 @@ export async function submitTask(
       completed_at: requiresReview ? null : new Date(),
     },
   });
+
+  if (activeTranslationClaim) {
+    await prisma.translationClaim.update({
+      where: { id: activeTranslationClaim.id },
+      data: {
+        status: "submitted",
+        submitted_at: new Date(),
+      },
+    });
+  }
 
   await timelineService.createTimelineEvent({
     project_id: task.project_id,
@@ -1650,24 +1830,86 @@ export async function approveTask(
     },
   });
 
-  const updated = await prisma.task.update({
-    where: { id: taskId },
-    data: {
-      status: "completed",
-      completed_at: new Date(),
-    },
-  });
+  let updated;
+  if (task.role === TaskRole.translation) {
+    const submittedClaim = await prisma.translationClaim.findFirst({
+      where: {
+        task: translationClaimScope(task),
+        status: "submitted",
+      },
+      orderBy: [
+        { segment_start: "asc" },
+        { submitted_at: "asc" },
+      ],
+    });
 
-  // Unlock next stage: make the next task in pipeline claimable if dependencies are met
-  const downstream = await getDownstreamTasks(taskId);
-  for (const downTask of downstream) {
-    const downDepsMet = await checkDependenciesMet(downTask.id);
-    if (downDepsMet && downTask.status === "pending_publish") {
-      await prisma.task.update({
-        where: { id: downTask.id },
-        data: { status: "claimable" },
+    if (!submittedClaim) {
+      throw new AppError("No submitted translation segment is waiting for approval", "BAD_REQUEST", 400);
+    }
+
+    await prisma.translationClaim.update({
+      where: { id: submittedClaim.id },
+      data: {
+        status: "approved",
+        approved_at: new Date(),
+      },
+    });
+
+    const nextClaim = await activateNextTranslationClaim(task);
+    if (nextClaim) {
+      updated = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    } else if (await isTranslationCoverageComplete(task)) {
+      updated = await prisma.task.update({
+        where: { id: taskId },
+        data: {
+          status: "completed",
+          assignee_id: null,
+          completed_at: new Date(),
+        },
       });
-      await notifyUnlockedDownstreamTask(downTask, reviewerId);
+
+      const downstream = await getDownstreamTasks(taskId);
+      for (const downTask of downstream) {
+        const downDepsMet = await checkDependenciesMet(downTask.id);
+        if (downDepsMet && downTask.status === "pending_publish") {
+          await prisma.task.update({
+            where: { id: downTask.id },
+            data: { status: "claimable" },
+          });
+          await notifyUnlockedDownstreamTask(downTask, reviewerId);
+        }
+      }
+    } else {
+      updated = await prisma.task.update({
+        where: { id: taskId },
+        data: {
+          status: "claimable",
+          assignee_id: null,
+          submitted_at: null,
+          completed_at: null,
+        },
+      });
+    }
+  } else {
+    updated = await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        status: "completed",
+        completed_at: new Date(),
+      },
+    });
+
+    // Unlock next stage: make the next task in pipeline claimable if dependencies are met
+    const downstream = await getDownstreamTasks(taskId);
+    for (const downTask of downstream) {
+      const downDepsMet = await checkDependenciesMet(downTask.id);
+      if (downDepsMet && downTask.status === "pending_publish") {
+        await prisma.task.update({
+          where: { id: downTask.id },
+          data: { status: "claimable" },
+        });
+        await notifyUnlockedDownstreamTask(downTask, reviewerId);
+      }
     }
   }
 
@@ -1764,12 +2006,41 @@ export async function rejectTask(
     });
   }
 
-  const updated = await prisma.task.update({
+  let updated = await prisma.task.update({
     where: { id: taskId },
     data: {
       status: "review_rejected",
     },
   });
+
+  if (task.role === TaskRole.translation) {
+    const submittedClaim = await prisma.translationClaim.findFirst({
+      where: {
+        task: translationClaimScope(task),
+        status: "submitted",
+      },
+      orderBy: [
+        { segment_start: "asc" },
+        { submitted_at: "asc" },
+      ],
+    });
+
+    if (submittedClaim) {
+      await prisma.translationClaim.update({
+        where: { id: submittedClaim.id },
+        data: { status: "active" },
+      });
+
+      updated = await prisma.task.update({
+        where: { id: taskId },
+        data: {
+          status: "assigned",
+          assignee_id: submittedClaim.user_id,
+          submitted_at: null,
+        },
+      });
+    }
+  }
 
   await timelineService.createTimelineEvent({
     project_id: task.project_id,
@@ -1939,7 +2210,7 @@ export async function claimTranslationSegment(
     );
   }
 
-  if (task.status !== "claimable") {
+  if (!["claimable", "assigned", "in_progress", "submitted"].includes(task.status)) {
     throw new AppError(
       `Translation segments cannot be claimed. Current status: ${task.status}`,
       "BAD_REQUEST",
@@ -2015,7 +2286,7 @@ export async function claimTranslationSegment(
     where: {
       ...activeClaimScope,
       user_id: userId,
-      status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
+      status: { in: RESERVED_TRANSLATION_CLAIM_STATUSES },
     },
     select: {
       segment_start: true,
@@ -2038,7 +2309,7 @@ export async function claimTranslationSegment(
   const overlapping = await prisma.translationClaim.findFirst({
     where: {
       ...activeClaimScope,
-      status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
+      status: { in: [...RESERVED_TRANSLATION_CLAIM_STATUSES, "approved"] },
       AND: [
         { segment_start: { lt: data.segment_end } },
         { segment_end: { gt: data.segment_start } },
@@ -2061,17 +2332,19 @@ export async function claimTranslationSegment(
       user_id: userId,
       segment_start: data.segment_start,
       segment_end: data.segment_end,
-      status: "active",
+      status: "pending",
       expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     },
   });
+
+  const activatedClaim = await activateNextTranslationClaim(task);
 
   // Check if all segments are claimed (if episode_length is known)
   if (task.unit?.episode_length) {
     const allClaims = await prisma.translationClaim.findMany({
       where: {
         ...activeClaimScope,
-        status: { in: ACTIVE_TRANSLATION_CLAIM_STATUSES },
+        status: { in: [...RESERVED_TRANSLATION_CLAIM_STATUSES, "approved"] },
       },
       orderBy: { segment_start: "asc" },
     });
@@ -2110,10 +2383,12 @@ export async function claimTranslationSegment(
     action: "translation.claim_segment",
     resource_type: "task",
     resource_id: taskId,
-    new_value: claim,
+    new_value: activatedClaim?.id === claim.id
+      ? { ...claim, status: "active" }
+      : claim,
   });
 
-  return claim;
+  return activatedClaim?.id === claim.id ? activatedClaim : claim;
 }
 
 export async function abandonTranslationSegment(
@@ -2152,20 +2427,27 @@ export async function abandonTranslationSegment(
     },
   });
 
-  await prisma.task.updateMany({
-    where: claim.unit_id
-      ? {
-          project_id: claim.task.project_id,
-          unit_id: claim.unit_id,
-          role: "translation",
-          status: "assigned",
-        }
-      : {
-          id: claim.task_id,
-          status: "assigned",
-        },
-    data: { status: "claimable" },
+  const next = await activateNextTranslationClaim({
+    id: claim.task_id,
+    project_id: claim.task.project_id,
+    unit_id: claim.unit_id,
+    title: "翻译任务",
   });
+
+  if (!next) {
+    await prisma.task.updateMany({
+      where: claim.unit_id
+        ? {
+            project_id: claim.task.project_id,
+            unit_id: claim.unit_id,
+            role: "translation",
+          }
+        : {
+            id: claim.task_id,
+          },
+      data: { status: "claimable", assignee_id: null, started_at: null, submitted_at: null },
+    });
+  }
 
   await auditService.log({
     user_id: userId,
@@ -2192,21 +2474,40 @@ export async function submitTranslation(
     throw new AppError("Task not found", "NOT_FOUND", 404);
   }
 
+  if (task.role !== TaskRole.translation) {
+    throw new AppError("Only translation tasks accept translation submissions", "BAD_REQUEST", 400);
+  }
+
+  const activeClaim = await prisma.translationClaim.findFirst({
+    where: {
+      task: translationClaimScope(task),
+      user_id: userId,
+      status: "active",
+    },
+  });
+
+  if (!activeClaim) {
+    throw new AppError(
+      "Only the active translation segment can submit translation content",
+      "FORBIDDEN",
+      403
+    );
+  }
+
   const submission = await prisma.translationSubmission.create({
     data: {
       task_id: taskId,
       user_id: userId,
+      claim_id: activeClaim.id,
       content: data.content,
       line_count: data.line_count,
     },
   });
 
   // Update claim status if exists
-  await prisma.translationClaim.updateMany({
+  await prisma.translationClaim.update({
     where: {
-      task_id: taskId,
-      user_id: userId,
-      status: "active",
+      id: activeClaim.id,
     },
     data: {
       status: "submitted",

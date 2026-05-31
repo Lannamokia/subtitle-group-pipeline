@@ -1473,7 +1473,7 @@ function TasksTab({
                         还没有人认领时间段
                       </div>
                     )}
-                    {selectedTask.status === "claimable" && (
+                    {["claimable", "assigned", "in_progress", "submitted"].includes(selectedTask.status) && (
                       <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                         <Input
                           type="number"
