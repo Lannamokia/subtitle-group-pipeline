@@ -72,6 +72,10 @@ type ProjectFormValues = z.infer<typeof projectFormSchema>;
 
 type ApiEnvelope<T> = { data: T };
 
+function getUserDisplayName(user?: User | null) {
+  return user?.nickname?.trim() || user?.username || "";
+}
+
 function isUuid(value: string | undefined): value is string {
   return Boolean(value?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
 }
@@ -608,9 +612,10 @@ export function ProjectCreatePage() {
                   {selectedTemplate?.roles
                     .filter((r) => r.enabled)
                     .map((roleConfig) => {
-                      const roleMembers = form
+                      const memberSlots = form
                         .watch("members")
-                        .filter((m) => m.role === roleConfig.role);
+                        .map((member, index) => ({ member, index }))
+                        .filter(({ member }) => member.role === roleConfig.role);
                       return (
                         <div key={roleConfig.role} className="border rounded-lg p-4">
                           <div className="flex items-center justify-between mb-3">
@@ -625,28 +630,36 @@ export function ProjectCreatePage() {
                           </div>
                           <div className="space-y-2">
                             {Array.from({ length: roleConfig.slotCount }, (_, i) => {
-                              const member = roleMembers[i];
+                              const slot = memberSlots[i];
+                              const member = slot?.member;
 
                               return (
-                                <div key={i} className="flex items-center gap-2">
+                                <div key={`${roleConfig.role}-${i}`} className="flex items-center gap-2">
                                   <Select
                                     value={member?.userId || UNASSIGNED_SELECT_VALUE}
                                     onValueChange={(val) => {
                                       const members = form.getValues("members");
-                                      const idx = members.findIndex(
-                                        (m, idx) =>
-                                          m.role === roleConfig.role &&
-                                          members
-                                            .slice(0, idx + 1)
-                                            .filter((m) => m.role === roleConfig.role)
-                                            .length ===
-                                            i + 1
-                                      );
-                                      if (idx >= 0) {
-                                        members[idx].userId =
-                                          val === UNASSIGNED_SELECT_VALUE ? undefined : val;
-                                        form.setValue("members", [...members]);
+                                      const nextMembers = members.map((item) => ({ ...item }));
+                                      const nextUserId =
+                                        val === UNASSIGNED_SELECT_VALUE ? undefined : val;
+
+                                      if (slot) {
+                                        nextMembers[slot.index] = {
+                                          ...nextMembers[slot.index],
+                                          userId: nextUserId,
+                                        };
+                                      } else {
+                                        nextMembers.push({
+                                          role: roleConfig.role,
+                                          userId: nextUserId,
+                                        });
                                       }
+
+                                      form.setValue("members", nextMembers, {
+                                        shouldDirty: true,
+                                        shouldTouch: true,
+                                        shouldValidate: true,
+                                      });
                                     }}
                                   >
                                     <SelectTrigger className="flex-1">
@@ -656,7 +669,7 @@ export function ProjectCreatePage() {
                                       <SelectItem value={UNASSIGNED_SELECT_VALUE}>暂不分配</SelectItem>
                                       {users.map((user) => (
                                         <SelectItem key={user.id} value={user.id}>
-                                          {user.username}
+                                          {getUserDisplayName(user)}
                                         </SelectItem>
                                       ))}
                                     </SelectContent>
@@ -739,7 +752,7 @@ export function ProjectCreatePage() {
                           key={i}
                           label={getRoleLabel(m.role as TaskRole)}
                           value={
-                            users.find((u) => u.id === m.userId)?.username || m.userId || ""
+                            getUserDisplayName(users.find((u) => u.id === m.userId)) || m.userId || ""
                           }
                         />
                       ))}
