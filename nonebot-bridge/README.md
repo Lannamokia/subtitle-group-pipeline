@@ -93,6 +93,8 @@ HEARTBEAT_INTERVAL_SECONDS=30
 - `QQ_BRIDGE_TOKEN`：桥接器和后端共享密钥。建议填写长随机字符串，并和后端系统设置里的 QQ bot secret 保持一致。
 - `HEARTBEAT_INTERVAL_SECONDS`：心跳上报间隔，最低会按 10 秒处理。
 
+桥接器会从 `bot.py` 所在目录显式读取 `.env`，所以无论你在项目根目录执行 `python nonebot-bridge/bot.py`，还是进入 `nonebot-bridge` 后执行 `python bot.py`，都会读取 `nonebot-bridge/.env`。
+
 ## 后端配置
 
 后端有两处和桥接器相关：

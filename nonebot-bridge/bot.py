@@ -1,5 +1,11 @@
+from pathlib import Path
+
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 nonebot.init()
 
