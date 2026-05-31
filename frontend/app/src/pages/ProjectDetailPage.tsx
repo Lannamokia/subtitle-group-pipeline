@@ -460,7 +460,7 @@ function formatShortList(items: string[], max = 8) {
 
 const breakableTextClass = "break-words [overflow-wrap:anywhere]";
 
-type DiffLineKind = "same" | "add" | "remove";
+type DiffLineKind = "same" | "add" | "remove" | "hunk";
 
 interface DiffLine {
   kind: DiffLineKind;
@@ -495,12 +495,54 @@ function buildFallbackDiff(oldText: string, newText: string): DiffLine[] {
   return rows;
 }
 
+function buildUnifiedDiffRows(rows: DiffLine[], context = 3): DiffLine[] {
+  const changedIndexes = rows
+    .map((row, index) => row.kind === "add" || row.kind === "remove" ? index : -1)
+    .filter((index) => index >= 0);
+
+  if (changedIndexes.length === 0) {
+    return [{ kind: "hunk", text: "文件内容无差异" }];
+  }
+
+  const ranges: Array<[number, number]> = [];
+  for (const index of changedIndexes) {
+    const start = Math.max(0, index - context);
+    const end = Math.min(rows.length - 1, index + context);
+    const last = ranges[ranges.length - 1];
+    if (last && start <= last[1] + 1) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      ranges.push([start, end]);
+    }
+  }
+
+  const hunks: DiffLine[] = [];
+  for (const [start, end] of ranges) {
+    const chunk = rows.slice(start, end + 1);
+    const oldLines = chunk
+      .filter((row) => row.kind !== "add" && row.oldLine !== undefined)
+      .map((row) => row.oldLine!);
+    const newLines = chunk
+      .filter((row) => row.kind !== "remove" && row.newLine !== undefined)
+      .map((row) => row.newLine!);
+    const oldStart = oldLines[0] ?? 0;
+    const newStart = newLines[0] ?? 0;
+    hunks.push({
+      kind: "hunk",
+      text: `@@ -${oldStart},${oldLines.length} +${newStart},${newLines.length} @@`,
+    });
+    hunks.push(...chunk);
+  }
+
+  return hunks;
+}
+
 function buildLineDiff(oldText: string, newText: string): DiffLine[] {
   const oldLines = splitPreviewLines(oldText);
   const newLines = splitPreviewLines(newText);
   const cellCount = oldLines.length * newLines.length;
   if (cellCount > 250_000) {
-    return buildFallbackDiff(oldText, newText);
+    return buildUnifiedDiffRows(buildFallbackDiff(oldText, newText));
   }
 
   const dp = Array.from({ length: oldLines.length + 1 }, () =>
@@ -543,7 +585,7 @@ function buildLineDiff(oldText: string, newText: string): DiffLine[] {
     rows.push({ kind: "add", newLine: newIndex + 1, text: newLines[newIndex] });
     newIndex += 1;
   }
-  return rows;
+  return buildUnifiedDiffRows(rows);
 }
 
 function versionLabel(version: FileVersion | FilePreview["version"] | null | undefined) {
@@ -2582,24 +2624,37 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
                         </div>
                         <div className="max-h-[65vh] overflow-auto rounded-lg border border-gray-200 bg-white font-mono text-xs leading-5">
                           {diffRows.map((row, index) => (
-                            <div
-                              key={`${row.kind}-${row.oldLine ?? "x"}-${row.newLine ?? "x"}-${index}`}
-                              className={cn(
-                                "grid grid-cols-[3.5rem_3.5rem_2rem_minmax(0,1fr)] gap-2 border-b border-gray-100 px-3 py-1 last:border-0",
-                                row.kind === "add" && "bg-green-50 text-green-900",
-                                row.kind === "remove" && "bg-red-50 text-red-900",
-                                row.kind === "same" && "text-gray-700"
-                              )}
-                            >
-                              <span className="select-none text-right text-gray-400">{row.oldLine ?? ""}</span>
-                              <span className="select-none text-right text-gray-400">{row.newLine ?? ""}</span>
-                              <span className="select-none text-center text-gray-500">
-                                {row.kind === "add" ? "+" : row.kind === "remove" ? "-" : ""}
-                              </span>
-                              <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                                {row.text || " "}
-                              </span>
-                            </div>
+                            row.kind === "hunk" ? (
+                              <div
+                                key={`hunk-${index}`}
+                                className="border-b border-blue-100 bg-blue-50 px-3 py-1 text-blue-700"
+                              >
+                                {row.text}
+                              </div>
+                            ) : (
+                              <div
+                                key={`${row.kind}-${row.oldLine ?? "x"}-${row.newLine ?? "x"}-${index}`}
+                                className={cn(
+                                  "grid grid-cols-[4rem_4rem_minmax(0,1fr)] border-b border-gray-100 last:border-0",
+                                  row.kind === "add" && "bg-[#dafbe1] text-[#1a7f37]",
+                                  row.kind === "remove" && "bg-[#ffebe9] text-[#cf222e]",
+                                  row.kind === "same" && "bg-white text-gray-700"
+                                )}
+                              >
+                                <span className="select-none border-r border-gray-100 px-2 py-1 text-right text-gray-400">
+                                  {row.oldLine ?? ""}
+                                </span>
+                                <span className="select-none border-r border-gray-100 px-2 py-1 text-right text-gray-400">
+                                  {row.newLine ?? ""}
+                                </span>
+                                <span className="whitespace-pre-wrap break-words px-3 py-1 [overflow-wrap:anywhere]">
+                                  <span className="inline-block w-5 select-none">
+                                    {row.kind === "add" ? "+" : row.kind === "remove" ? "-" : " "}
+                                  </span>
+                                  {row.text || " "}
+                                </span>
+                              </div>
+                            )
                           ))}
                         </div>
                       </div>
