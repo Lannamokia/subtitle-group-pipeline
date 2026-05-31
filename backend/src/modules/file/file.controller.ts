@@ -156,6 +156,9 @@ async function buildUploadInputFromMultipart(req: AuthenticatedRequest) {
     unit_id: typeof body.unit_id === "string" ? body.unit_id : undefined,
     unitId: typeof body.unitId === "string" ? body.unitId : undefined,
     role: taskRole,
+    episode_length: typeof body.episode_length === "string" && body.episode_length.trim()
+      ? Number(body.episode_length)
+      : undefined,
     change_summary: typeof body.change_summary === "string" ? body.change_summary : null,
   };
 }

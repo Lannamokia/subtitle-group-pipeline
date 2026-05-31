@@ -36,6 +36,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { FileListItem } from "@/components/FileListItem";
+import { LinkHistoryList } from "@/components/LinkHistoryList";
 import { toast } from "sonner";
 import type { FileEntity, FileType, FileVersion, LinkAsset, Project, TaskRole } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
@@ -139,7 +140,7 @@ export function FileListPage() {
         tag: tagFilter || undefined,
       });
       setFiles(res.items);
-      setLinks(await fileApi.getLinks({ projectId: selectedProjectId }));
+      setLinks([]);
     } catch (error) {
       toast.error("获取文件列表失败: " + getErrorMessage(error));
     } finally {
@@ -158,6 +159,11 @@ export function FileListPage() {
   useEffect(() => {
     if (!selectedFile) {
       setVersions([]);
+      return;
+    }
+    if (selectedFile.assetKind === "link") {
+      setVersions([]);
+      setVersionsLoading(false);
       return;
     }
     setVersionsLoading(true);
@@ -198,7 +204,7 @@ export function FileListPage() {
     ),
     [uploadProfile.fileTypes]
   );
-  const replaceTarget = files.find((file) => file.id === replaceTargetId);
+  const replaceTarget = files.find((file) => file.id === replaceTargetId && file.assetKind !== "link");
   const uploadAccept = uploadMode === "replace" && replaceTarget
     ? getPolicyUploadProfile(selectedProject?.uploadPolicy, currentProjectRole, [replaceTarget.type]).accept
     : uploadProfile.constrained
@@ -282,8 +288,13 @@ export function FileListPage() {
     }
   };
 
-  const handleDownload = async (fileId: string) => {
+  const handleDownload = async (file: FileEntity) => {
     try {
+      if (file.assetKind === "link" && file.url) {
+        window.open(file.url, "_blank");
+        return;
+      }
+      const fileId = file.id;
       const url = await fileApi.downloadFile(fileId);
       if (url) window.open(url, "_blank");
     } catch (error) {
@@ -315,7 +326,7 @@ export function FileListPage() {
       toast.success("链接已添加");
       setLinkDialogOpen(false);
       setLinkForm({ name: "", url: "", extractCode: "", description: "" });
-      setLinks(await fileApi.getLinks({ projectId: selectedProjectId }));
+      fetchFiles();
     } catch (error) {
       toast.error("添加失败: " + getErrorMessage(error));
     } finally {
@@ -337,8 +348,13 @@ export function FileListPage() {
     if (!deleteTarget) return;
     setDeletingFile(true);
     try {
-      await fileApi.deleteFile(deleteTarget.id);
-      toast.success("文件已删除");
+      if (deleteTarget.assetKind === "link") {
+        await fileApi.deleteLink(deleteTarget.id);
+        toast.success("链接已删除");
+      } else {
+        await fileApi.deleteFile(deleteTarget.id);
+        toast.success("文件已删除");
+      }
       setFiles((prev) => prev.filter((file) => file.id !== deleteTarget.id));
       if (selectedFile?.id === deleteTarget.id) {
         setSelectedFile(null);
@@ -515,7 +531,7 @@ export function FileListPage() {
                     <FileListItem
                       key={file.id}
                       file={file}
-                      onDownload={() => handleDownload(file.id)}
+                      onDownload={() => handleDownload(file)}
                       onViewHistory={() => setSelectedFile(file)}
                       onDelete={canDeleteFile(file) ? () => setDeleteTarget(file) : undefined}
                     />
@@ -604,7 +620,7 @@ export function FileListPage() {
                   <SelectValue placeholder="选择被替换文件" />
                 </SelectTrigger>
                 <SelectContent>
-                  {files.map((file) => (
+                  {files.filter((file) => file.assetKind !== "link").map((file) => (
                     <SelectItem key={file.id} value={file.id}>
                       {file.name} · {file.versionCount}版本
                     </SelectItem>
@@ -734,43 +750,49 @@ export function FileListPage() {
           </SheetHeader>
           {selectedFile && (
             <div className="mt-6 space-y-3">
-              <div className="text-sm">
-                <p className="font-medium">{selectedFile.name}</p>
-                <p className="text-gray-500">共 {selectedFile.versionCount} 个版本</p>
-              </div>
-              {versionsLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
-                </div>
-              ) : versions.length > 0 ? (
-                <div className="space-y-2">
-                  {versions.map((version) => (
-                    <div key={version.id} className="rounded-md border border-gray-200 p-3 text-sm space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">v{version.versionNumber}</span>
-                        <div className="flex items-center gap-1">
-                          {version.isCurrent && <span className="text-[10px] rounded bg-primary-50 text-primary-700 px-1.5 py-0.5">当前</span>}
-                          {version.isLatestApproved && <span className="text-[10px] rounded bg-green-50 text-green-700 px-1.5 py-0.5">通过</span>}
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        {version.changeSummary || "无变更说明"} · {new Date(version.createdAt).toLocaleString("zh-CN")}
-                      </p>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => handleDownloadVersion(selectedFile.id, version.id)}>
-                          下载此版本
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleApproveVersion(version.id)}>
-                          通过此版本
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {selectedFile.assetKind === "link" ? (
+                <LinkHistoryList file={selectedFile} />
               ) : (
-                <div className="text-center py-8 text-sm text-gray-400">
-                  暂无版本记录
-                </div>
+                <>
+                  <div className="text-sm">
+                    <p className="font-medium">{selectedFile.name}</p>
+                    <p className="text-gray-500">共 {selectedFile.versionCount} 个版本</p>
+                  </div>
+                  {versionsLoading ? (
+                    <div className="flex justify-center py-8">
+                      <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+                    </div>
+                  ) : versions.length > 0 ? (
+                    <div className="space-y-2">
+                      {versions.map((version) => (
+                        <div key={version.id} className="rounded-md border border-gray-200 p-3 text-sm space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">v{version.versionNumber}</span>
+                            <div className="flex items-center gap-1">
+                              {version.isCurrent && <span className="text-[10px] rounded bg-primary-50 text-primary-700 px-1.5 py-0.5">当前</span>}
+                              {version.isLatestApproved && <span className="text-[10px] rounded bg-green-50 text-green-700 px-1.5 py-0.5">通过</span>}
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            {version.changeSummary || "无变更说明"} · {new Date(version.createdAt).toLocaleString("zh-CN")}
+                          </p>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => handleDownloadVersion(selectedFile.id, version.id)}>
+                              下载此版本
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => handleApproveVersion(version.id)}>
+                              通过此版本
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-sm text-gray-400">
+                      暂无版本记录
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

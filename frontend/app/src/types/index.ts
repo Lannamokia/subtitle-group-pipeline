@@ -221,10 +221,18 @@ export type VersionPointer = 'current' | 'latest' | 'latest_approved';
 export interface FileEntity {
   id: string;
   name: string;
+  assetKind?: 'binary' | 'link';
   type: FileType;
   projectId: string;
   taskId?: string;
   unitId?: string;
+  role?: TaskRole;
+  url?: string;
+  fileId?: string;
+  extractCode?: string;
+  description?: string;
+  linkType?: string;
+  linkHistory?: LinkAsset[];
   uploader: User;
   size: number;
   hash?: string;
@@ -265,10 +273,15 @@ export interface FileVersion {
 export interface LinkAsset {
   id: string;
   projectId: string;
+  fileId?: string;
   name: string;
   url: string;
   extractCode?: string;
   description?: string;
+  taskId?: string;
+  unitId?: string;
+  role?: TaskRole;
+  type?: FileType;
   createdBy: User;
   createdAt: string;
   updatedAt: string;

@@ -70,6 +70,7 @@ import { AvatarGroup, UserAvatar } from "@/components/UserAvatar";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TaskCard } from "@/components/TaskCard";
 import { FileListItem } from "@/components/FileListItem";
+import { LinkHistoryList } from "@/components/LinkHistoryList";
 import { TimelineEventItem } from "@/components/TimelineEvent";
 import { DeliveryChecklistEditor } from "@/components/DeliveryChecklistEditor";
 import { TaskCommentPanel } from "@/components/TaskCommentPanel";
@@ -114,6 +115,7 @@ import {
   Clock,
   Check,
   X,
+  Link2,
   Megaphone,
   Send,
   Edit3,
@@ -580,6 +582,12 @@ function TasksTab({
   const [taskUploadType, setTaskUploadType] = useState<FileType>("subtitle");
   const [taskUploadTags, setTaskUploadTags] = useState("");
   const [taskUploadSummary, setTaskUploadSummary] = useState("");
+  const [taskSubmitMode, setTaskSubmitMode] = useState<"file" | "link">("file");
+  const [taskLinkName, setTaskLinkName] = useState("");
+  const [taskLinkUrl, setTaskLinkUrl] = useState("");
+  const [taskLinkExtractCode, setTaskLinkExtractCode] = useState("");
+  const [taskLinkDescription, setTaskLinkDescription] = useState("");
+  const [sourceEpisodeLength, setSourceEpisodeLength] = useState<number | "">("");
   const [taskUploading, setTaskUploading] = useState(false);
   const [taskDragOver, setTaskDragOver] = useState(false);
   const [segmentStart, setSegmentStart] = useState<number | "">("");
@@ -639,6 +647,10 @@ function TasksTab({
     () => selectedTask ? getPolicyAwareTaskDeliveryRule(selectedTask.role, project.uploadPolicy) : null,
     [project.uploadPolicy, selectedTask?.id, selectedTask?.role]
   );
+  const selectedTaskAllowsLink = Boolean(
+    selectedTask && ["source", "encoding"].includes(selectedTask.role)
+  );
+  const selectedTaskRequiresSourceLength = selectedTask?.role === "source";
   const workflowSummaries = TASK_WORKFLOW_STEPS.map((step) => {
     const roleTasks = filteredTasks
       .filter((task) => task.role === step.role)
@@ -665,8 +677,14 @@ function TasksTab({
     );
     setTaskUploadTags("");
     setTaskUploadSummary("");
+    setTaskSubmitMode("file");
+    setTaskLinkName("");
+    setTaskLinkUrl("");
+    setTaskLinkExtractCode("");
+    setTaskLinkDescription("");
+    setSourceEpisodeLength(selectedTaskUnit?.episodeLength ?? "");
     setTaskDragOver(false);
-  }, [selectedTask?.id, selectedTaskDeliveryRule]);
+  }, [selectedTask?.id, selectedTaskDeliveryRule, selectedTaskUnit?.episodeLength]);
 
   useEffect(() => {
     setSegmentStart("");
@@ -880,6 +898,10 @@ function TasksTab({
 
   const handleTaskUpload = async (fileList: FileList | null) => {
     if (!selectedTask || !fileList || fileList.length === 0) return;
+    if (selectedTaskRequiresSourceLength && (sourceEpisodeLength === "" || Number(sourceEpisodeLength) <= 0)) {
+      toast.error("请填写片源时长");
+      return;
+    }
     setTaskUploading(true);
     try {
       const tags = taskUploadTags.split(",").map((tag) => tag.trim()).filter(Boolean);
@@ -891,6 +913,7 @@ function TasksTab({
         type: taskUploadType,
         tags,
         changeSummary: taskUploadSummary,
+        episodeLength: selectedTaskRequiresSourceLength ? Number(sourceEpisodeLength) : undefined,
       });
       toast.success("任务文件已上传");
       setTaskUploadTags("");
@@ -898,6 +921,48 @@ function TasksTab({
       onUpdate();
     } catch (error) {
       toast.error("任务文件上传失败: " + getErrorMessage(error));
+    } finally {
+      setTaskUploading(false);
+    }
+  };
+
+  const handleTaskLinkSubmit = async () => {
+    if (!selectedTask || !selectedTaskAllowsLink) return;
+    if (!taskLinkUrl.trim()) {
+      toast.error("请填写网盘链接");
+      return;
+    }
+    if (selectedTaskRequiresSourceLength && (sourceEpisodeLength === "" || Number(sourceEpisodeLength) <= 0)) {
+      toast.error("请填写片源时长");
+      return;
+    }
+
+    setTaskUploading(true);
+    try {
+      const tags = taskUploadTags.split(",").map((tag) => tag.trim()).filter(Boolean);
+      await fileApi.createLink({
+        projectId: project.id,
+        taskId: selectedTask.id,
+        unitId: selectedTask.unitId,
+        role: selectedTask.role,
+        type: taskUploadType,
+        tags,
+        name: taskLinkName.trim() || `${getRoleLabel(selectedTask.role)}网盘链接`,
+        url: taskLinkUrl.trim(),
+        extractCode: taskLinkExtractCode.trim() || undefined,
+        description: taskLinkDescription.trim() || taskUploadSummary.trim() || undefined,
+        episodeLength: selectedTaskRequiresSourceLength ? Number(sourceEpisodeLength) : undefined,
+      });
+      toast.success("网盘链接已提交");
+      setTaskUploadTags("");
+      setTaskUploadSummary("");
+      setTaskLinkName("");
+      setTaskLinkUrl("");
+      setTaskLinkExtractCode("");
+      setTaskLinkDescription("");
+      onUpdate();
+    } catch (error) {
+      toast.error("提交网盘链接失败: " + getErrorMessage(error));
     } finally {
       setTaskUploading(false);
     }
@@ -1490,6 +1555,30 @@ function TasksTab({
                         {getRoleLabel(selectedTask.role)}
                       </Badge>
                     </div>
+                    {selectedTaskAllowsLink && (
+                      <div className="grid grid-cols-2 rounded-md border border-gray-200 bg-gray-50 p-1 text-xs">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={taskSubmitMode === "file" ? "default" : "ghost"}
+                          className="h-8"
+                          onClick={() => setTaskSubmitMode("file")}
+                        >
+                          <Upload className="mr-1.5 h-3.5 w-3.5" />
+                          上传文件
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={taskSubmitMode === "link" ? "default" : "ghost"}
+                          className="h-8"
+                          onClick={() => setTaskSubmitMode("link")}
+                        >
+                          <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                          网盘链接
+                        </Button>
+                      </div>
+                    )}
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Select value={taskUploadType} onValueChange={(value) => setTaskUploadType(value as FileType)}>
                         <SelectTrigger>
@@ -1509,51 +1598,99 @@ function TasksTab({
                         placeholder="标签，用逗号分隔"
                       />
                     </div>
+                    {selectedTaskRequiresSourceLength && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">片源时长（秒，必填）</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={sourceEpisodeLength}
+                          onChange={(event) =>
+                            setSourceEpisodeLength(event.target.value === "" ? "" : Number(event.target.value))
+                          }
+                          placeholder="片源时长（秒，必填）"
+                        />
+                        <p className="text-xs text-gray-500">
+                          该时长会写入当前分集，后续翻译分段认领会按此时长校验。
+                        </p>
+                      </div>
+                    )}
                     <Input
                       value={taskUploadSummary}
                       onChange={(event) => setTaskUploadSummary(event.target.value)}
                       placeholder="提交说明或版本变更说明"
                     />
-                    <div
-                      className={cn(
-                        "min-w-0 overflow-hidden rounded-lg border-2 border-dashed p-4 text-center transition-colors sm:p-5",
-                        taskDragOver ? "border-primary-500 bg-primary-50" : "border-gray-300 bg-white"
-                      )}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        setTaskDragOver(true);
-                      }}
-                      onDragLeave={() => setTaskDragOver(false)}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        setTaskDragOver(false);
-                        handleTaskUpload(event.dataTransfer.files);
-                      }}
-                    >
-                      <Upload className="mx-auto mb-2 h-8 w-8 text-gray-300" />
-                      <p className="text-sm text-gray-600">拖拽符合岗位要求的文件到此处</p>
-                      <p className={cn("mx-auto mt-1 max-w-full text-xs leading-5 text-gray-400", breakableTextClass)}>
-                        支持：{formatShortList(selectedTaskDeliveryRule.formats, 8)}
-                      </p>
-                      <label className="mt-3 inline-block">
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept={selectedTaskDeliveryRule.accept}
-                          disabled={taskUploading}
-                          onChange={(event) => {
-                            handleTaskUpload(event.target.files);
-                            event.currentTarget.value = "";
-                          }}
+                    {taskSubmitMode === "link" && selectedTaskAllowsLink ? (
+                      <div className="space-y-3 rounded-lg border border-dashed border-blue-200 bg-blue-50/50 p-3">
+                        <Input
+                          value={taskLinkName}
+                          onChange={(event) => setTaskLinkName(event.target.value)}
+                          placeholder="链接名称（可选）"
                         />
-                        <Button type="button" variant="outline" size="sm" asChild disabled={taskUploading}>
-                          <span>
-                            {taskUploading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                            选择文件
-                          </span>
+                        <Input
+                          value={taskLinkUrl}
+                          onChange={(event) => setTaskLinkUrl(event.target.value)}
+                          placeholder="https://..."
+                        />
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Input
+                            value={taskLinkExtractCode}
+                            onChange={(event) => setTaskLinkExtractCode(event.target.value)}
+                            placeholder="提取码（可选）"
+                          />
+                          <Input
+                            value={taskLinkDescription}
+                            onChange={(event) => setTaskLinkDescription(event.target.value)}
+                            placeholder="链接说明（可选）"
+                          />
+                        </div>
+                        <Button type="button" size="sm" onClick={handleTaskLinkSubmit} disabled={taskUploading}>
+                          {taskUploading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                          提交网盘链接
                         </Button>
-                      </label>
-                    </div>
+                      </div>
+                    ) : (
+                      <div
+                        className={cn(
+                          "min-w-0 overflow-hidden rounded-lg border-2 border-dashed p-4 text-center transition-colors sm:p-5",
+                          taskDragOver ? "border-primary-500 bg-primary-50" : "border-gray-300 bg-white"
+                        )}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          setTaskDragOver(true);
+                        }}
+                        onDragLeave={() => setTaskDragOver(false)}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          setTaskDragOver(false);
+                          handleTaskUpload(event.dataTransfer.files);
+                        }}
+                      >
+                        <Upload className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+                        <p className="text-sm text-gray-600">拖拽符合岗位要求的文件到此处</p>
+                        <p className={cn("mx-auto mt-1 max-w-full text-xs leading-5 text-gray-400", breakableTextClass)}>
+                          支持：{formatShortList(selectedTaskDeliveryRule.formats, 8)}
+                        </p>
+                        <label className="mt-3 inline-block">
+                          <input
+                            type="file"
+                            className="hidden"
+                            accept={selectedTaskDeliveryRule.accept}
+                            disabled={taskUploading}
+                            onChange={(event) => {
+                              handleTaskUpload(event.target.files);
+                              event.currentTarget.value = "";
+                            }}
+                          />
+                          <Button type="button" variant="outline" size="sm" asChild disabled={taskUploading}>
+                            <span>
+                              {taskUploading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                              选择文件
+                            </span>
+                          </Button>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1768,7 +1905,7 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
     ),
     [uploadProfile.fileTypes]
   );
-  const replaceTarget = files.find((file) => file.id === replaceTargetId);
+  const replaceTarget = files.find((file) => file.id === replaceTargetId && file.assetKind !== "link");
   const uploadAccept = uploadMode === "replace" && replaceTarget
     ? getPolicyUploadProfile(project.uploadPolicy, currentProjectRole, [replaceTarget.type]).accept
     : uploadProfile.constrained
@@ -1791,6 +1928,11 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
   useEffect(() => {
     if (!selectedFile) {
       setVersions([]);
+      return;
+    }
+    if (selectedFile.assetKind === "link") {
+      setVersions([]);
+      setVersionsLoading(false);
       return;
     }
     setVersionsLoading(true);
@@ -1836,8 +1978,13 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
     }
   };
 
-  const handleDownload = async (fileId: string) => {
+  const handleDownload = async (file: FileEntity) => {
     try {
+      if (file.assetKind === "link" && file.url) {
+        window.open(file.url, "_blank");
+        return;
+      }
+      const fileId = file.id;
       const url = await fileApi.downloadFile(fileId);
       if (url) window.open(url, "_blank");
     } catch (error) {
@@ -1915,7 +2062,7 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
                 <FileListItem
                   key={file.id}
                   file={file}
-                  onDownload={() => handleDownload(file.id)}
+                  onDownload={() => handleDownload(file)}
                   onViewHistory={() => setSelectedFile(file)}
                 />
               ))}
@@ -1948,7 +2095,7 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
                   <SelectValue placeholder="选择被替换文件" />
                 </SelectTrigger>
                 <SelectContent>
-                  {files.map((file) => (
+                  {files.filter((file) => file.assetKind !== "link").map((file) => (
                     <SelectItem key={file.id} value={file.id}>
                       {file.name} · {file.versionCount}版本
                     </SelectItem>
@@ -2022,50 +2169,56 @@ function FilesTab({ files, project, onUpdate }: { files: FileEntity[]; project: 
 
       {/* File History Sheet */}
       <Sheet open={!!selectedFile} onOpenChange={() => setSelectedFile(null)}>
-        <SheetContent>
+        <SheetContent className="overflow-y-auto">
           <SheetHeader>
             <SheetTitle>版本历史</SheetTitle>
           </SheetHeader>
           {selectedFile && (
             <div className="mt-6 space-y-3">
-              <div className="text-sm">
-                <p className="font-medium">{selectedFile.name}</p>
-                <p className="text-gray-500">共 {selectedFile.versionCount} 个版本</p>
-              </div>
-              {versionsLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
-                </div>
-              ) : versions.length > 0 ? (
-                <div className="space-y-2">
-                  {versions.map((version) => (
-                    <div key={version.id} className="rounded-md border border-gray-200 p-3 text-sm space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="font-medium">v{version.versionNumber}</div>
-                        <div className="flex items-center gap-1">
-                          {version.isCurrent && <Badge variant="default" className="text-[10px]">当前</Badge>}
-                          {version.isLatest && <Badge variant="outline" className="text-[10px]">最新</Badge>}
-                          {version.isLatestApproved && <Badge variant="outline" className="text-[10px]">已锁版</Badge>}
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        {version.changeSummary || "无变更说明"} · {new Date(version.createdAt).toLocaleString("zh-CN")}
-                      </p>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => handleDownloadVersion(selectedFile.id, version.id)}>
-                          下载此版本
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleApproveVersion(selectedFile, version.id)}>
-                          通过此版本
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {selectedFile.assetKind === "link" ? (
+                <LinkHistoryList file={selectedFile} />
               ) : (
-                <div className="text-center py-8 text-sm text-gray-400">
-                  暂无版本记录
-                </div>
+                <>
+                  <div className="text-sm">
+                    <p className="font-medium">{selectedFile.name}</p>
+                    <p className="text-gray-500">共 {selectedFile.versionCount} 个版本</p>
+                  </div>
+                  {versionsLoading ? (
+                    <div className="flex justify-center py-8">
+                      <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+                    </div>
+                  ) : versions.length > 0 ? (
+                    <div className="space-y-2">
+                      {versions.map((version) => (
+                        <div key={version.id} className="rounded-md border border-gray-200 p-3 text-sm space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium">v{version.versionNumber}</div>
+                            <div className="flex items-center gap-1">
+                              {version.isCurrent && <Badge variant="default" className="text-[10px]">当前</Badge>}
+                              {version.isLatest && <Badge variant="outline" className="text-[10px]">最新</Badge>}
+                              {version.isLatestApproved && <Badge variant="outline" className="text-[10px]">已锁版</Badge>}
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            {version.changeSummary || "无变更说明"} · {new Date(version.createdAt).toLocaleString("zh-CN")}
+                          </p>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => handleDownloadVersion(selectedFile.id, version.id)}>
+                              下载此版本
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => handleApproveVersion(selectedFile, version.id)}>
+                              通过此版本
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-sm text-gray-400">
+                      暂无版本记录
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -3016,7 +3169,6 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
   const [name, setName] = useState(project.name);
   const [qqGroupId, setQqGroupId] = useState(project.qqGroupId ?? "");
   const [episodeCount, setEpisodeCount] = useState(project.episodes || project.units?.length || 1);
-  const [episodeLength, setEpisodeLength] = useState<number | "">(project.units?.[0]?.episodeLength ?? "");
   const [deliveryChecklist, setDeliveryChecklist] = useState(project.deliveryChecklist ?? []);
   const [downloadLinkTtlSeconds, setDownloadLinkTtlSeconds] = useState(project.downloadLinkTtlSeconds ?? 300);
   const [wikiApprovalRequired, setWikiApprovalRequired] = useState(project.wikiApprovalRequired ?? false);
@@ -3035,7 +3187,6 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
     setName(project.name);
     setQqGroupId(project.qqGroupId ?? "");
     setEpisodeCount(project.episodes || project.units?.length || 1);
-    setEpisodeLength(project.units?.[0]?.episodeLength ?? "");
     setDeliveryChecklist(project.deliveryChecklist ?? []);
     setDownloadLinkTtlSeconds(project.downloadLinkTtlSeconds ?? 300);
     setWikiApprovalRequired(project.wikiApprovalRequired ?? false);
@@ -3082,7 +3233,6 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
       await projectApi.updateUnitCount(project.id, {
         season: project.season || 1,
         episodes: targetEpisodeCount,
-        episodeLength: episodeLength === "" ? null : Number(episodeLength),
         deleteUnitIds: options.deleteUnitIds,
         forceDeleteNonEmpty: options.forceDeleteNonEmpty,
       });
@@ -3178,7 +3328,7 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
                 开项后仍可增加分集；任务由监制在对应分集中手动创建。删除分集前会检查文件和任务内容。
               </p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700">当前季集数</label>
                 <Input
@@ -3190,19 +3340,10 @@ function SettingsTab({ project, onUpdate }: { project: Project; onUpdate: () => 
                   disabled={!isSupervisor}
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">每集时长（秒，可选）</label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={episodeLength}
-                  onChange={(event) =>
-                    setEpisodeLength(event.target.value === "" ? "" : Number(event.target.value))
-                  }
-                  disabled={!isSupervisor}
-                />
-              </div>
             </div>
+            <p className="text-xs text-gray-500">
+              分集时长由片源任务提交时填写，系统会按每一集自己的片源时长校验后续分段任务。
+            </p>
             {isSupervisor && (
               <Button variant="outline" onClick={handleUpdateUnits} disabled={savingUnits}>
                 {savingUnits && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}

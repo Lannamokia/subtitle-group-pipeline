@@ -609,6 +609,116 @@ describe("File Management Tests", () => {
   });
 
   describe("Link-Type Asset History", () => {
+    it("should update unit duration when a source task uploads source material", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 600 });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: user.id,
+        role: "source",
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/files/upload",
+        {
+          project_id: project.id,
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "source",
+          name: "source.mp4",
+          file_type: "video",
+          mime_type: "video/mp4",
+          size_bytes: 1024,
+          storage_path: "/uploads/source.mp4",
+          episode_length: 1800,
+        },
+        token
+      );
+
+      expectSuccess(res, 201);
+      const updatedUnit = await prisma.projectUnit.findUnique({ where: { id: unit.id } });
+      expect(updatedUnit!.episode_length).toBe(1800);
+    });
+
+    it("should create task-scoped source link assets and update unit duration", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 600 });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: user.id,
+        role: "source",
+      });
+
+      const res = await post(
+        app,
+        "/api/v1/files/links",
+        {
+          project_id: project.id,
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "source",
+          type: "video",
+          url: "https://pan.baidu.com/s/source",
+          link_type: "cloud_drive",
+          name: "source drive",
+          extractCode: "abcd",
+          episode_length: 2222,
+          tags: ["source"],
+        },
+        token
+      );
+
+      expectSuccess(res, 201);
+      expect(res.body.data.task_id).toBe(task.id);
+      expect(res.body.data.unit_id).toBe(unit.id);
+      expect(res.body.data.extract_code).toBe("abcd");
+
+      const updatedUnit = await prisma.projectUnit.findUnique({ where: { id: unit.id } });
+      expect(updatedUnit!.episode_length).toBe(2222);
+
+      const secondRes = await post(
+        app,
+        "/api/v1/files/links",
+        {
+          project_id: project.id,
+          task_id: task.id,
+          unit_id: unit.id,
+          role: "source",
+          type: "video",
+          url: "https://pan.baidu.com/s/source-v2",
+          link_type: "cloud_drive",
+          name: "source drive v2",
+          extractCode: "efgh",
+          episode_length: 3333,
+          tags: ["source"],
+        },
+        token
+      );
+
+      expectSuccess(secondRes, 201);
+      const unitAfterSecondLink = await prisma.projectUnit.findUnique({ where: { id: unit.id } });
+      expect(unitAfterSecondLink!.episode_length).toBe(3333);
+
+      const list = await get(
+        app,
+        `/api/v1/files?project_id=${project.id}&unit_id=${unit.id}&task_id=${task.id}&role=source`,
+        token
+      );
+
+      expectSuccess(list, 200);
+      expect(list.body.data.items).toHaveLength(1);
+      expect(list.body.data.items[0].asset_kind).toBe("link");
+      expect(list.body.data.items[0].url).toBe("https://pan.baidu.com/s/source-v2");
+      expect(list.body.data.items[0].extract_code).toBe("efgh");
+      expect(list.body.data.items[0].version_count).toBe(2);
+      expect(list.body.data.items[0].link_history).toHaveLength(2);
+    });
+
     it("should create link history entries", async () => {
       const { user, token } = await createTestUser();
       const project = await createTestProject({ owner_id: user.id });

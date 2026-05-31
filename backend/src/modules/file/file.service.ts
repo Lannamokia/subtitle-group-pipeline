@@ -476,6 +476,14 @@ interface TaskUploadContext {
   taskTitle?: string;
 }
 
+interface TaskContextData {
+  task_id?: string;
+  taskId?: string;
+  unit_id?: string;
+  unitId?: string;
+  role?: TaskRole;
+}
+
 function isTaskRole(value: unknown): value is TaskRole {
   return typeof value === "string" && Object.values(TaskRole).includes(value as TaskRole);
 }
@@ -504,7 +512,7 @@ function buildDisplayFilename(data: UploadFileInput, context: TaskUploadContext)
 
 async function resolveTaskUploadContext(
   projectId: string,
-  data: UploadFileInput
+  data: TaskContextData
 ): Promise<TaskUploadContext> {
   const taskId = data.task_id || data.taskId;
   const providedUnitId = data.unit_id || data.unitId;
@@ -571,6 +579,37 @@ function metadataStringForUpload(
   }
 
   return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : data.metadata;
+}
+
+function sourceEpisodeLengthFromInput(data: {
+  episode_length?: number | null;
+  episodeLength?: number | null;
+}): number | null | undefined {
+  return data.episode_length ?? data.episodeLength;
+}
+
+async function syncSourceEpisodeLength(
+  projectId: string,
+  context: TaskUploadContext,
+  episodeLength: number | null | undefined
+) {
+  if (context.role !== TaskRole.source || !context.unitId || episodeLength === undefined || episodeLength === null) {
+    return;
+  }
+
+  const unit = await prisma.projectUnit.findUnique({
+    where: { id: context.unitId },
+    select: { project_id: true },
+  });
+
+  if (!unit || unit.project_id !== projectId) {
+    throw new AppError("Project unit not found", "NOT_FOUND", 404);
+  }
+
+  await prisma.projectUnit.update({
+    where: { id: context.unitId },
+    data: { episode_length: episodeLength },
+  });
 }
 
 function getMetadataStringValue(metadata: Record<string, unknown>, ...keys: string[]): string | undefined {
@@ -921,13 +960,15 @@ export async function uploadFile(
   );
 
   if (existingTaskFile) {
-    return appendFileVersion(existingTaskFile.id, uploaderId, data, {
+    const updatedFile = await appendFileVersion(existingTaskFile.id, uploaderId, data, {
       displayName,
       metadata,
       tags: data.tags,
       storageBackendId,
       taskId: taskContext.taskId,
     });
+    await syncSourceEpisodeLength(data.project_id, taskContext, sourceEpisodeLengthFromInput(data));
+    return updatedFile;
   }
 
   // Create file entity
@@ -985,6 +1026,8 @@ export async function uploadFile(
       task_id: taskContext.taskId,
     },
   });
+
+  await syncSourceEpisodeLength(data.project_id, taskContext, sourceEpisodeLengthFromInput(data));
 
   return {
     ...file,
@@ -1237,6 +1280,9 @@ export async function getProjectFiles(
   };
 
   const decoratedFiles = files.map(decorateFile).filter((file) => {
+    if (getMetadataStringValue(file.metadata_json, "asset_kind", "assetKind") === "link") {
+      return false;
+    }
     if (resolvedUnitId && file.unit_id !== resolvedUnitId) {
       return false;
     }
@@ -1295,6 +1341,7 @@ export async function getProjectFiles(
       ...link,
       asset_kind: "link" as const,
       name: link.description || link.file?.name || link.url,
+      extract_code: getMetadataStringValue(metadata, "extract_code", "extractCode"),
       file_type: link.file?.file_type || FileType.other,
       uploader_id: link.created_by,
       uploader: creatorMap.get(link.created_by) || null,
@@ -1343,18 +1390,39 @@ export async function getProjectFiles(
     return true;
   });
 
+  const groupedLinks = Array.from(
+    decoratedLinks.reduce((groups, link) => {
+      const key = link.file_id || link.id;
+      const history = groups.get(key) || [];
+      history.push(link);
+      groups.set(key, history);
+      return groups;
+    }, new Map<string, typeof decoratedLinks>())
+      .values()
+  ).map((history) => {
+    const sortedHistory = [...history].sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
+    const latest = sortedHistory[0];
+    return {
+      ...latest,
+      link_history: sortedHistory,
+      version_count: sortedHistory.length,
+      has_multiple_versions: sortedHistory.length > 1,
+      latest_update_at: latest.created_at,
+    };
+  });
+
   const binaryItems = decoratedFiles.map((file) => ({
     ...file,
     asset_kind: "binary" as const,
   }));
-  const items = [...binaryItems, ...decoratedLinks]
+  const items = [...binaryItems, ...groupedLinks]
     .sort((a, b) => b.latest_update_at.getTime() - a.latest_update_at.getTime());
   const pagedItems = items.slice(skip, skip + pageSize);
   const itemIds = new Set(pagedItems.map((item) => `${item.asset_kind}:${item.id}`));
 
   return {
     files: binaryItems.filter((file) => itemIds.has(`binary:${file.id}`)),
-    links: decoratedLinks.filter((link) => itemIds.has(`link:${link.id}`)),
+    links: groupedLinks.filter((link) => itemIds.has(`link:${link.id}`)),
     items: pagedItems,
     meta: {
       page,
@@ -1839,6 +1907,81 @@ export async function verifyDownloadToken(token: string) {
 
 // ============ Link Asset (LinkHistory) ============
 
+function tagsStringForLink(data: CreateLinkInput): string | null {
+  if (Array.isArray(data.tags)) {
+    const tags = normalizeStringList(data.tags);
+    return tags.length > 0 ? JSON.stringify(tags) : null;
+  }
+  if (typeof data.tags === "string" && data.tags.trim()) {
+    const tags = parseTagList(data.tags);
+    return tags.length > 0 ? JSON.stringify(tags) : null;
+  }
+  return null;
+}
+
+function metadataStringForLink(data: CreateLinkInput, context: TaskUploadContext): string {
+  const metadata: Record<string, unknown> = {
+    asset_kind: "link",
+  };
+
+  if (context.taskId) metadata.task_id = context.taskId;
+  if (context.unitId) metadata.unit_id = context.unitId;
+  if (context.role) metadata.role = context.role;
+
+  const extractCode = data.extract_code || data.extractCode;
+  if (extractCode) metadata.extract_code = extractCode;
+  if (data.name) metadata.link_name = data.name;
+
+  return JSON.stringify(metadata);
+}
+
+async function findLinkFileBucket(
+  projectId: string,
+  fileType: FileType,
+  context: TaskUploadContext
+) {
+  if (!context.taskId || !context.role) {
+    return null;
+  }
+
+  const candidates = await prisma.fileEntity.findMany({
+    where: {
+      project_id: projectId,
+      file_type: fileType,
+      is_deleted: false,
+    },
+  });
+
+  return candidates
+    .filter((file) => {
+      const metadata = parseMetadata(file.metadata);
+      return (
+        getMetadataStringValue(metadata, "asset_kind", "assetKind") === "link" &&
+        getMetadataStringValue(metadata, "task_id", "taskId") === context.taskId &&
+        getMetadataStringValue(metadata, "role", "task_role") === context.role
+      );
+    })
+    .sort((a, b) => b.created_at.getTime() - a.created_at.getTime())[0] || null;
+}
+
+function decorateLinkWithMetadata<T extends {
+  file?: { metadata?: string | null; tags?: string | null; file_type?: FileType | null; name?: string | null } | null;
+  description?: string | null;
+  url: string;
+}>(link: T) {
+  const metadata = parseMetadata(link.file?.metadata);
+  return {
+    ...link,
+    name: link.description || getMetadataStringValue(metadata, "link_name", "linkName") || link.file?.name || link.url,
+    extract_code: getMetadataStringValue(metadata, "extract_code", "extractCode"),
+    file_type: link.file?.file_type || FileType.other,
+    task_id: getMetadataStringValue(metadata, "task_id", "taskId"),
+    unit_id: getMetadataStringValue(metadata, "unit_id", "unitId"),
+    role: getMetadataStringValue(metadata, "role", "task_role"),
+    tag_list: parseTagList(link.file?.tags),
+  };
+}
+
 export async function createLinkAsset(
   creatorId: string,
   data: CreateLinkInput
@@ -1856,10 +1999,22 @@ export async function createLinkAsset(
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
 
+  const taskContext = await resolveTaskUploadContext(projectId, data);
+  if (taskContext.role && taskContext.role !== TaskRole.source && taskContext.role !== TaskRole.encoding) {
+    throw new AppError("Only source and encoding tasks can submit cloud drive links", "VALIDATION_ERROR", 400);
+  }
+
+  const fileType = data.file_type || data.type || (
+    taskContext.role === TaskRole.source || taskContext.role === TaskRole.encoding
+      ? FileType.video
+      : FileType.other
+  );
+  let fileId = data.file_id || undefined;
+
   // If file_id is provided, verify it belongs to the project
-  if (data.file_id) {
+  if (fileId) {
     const file = await prisma.fileEntity.findUnique({
-      where: { id: data.file_id },
+      where: { id: fileId },
     });
 
     if (!file || file.project_id !== projectId) {
@@ -1867,10 +2022,83 @@ export async function createLinkAsset(
     }
   }
 
+  if (!fileId && taskContext.taskId && taskContext.role) {
+    const existingLinkFile = await findLinkFileBucket(projectId, fileType, taskContext);
+    if (existingLinkFile) {
+      fileId = existingLinkFile.id;
+      await prisma.fileEntity.update({
+        where: { id: fileId },
+        data: {
+          name: buildDisplayFilename(
+            {
+              project_id: projectId,
+              name: `${data.name || data.description || "网盘链接"}.url`,
+              file_type: fileType,
+              mime_type: "text/uri-list",
+              size_bytes: 0,
+              storage_path: data.url,
+              metadata: metadataStringForLink(data, taskContext),
+            },
+            taskContext
+          ),
+          metadata: metadataStringForLink(data, taskContext),
+          tags: tagsStringForLink(data),
+        },
+      });
+    } else {
+      const linkFile = await prisma.fileEntity.create({
+        data: {
+          project_id: projectId,
+          uploader_id: creatorId,
+          name: buildDisplayFilename(
+            {
+              project_id: projectId,
+              name: `${data.name || data.description || "网盘链接"}.url`,
+              file_type: fileType,
+              mime_type: "text/uri-list",
+              size_bytes: 0,
+              storage_path: data.url,
+              metadata: metadataStringForLink(data, taskContext),
+            },
+            taskContext
+          ),
+          original_name: data.name || data.description || "网盘链接",
+          file_type: fileType,
+          mime_type: "text/uri-list",
+          size_bytes: 0,
+          storage_path: data.url,
+          checksum: null,
+          metadata: metadataStringForLink(data, taskContext),
+          tags: tagsStringForLink(data),
+        },
+      });
+      fileId = linkFile.id;
+    }
+  }
+
+  if (!fileId) {
+    const linkFile = await prisma.fileEntity.create({
+      data: {
+        project_id: projectId,
+        uploader_id: creatorId,
+        name: data.name || data.description || "网盘链接",
+        original_name: data.name || data.description || "网盘链接",
+        file_type: fileType,
+        mime_type: "text/uri-list",
+        size_bytes: 0,
+        storage_path: data.url,
+        checksum: null,
+        metadata: metadataStringForLink(data, taskContext),
+        tags: tagsStringForLink(data),
+      },
+    });
+    fileId = linkFile.id;
+  }
+
   const link = await prisma.linkHistory.create({
     data: {
       project_id: projectId,
-      file_id: data.file_id,
+      file_id: fileId,
       url: data.url,
       link_type: data.link_type,
       description: data.description || data.name,
@@ -1883,10 +2111,14 @@ export async function createLinkAsset(
           id: true,
           name: true,
           file_type: true,
+          metadata: true,
+          tags: true,
         },
       },
     },
   });
+
+  await syncSourceEpisodeLength(projectId, taskContext, sourceEpisodeLengthFromInput(data));
 
   await timelineService.createTimelineEvent({
     project_id: projectId,
@@ -1901,7 +2133,7 @@ export async function createLinkAsset(
     },
   });
 
-  return link;
+  return decorateLinkWithMetadata(link);
 }
 
 export async function getLinkHistory(projectId: string) {
@@ -1919,12 +2151,14 @@ export async function getLinkHistory(projectId: string) {
           id: true,
           name: true,
           file_type: true,
+          metadata: true,
+          tags: true,
         },
       },
     },
   });
 
-  return links;
+  return links.map(decorateLinkWithMetadata);
 }
 
 export async function deleteLinkAsset(linkId: string) {

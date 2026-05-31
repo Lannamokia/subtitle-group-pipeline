@@ -21,6 +21,7 @@ import type {
   Task,
   TranslationClaim,
   TaskRole,
+  FileType,
   TaskComment,
   FileEntity,
   FileVersion,
@@ -364,10 +365,20 @@ export function normalizeFile(raw: AnyRecord): FileEntity {
   return {
     id: raw.id,
     name: raw.name ?? raw.original_name ?? "未命名文件",
+    assetKind: raw.assetKind ?? raw.asset_kind ?? (raw.url && raw.link_type ? "link" : "binary"),
     type: raw.type ?? raw.file_type ?? "other",
     projectId: raw.projectId ?? raw.project_id,
     taskId: raw.taskId ?? raw.task_id,
     unitId: raw.unitId ?? raw.unit_id,
+    role: raw.role,
+    url: raw.url,
+    fileId: raw.fileId ?? raw.file_id,
+    extractCode: raw.extractCode ?? raw.extract_code,
+    description: raw.description,
+    linkType: raw.linkType ?? raw.link_type,
+    linkHistory: Array.isArray(raw.linkHistory ?? raw.link_history)
+      ? (raw.linkHistory ?? raw.link_history).map((link: AnyRecord) => normalizeLink(link))
+      : undefined,
     uploader: raw.uploader ? normalizeUser(raw.uploader) : normalizeUser({ id: raw.uploader_id, username: "Unknown", role: "member", status: "active" }),
     size: raw.size ?? raw.size_bytes ?? 0,
     hash: raw.hash ?? raw.checksum,
@@ -414,10 +425,15 @@ export function normalizeLink(raw: AnyRecord): LinkAsset {
   return {
     id: raw.id,
     projectId: raw.projectId ?? raw.project_id,
+    fileId: raw.fileId ?? raw.file_id,
     name: raw.name ?? raw.description ?? raw.link_type ?? "网盘链接",
     url: raw.url,
     extractCode: raw.extractCode ?? raw.extract_code,
     description: raw.description,
+    taskId: raw.taskId ?? raw.task_id,
+    unitId: raw.unitId ?? raw.unit_id,
+    role: raw.role,
+    type: raw.type ?? raw.file_type,
     createdBy: raw.createdBy ? normalizeUser(raw.createdBy) : normalizeUser({ id: raw.created_by, username: "Unknown", role: "member", status: "active" }),
     createdAt: raw.createdAt ?? raw.created_at ?? "",
     updatedAt: raw.updatedAt ?? raw.updated_at ?? raw.created_at ?? "",
@@ -1248,16 +1264,20 @@ export const projectApi = {
       deleteUnitIds?: string[];
       forceDeleteNonEmpty?: boolean;
     }
-  ) =>
-    api.put<ApiResponse<unknown[]>>(`/projects/${id}/units/count`, {
+  ) => {
+    const payload: AnyRecord = {
       season_number: data.season,
       units_per_season: data.episodes,
-      episode_length: data.episodeLength ?? null,
       delete_unit_ids: data.deleteUnitIds,
       force_delete_non_empty: data.forceDeleteNonEmpty ?? false,
-    }).then((response) =>
+    };
+    if (data.episodeLength !== undefined) {
+      payload.episode_length = data.episodeLength;
+    }
+    return api.put<ApiResponse<unknown[]>>(`/projects/${id}/units/count`, payload).then((response) =>
       unwrapItems<unknown>(response.data.data).map((unit) => normalizeProjectUnit(unit as AnyRecord))
-    ),
+    );
+  },
 
   addMember: (projectId: string, data: { userId: string; role: TaskRole; isLead?: boolean }) =>
     api.post<ApiResponse<unknown>>(`/projects/${projectId}/members`, {
@@ -1388,7 +1408,7 @@ export const fileApi = {
       normalizeFile(response.data.data as AnyRecord)
     ),
 
-  uploadFile: (file: File, data: { projectId: string; taskId?: string; unitId?: string; type?: string; role?: string; tags?: string[]; changeSummary?: string }) => {
+  uploadFile: (file: File, data: { projectId: string; taskId?: string; unitId?: string; type?: string; role?: string; tags?: string[]; changeSummary?: string; episodeLength?: number | null }) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('projectId', data.projectId);
@@ -1398,6 +1418,9 @@ export const fileApi = {
     if (data.role) formData.append('role', data.role);
     if (data.tags?.length) formData.append('tags', JSON.stringify(data.tags));
     if (data.changeSummary) formData.append('change_summary', data.changeSummary);
+    if (data.episodeLength !== undefined && data.episodeLength !== null) {
+      formData.append('episode_length', String(data.episodeLength));
+    }
     return api.post<ApiResponse<unknown>>('/files', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((response) => normalizeFile(response.data.data as AnyRecord));
@@ -1438,13 +1461,31 @@ export const fileApi = {
       response.data.data.map((link) => normalizeLink(link as AnyRecord))
     ),
 
-  createLink: (data: { projectId: string; name?: string; url: string; extractCode?: string; description?: string }) =>
+  createLink: (data: {
+    projectId: string;
+    name?: string;
+    url: string;
+    extractCode?: string;
+    description?: string;
+    taskId?: string;
+    unitId?: string;
+    role?: TaskRole;
+    type?: FileType;
+    tags?: string[];
+    episodeLength?: number | null;
+  }) =>
     api.post<ApiResponse<unknown>>('/files/links', {
       projectId: data.projectId,
       name: data.name,
       url: data.url,
       extractCode: data.extractCode,
       description: data.description,
+      taskId: data.taskId,
+      unitId: data.unitId,
+      role: data.role,
+      type: data.type,
+      tags: data.tags,
+      episode_length: data.episodeLength ?? undefined,
       link_type: "cloud_drive",
     }).then((response) => normalizeLink(response.data.data as AnyRecord)),
 

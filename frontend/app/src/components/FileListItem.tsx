@@ -27,7 +27,9 @@ const fileTypeIcons: Record<string, React.ReactNode> = {
 };
 
 export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVersion = true, className }: FileListItemProps) {
-  const isLink = file.size === 0;
+  const isLink = file.assetKind === "link" || Boolean(file.url && file.size === 0);
+  const historyCount = isLink ? file.linkHistory?.length ?? file.versionCount : file.versionCount;
+  const canShowHistory = showVersion && Boolean(onViewHistory) && historyCount > 1;
 
   return (
     <div
@@ -46,9 +48,9 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-800 truncate">{file.name}</span>
-          {showVersion && file.versionCount > 1 && (
+          {canShowHistory && (
             <span className="shrink-0 px-1.5 py-0.5 text-caption bg-blue-50 text-blue-600 rounded">
-              {file.versionCount}版本
+              {isLink ? `${historyCount}次提交` : `${historyCount}版本`}
             </span>
           )}
           {file.isSensitive && (
@@ -61,6 +63,9 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
           <span className="text-xs text-gray-500">{isLink ? "网盘链接" : getFileTypeLabel(file.type)}</span>
           <span className="text-xs text-gray-400">{file.uploader.username}</span>
           <span className="text-xs text-gray-400">{formatRelativeTime(file.updatedAt)}</span>
+          {isLink && file.extractCode && (
+            <span className="text-xs text-gray-400">提取码: {file.extractCode}</span>
+          )}
         </div>
       </div>
 
@@ -78,12 +83,12 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
           size="sm"
           className="h-8 w-8 p-0"
           onClick={onDownload}
-          title="下载当前版本"
-          aria-label="下载当前版本"
+          title={isLink ? "打开网盘链接" : "下载当前版本"}
+          aria-label={isLink ? "打开网盘链接" : "下载当前版本"}
         >
-          <Download className="w-4 h-4" />
+          {isLink ? <Link2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
         </Button>
-        {file.versionCount > 1 && (
+        {canShowHistory && (
           <Button
             variant="ghost"
             size="sm"
@@ -103,10 +108,10 @@ export function FileListItem({ file, onDownload, onViewHistory, onDelete, showVe
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={onDownload}>
-              <Download className="w-4 h-4 mr-2" />
-              下载
+              {isLink ? <Link2 className="w-4 h-4 mr-2" /> : <Download className="w-4 h-4 mr-2" />}
+              {isLink ? "打开链接" : "下载"}
             </DropdownMenuItem>
-            {file.versionCount > 1 && (
+            {canShowHistory && (
               <DropdownMenuItem onClick={onViewHistory}>
                 <History className="w-4 h-4 mr-2" />
                 版本历史
