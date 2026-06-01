@@ -386,42 +386,109 @@ ports:
 
 ### 环境变量注入
 
-Compose 会读取项目根目录的 `.env` 做变量注入。常用变量：
+Compose 会读取项目根目录的 `.env` 做变量注入。推荐先复制模板：
 
-```env
-APP_HTTP_PORT=8080
-CADDY_SITE_ADDRESS=:80
-CORS_ORIGIN=http://localhost:8080
-FRONTEND_API_BASE_URL=/api/v1
-BACKEND_UPSTREAM=127.0.0.1:3000
-
-DATABASE_URL=
-DATABASE_AUTO_UPGRADE=true
-UPLOAD_MAX_SIZE=536870912000
-JWT_SECRET=
-JWT_EXPIRES_IN=24h
-JWT_REFRESH_EXPIRES_IN=7d
-BCRYPT_ROUNDS=12
-
-QQ_BRIDGE_TOKEN=change-this-to-a-long-random-secret
-QQ_BRIDGE_PORT=8095
-HEARTBEAT_INTERVAL_SECONDS=30
-QQBOT_LOG_LEVEL=INFO
-
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASS=
-SMTP_FROM=
+```bash
+cp .env.compose.example .env
 ```
 
-说明：
+#### 对外访问与 Caddy
 
-- `FRONTEND_API_BASE_URL` 会在容器启动时写入 `/srv/frontend/config.js`，属于前端运行时配置，不需要重新构建镜像。
-- `DATABASE_URL` 和 `JWT_SECRET` 留空时不会覆盖初始化页已经写入的 `/app/config/backend.env`；填入非空值时会作为容器环境变量优先生效。
-- `BACKEND_UPSTREAM` 默认是 `127.0.0.1:3000`，因为 Caddy 和后端在同一个 app 容器内。
-- `QQ_BRIDGE_TOKEN` 需要同时给 app 和 qqbot 使用，系统设置里的 QQ bot secret 也应保持一致。
-- `SMTP_*` 可以通过环境变量注入，也可以后续在系统设置的通知渠道页面维护。
+| 变量名 | 注入位置 | 默认值 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `APP_HTTP_PORT` | Compose 端口映射 | `8080` | `18080` | 宿主机 HTTP 端口，映射到 app 容器的 `80`。本地访问地址就是 `http://localhost:<APP_HTTP_PORT>`。 |
+| `APP_HTTPS_PORT` | Compose 端口映射 | `443` | `443` | HTTPS 端口。默认在 `compose.yml` 中注释，需要开启公网 HTTPS 时手动取消 `443:443` 映射。 |
+| `CADDY_SITE_ADDRESS` | app / Caddy | `:80` | `1.xyz` | Caddy 站点地址。本地测试用 `:80`；绑定域名并开放 80/443 后可填域名以启用 Caddy 自动 HTTPS。 |
+| `BACKEND_UPSTREAM` | app / Caddy | `127.0.0.1:3000` | `127.0.0.1:3000` | Caddy 反代目标。二合一镜像里 Caddy 和后端在同一容器内，通常不需要改。 |
+| `CORS_ORIGIN` | app / 后端 | `http://localhost:8080` | `https://1.xyz` | 后端允许的前端来源。二合一部署通常填实际访问来源；不要传空字符串，临时不配置时直接不传。 |
+
+#### 前端运行时
+
+| 变量名 | 注入位置 | 默认值 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `FRONTEND_API_BASE_URL` | app / 前端运行时 | `/api/v1` | `/api/v1` | 容器启动时写入 `/srv/frontend/config.js`，不需要重建镜像即可修改前端 API 地址。二合一部署保持 `/api/v1`。 |
+| `FRONTEND_BACKEND_PORT` | app / 前端运行时 | 未设置 | `3000` | 仅当前端需要按当前 host 推断后端端口时使用；二合一 Caddy 部署一般不需要。 |
+| `VITE_API_BASE_URL` | app 镜像构建参数 | `/api/v1` | `/api/v1` | 前端构建时默认 API 地址。运行时优先使用 `FRONTEND_API_BASE_URL` 写入的 `/config.js`。 |
+
+#### 后端核心配置
+
+| 变量名 | 注入位置 | 默认值 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `DATABASE_URL` | app / 后端 | 空 | `postgresql://subtitle:subtitle@postgres:5432/subtitle?schema=public` | 数据库连接串。留空时走图形化初始化页，初始化结果会写入 `/app/config/backend.env`；填非空值时优先生效。 |
+| `DATABASE_AUTO_UPGRADE` | app / 后端 | `true` | `true` | 启动时是否尝试同步当前 Prisma schema。生产库升级前仍建议先备份。 |
+| `JWT_SECRET` | app / 后端 | 空 | `please-change-to-long-random-secret` | JWT 签名密钥。已有初始化库应注入当初使用的同一值，否则旧 token 会失效。留空时不覆盖 `/app/config/backend.env`。 |
+| `JWT_EXPIRES_IN` | app / 后端 | `24h` | `7d` | 访问 token 有效期。 |
+| `JWT_REFRESH_EXPIRES_IN` | app / 后端 | `7d` | `30d` | 刷新 token 有效期。 |
+| `BCRYPT_ROUNDS` | app / 后端 | `12` | `12` | 密码哈希成本。数值越高越慢。 |
+| `UPLOAD_MAX_SIZE` | app / 后端 | `536870912000` | `536870912000` | 后端允许的单文件大小上限，单位字节。默认约 500GB。 |
+| `UPLOAD_DIR` | app / 后端 | `/app/uploads` | `/app/uploads` | 本地存储后端目录。Compose 默认挂载到 `app-uploads` volume。 |
+| `ENV_FILE_PATH` | app / 后端 | `/app/config/backend.env` | `/app/config/backend.env` | 后端持久化环境配置文件路径。Compose 默认挂载到 `app-config` volume。通常不需要改。 |
+| `API_PREFIX` | app / 后端 | `/api/v1` | `/api/v1` | 后端 API 前缀。改动后需要同步 Caddy 和前端配置。 |
+| `PORT` | app / 后端 | `3000` | `3000` | 后端在容器内监听端口。二合一镜像里 Caddy 默认反代到这个端口。 |
+| `NODE_ENV` | app / 后端 | `production` | `production` | Node 运行环境。容器部署保持 `production`。 |
+
+#### 初始化后端重启
+
+| 变量名 | 注入位置 | 默认值 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `SETUP_RESTART_DELAY_MS` | app / 后端 | `1500` | `1500` | 初始化完成后主进程退出重启前的等待时间，单位毫秒。 |
+| `SETUP_RESTART_CHILD_DELAY_MS` | app / 后端 | `1500` | `1500` | 非托管进程模式下派生重启 helper 的等待时间，单位毫秒。容器中主要依赖 Docker restart policy。 |
+
+#### QQ 机器人桥接器
+
+| 变量名 | 注入位置 | 默认值 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `QQ_BRIDGE_TOKEN` | app + qqbot | 空 | `change-this-to-a-long-random-secret` | 后端和 QQ 桥接器共享 secret。系统设置里的 QQ bot secret 也应保持一致。 |
+| `NONEBOT_HTTP_API` | app / 后端 | `http://qqbot:8095` | `http://qqbot:8095` | 后端调用 QQ 桥接器的 HTTP 地址。Compose 网络内使用服务名 `qqbot`。 |
+| `QQ_BRIDGE_PORT` | qqbot 端口映射 | `8095` | `8095` | 宿主机暴露的 QQ 桥接器端口，也是 OneBot 反向 WebSocket 默认端口。 |
+| `HEARTBEAT_INTERVAL_SECONDS` | qqbot | `30` | `30` | QQ 桥接器向后端上报心跳的间隔，单位秒。 |
+| `QQBOT_LOG_LEVEL` | qqbot | `INFO` | `DEBUG` | QQ 桥接器日志级别。 |
+
+#### 邮件通知
+
+| 变量名 | 注入位置 | 默认值 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `SMTP_HOST` | app / 后端 | 空 | `smtp.example.com` | SMTP 服务器地址。留空表示不通过环境变量配置邮件服务。 |
+| `SMTP_PORT` | app / 后端 | `587` | `465` | SMTP 端口。 |
+| `SMTP_USER` | app / 后端 | 空 | `notice@example.com` | SMTP 用户名。 |
+| `SMTP_PASS` | app / 后端 | 空 | `app-password` | SMTP 密码或授权码。 |
+| `SMTP_FROM` | app / 后端 | 空 | `SubtitleSync <notice@example.com>` | 邮件发件人。 |
+
+#### 可选数据库服务 profile
+
+| 变量名 | 注入位置 | 默认值 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `POSTGRES_DB` | `postgres` profile | `subtitle` | `subtitle` | 内置 PostgreSQL 数据库名。 |
+| `POSTGRES_USER` | `postgres` profile | `subtitle` | `subtitle` | 内置 PostgreSQL 用户名。 |
+| `POSTGRES_PASSWORD` | `postgres` profile | `subtitle` | `strong-password` | 内置 PostgreSQL 密码。 |
+| `MYSQL_DATABASE` | `mysql` profile | `subtitle` | `subtitle` | 内置 MySQL 数据库名。 |
+| `MYSQL_USER` | `mysql` profile | `subtitle` | `subtitle` | 内置 MySQL 用户名。 |
+| `MYSQL_PASSWORD` | `mysql` profile | `subtitle` | `strong-password` | 内置 MySQL 用户密码。 |
+| `MYSQL_ROOT_PASSWORD` | `mysql` profile | `subtitle-root` | `strong-root-password` | 内置 MySQL root 密码。 |
+
+常用连接串示例：
+
+```text
+Compose PostgreSQL:
+postgresql://subtitle:subtitle@postgres:5432/subtitle?schema=public
+
+Compose MySQL:
+mysql://subtitle:subtitle@mysql:3306/subtitle
+
+宿主机 PostgreSQL:
+postgresql://user:password@host.docker.internal:5432/subtitle?schema=public
+
+宿主机 MySQL:
+mysql://user:password@host.docker.internal:3306/subtitle
+
+容器内 SQLite:
+file:/app/config/subtitle.db
+```
+
+留空处理规则：
+
+- `DATABASE_URL`、`JWT_SECRET`、`QQ_BRIDGE_TOKEN`、`SMTP_HOST`、`SMTP_USER`、`SMTP_PASS`、`SMTP_FROM` 为空时，entrypoint 会在启动后端前取消这些空环境变量，避免覆盖 `/app/config/backend.env` 中的持久化配置。
+- 其他变量如果传了空字符串，通常会被后端当成实际配置值读取；不确定时应直接不传，而不是传 `KEY=`。
 
 ### OneBot 协议端连接
 
