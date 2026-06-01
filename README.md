@@ -440,6 +440,7 @@ cp .env.compose.example .env
 |---|---|---:|---|---|
 | `QQ_BRIDGE_TOKEN` | app + qqbot | 空 | `change-this-to-a-long-random-secret` | 后端和 QQ 桥接器共享 secret。系统设置里的 QQ bot secret 也应保持一致。 |
 | `NONEBOT_HTTP_API` | app / 后端 | `http://qqbot:8095` | `http://qqbot:8095` | 后端调用 QQ 桥接器的 HTTP 地址。Compose 网络内使用服务名 `qqbot`。 |
+| `QQ_BRIDGE_REQUEST_TIMEOUT_MS` | app / 后端 | `15000` | `15000` | 后端调用 QQ 桥接器发送消息的超时时间，单位毫秒。发送类请求不会自动重试，避免测试消息或通知重复投递。 |
 | `QQ_BRIDGE_PORT` | qqbot 端口映射 | `8095` | `8095` | 宿主机暴露的 QQ 桥接器端口，也是 OneBot 反向 WebSocket 默认端口。 |
 | `HEARTBEAT_INTERVAL_SECONDS` | qqbot | `30` | `30` | QQ 桥接器向后端上报心跳的间隔，单位秒。 |
 | `QQBOT_LOG_LEVEL` | qqbot | `INFO` | `DEBUG` | QQ 桥接器日志级别。 |

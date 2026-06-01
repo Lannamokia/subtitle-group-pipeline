@@ -1,6 +1,9 @@
 import { env } from "../../../config/env";
 
-const MAX_RETRIES = 3;
+const QQ_SEND_TIMEOUT_MS = Math.max(
+  1000,
+  Number(process.env.QQ_BRIDGE_REQUEST_TIMEOUT_MS ?? 15000)
+);
 
 export interface QQMessagePayload {
   groupId: string;
@@ -92,8 +95,7 @@ export function buildGroupMessageContent(payload: QQMessagePayload): string {
 
 async function sendNoneBotRequest(
   endpoint: string,
-  payload: Record<string, unknown>,
-  retryCount = 0
+  payload: Record<string, unknown>
 ): Promise<QQResult> {
   const bridge = await getConfiguredBridge();
   if (!bridge) {
@@ -111,6 +113,7 @@ async function sendNoneBotRequest(
         ...(bridge.secret ? { Authorization: `Bearer ${bridge.secret}` } : {}),
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(QQ_SEND_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -119,20 +122,20 @@ async function sendNoneBotRequest(
 
     const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
 
+    if (data?.success === false) {
+      return {
+        success: false,
+        error: (data.error as string) || "QQ bridge rejected the message",
+      };
+    }
+
     return {
       success: true,
       messageId: (data?.message_id as string) || `qq-${Date.now()}`,
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-
-    if (retryCount < MAX_RETRIES) {
-      const delay = Math.pow(2, retryCount) * 1000;
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return sendNoneBotRequest(endpoint, payload, retryCount + 1);
-    }
-
-    console.error(`[QQAdapter] Failed after ${MAX_RETRIES} retries:`, errMsg);
+    console.error("[QQAdapter] Failed to send QQ message:", errMsg);
     return { success: false, error: errMsg };
   }
 }

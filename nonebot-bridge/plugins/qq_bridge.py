@@ -159,6 +159,15 @@ def get_onebot() -> Bot | None:
     return bot
 
 
+def extract_message_id(result: Any) -> str:
+    if isinstance(result, dict):
+        message_id = result.get("message_id")
+        return "" if message_id is None else str(message_id)
+    if result is None:
+        return ""
+    return str(result)
+
+
 async def build_heartbeat_payload() -> dict[str, Any]:
     bot = get_onebot()
     if bot is None:
@@ -207,7 +216,7 @@ async def send_group_msg(payload: dict[str, Any]):
         message=message,
         auto_escape=bool(payload.get("auto_escape", False)),
     )
-    return {"success": True, "message_id": str(result.get("message_id", ""))}
+    return {"success": True, "message_id": extract_message_id(result)}
 
 
 @driver.server_app.post("/send_private_msg")
@@ -223,7 +232,7 @@ async def send_private_msg(payload: dict[str, Any]):
         message=message,
         auto_escape=bool(payload.get("auto_escape", False)),
     )
-    return {"success": True, "message_id": str(result.get("message_id", ""))}
+    return {"success": True, "message_id": extract_message_id(result)}
 
 
 def build_group_message(message: str, at_users: list[Any]) -> Message:
@@ -250,4 +259,4 @@ async def bridge_send_group(payload: dict[str, Any]):
         group_id=group_id,
         message=build_group_message(message, at_users),
     )
-    return {"success": True, "message_id": str(result.get("message_id", ""))}
+    return {"success": True, "message_id": extract_message_id(result)}
