@@ -34,9 +34,9 @@ const avatarUserParamSchema = z.object({ userId: z.string().uuid("Invalid user I
 
 // Backward-compatible aliases for tests and older clients using /storage/backends.
 // MUST be registered BEFORE /:id to avoid "backends" being captured as an ID parameter.
-router.get("/backends", validateQuery(storageQuerySchema), controller.getBackends);
-router.get("/backends/default", controller.getDefaultBackend);
-router.get("/backends/:id", validateParams(idParamSchema), controller.getBackend);
+router.get("/backends", authenticate, validateQuery(storageQuerySchema), controller.getBackends);
+router.get("/backends/default", authenticate, controller.getDefaultBackend);
+router.get("/backends/:id", authenticate, validateParams(idParamSchema), controller.getBackend);
 router.post("/backends", authenticate, requireRole("super_admin", "group_admin"), validateBody(createStorageBackendSchema), controller.createBackend);
 router.put("/backends/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
 router.patch("/backends/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
@@ -63,9 +63,9 @@ router.put(
   controller.updateDataRetentionSettings
 );
 
-router.get("/", validateQuery(storageQuerySchema), controller.getBackends);
-router.get("/default", controller.getDefaultBackend);
-router.get("/:id", validateParams(idParamSchema), controller.getBackend);
+router.get("/", authenticate, validateQuery(storageQuerySchema), controller.getBackends);
+router.get("/default", authenticate, controller.getDefaultBackend);
+router.get("/:id", authenticate, validateParams(idParamSchema), controller.getBackend);
 router.post("/", authenticate, requireRole("super_admin", "group_admin"), validateBody(createStorageBackendSchema), controller.createBackend);
 router.patch("/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), validateBody(updateStorageBackendSchema), controller.updateBackend);
 router.delete("/:id", authenticate, requireRole("super_admin", "group_admin"), validateParams(idParamSchema), controller.deleteBackend);
