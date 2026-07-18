@@ -201,6 +201,7 @@ export const batchAssignTasksSchema = z.object({
   assignee_id: z.string().uuid("Invalid assignee ID").optional(),
   assigneeId: z.string().uuid("Invalid assignee ID").optional(),
   role: z.nativeEnum(TaskRole).optional(),
+  override_reason: z.string().min(1).max(1000).optional(),
 }).refine((data) => data.unit_id || data.unitId, {
   message: "unit_id is required",
 }).refine((data) => data.assignee_id || data.assigneeId, {

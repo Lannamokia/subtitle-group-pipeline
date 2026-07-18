@@ -24,8 +24,43 @@ import * as fileService from "../file/file.service";
 import * as storageService from "../storage/storage.service";
 import * as notificationService from "../notification/notification.service";
 import { createHash, randomUUID } from "crypto";
-import type { ConflictType } from "@prisma/client";
+import type { ConflictType, UserRole } from "@prisma/client";
 import { applyAssTextPatch, parseAssDocument, type AssPatchConflict } from "./ass-structured";
+import { assertProjectViewPermission } from "../project/project-access";
+
+async function assertSubtitleProjectRead(projectId: string, userId: string, userRole: UserRole) {
+  await assertProjectViewPermission(projectId, userId, userRole, {
+    allowOpenClaimCandidate: false,
+  });
+}
+
+async function assertSubtitleProjectManage(projectId: string, userId: string, userRole: UserRole) {
+  if (["super_admin", "group_admin", "supervisor"].includes(userRole)) return;
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      owner_id: true,
+      members: {
+        where: {
+          user_id: userId,
+          left_at: null,
+          OR: [{ role: "supervisor" }, { is_lead: true }],
+        },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+  if (!project) throw new AppError("Project not found", "NOT_FOUND", 404);
+  if (project.owner_id !== userId && project.members.length === 0) {
+    throw new AppError("Insufficient permissions to manage this project", "FORBIDDEN", 403);
+  }
+}
+
+function canReadAllProjects(userRole: UserRole) {
+  return ["super_admin", "group_admin", "supervisor"].includes(userRole);
+}
 
 // ==================== TRANSLATION CLAIMS ====================
 
@@ -259,7 +294,13 @@ export async function releaseTranslationClaim(claimId: string, userId: string) {
   return updated;
 }
 
-export async function getTranslationClaims(projectUnitId: string) {
+export async function getTranslationClaims(projectUnitId: string, userId: string, userRole: UserRole) {
+  const unit = await prisma.projectUnit.findUnique({
+    where: { id: projectUnitId },
+    select: { project_id: true },
+  });
+  if (!unit) throw new AppError("Project unit not found", "NOT_FOUND", 404);
+  await assertSubtitleProjectRead(unit.project_id, userId, userRole);
   const claims = await prisma.translationClaim.findMany({
     where: { unit_id: projectUnitId },
     orderBy: { segment_start: "asc" },
@@ -283,7 +324,7 @@ export async function getTranslationClaims(projectUnitId: string) {
   return claims;
 }
 
-export async function getTranslationClaimById(claimId: string) {
+export async function getTranslationClaimById(claimId: string, userId: string, userRole: UserRole) {
   const claim = await prisma.translationClaim.findUnique({
     where: { id: claimId },
     include: {
@@ -295,10 +336,7 @@ export async function getTranslationClaimById(claimId: string) {
         },
       },
       task: {
-        select: {
-          id: true,
-          title: true,
-        },
+        select: { id: true, title: true, project_id: true },
       },
       submissions: true,
     },
@@ -307,6 +345,8 @@ export async function getTranslationClaimById(claimId: string) {
   if (!claim) {
     throw new AppError("Claim not found", "NOT_FOUND", 404);
   }
+
+  await assertSubtitleProjectRead(claim.task.project_id, userId, userRole);
 
   return claim;
 }
@@ -457,7 +497,13 @@ export async function submitTranslation(
   return submission;
 }
 
-export async function getSubmissionsByTask(taskId: string) {
+export async function getSubmissionsByTask(taskId: string, userId: string, userRole: UserRole) {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { project_id: true },
+  });
+  if (!task) throw new AppError("Task not found", "NOT_FOUND", 404);
+  await assertSubtitleProjectRead(task.project_id, userId, userRole);
   const submissions = await prisma.translationSubmission.findMany({
     where: { task_id: taskId },
     orderBy: { submitted_at: "desc" },
@@ -1178,7 +1224,7 @@ export async function processMergeJob(jobId: string) {
   }
 }
 
-export async function getMergeJobStatus(jobId: string) {
+export async function getMergeJobStatus(jobId: string, userId: string, userRole: UserRole) {
   const job = await prisma.mergeJob.findUnique({
     where: { id: jobId },
   });
@@ -1186,6 +1232,7 @@ export async function getMergeJobStatus(jobId: string) {
   if (!job) {
     throw new AppError("Merge job not found", "NOT_FOUND", 404);
   }
+  await assertSubtitleProjectRead(job.project_id, userId, userRole);
 
   let logData: Record<string, unknown> | null = null;
   if (job.log) {
@@ -1202,7 +1249,7 @@ export async function getMergeJobStatus(jobId: string) {
   };
 }
 
-export async function getMergeConflicts(jobId: string) {
+export async function getMergeConflicts(jobId: string, userId: string, userRole: UserRole) {
   const job = await prisma.mergeJob.findUnique({
     where: { id: jobId },
   });
@@ -1210,6 +1257,7 @@ export async function getMergeConflicts(jobId: string) {
   if (!job) {
     throw new AppError("Merge job not found", "NOT_FOUND", 404);
   }
+  await assertSubtitleProjectRead(job.project_id, userId, userRole);
 
   const conflicts = await prisma.subtitleConflict.findMany({
     where: {
@@ -1237,12 +1285,18 @@ export async function createMergeJobLegacy(data: CreateMergeJobInput) {
   return job;
 }
 
-export async function getMergeJobs(query: MergeJobQueryInput) {
+export async function getMergeJobs(query: MergeJobQueryInput, userId: string, userRole: UserRole) {
   const page = query.page || 1;
   const pageSize = query.pageSize || 20;
   const skip = (page - 1) * pageSize;
 
   const where: Record<string, unknown> = {};
+
+  if (query.project_id) {
+    await assertSubtitleProjectRead(query.project_id, userId, userRole);
+  } else if (!canReadAllProjects(userRole)) {
+    throw new AppError("project_id is required", "VALIDATION_ERROR", 400);
+  }
 
   if (query.project_id) {
     where.project_id = query.project_id;
@@ -1288,8 +1342,18 @@ export async function updateMergeJobStatus(
   jobId: string,
   status: string,
   outputFileId?: string,
-  log?: string
+  log?: string,
+  actorId?: string,
+  actorRole?: UserRole
 ) {
+  const existing = await prisma.mergeJob.findUnique({
+    where: { id: jobId },
+    select: { project_id: true },
+  });
+  if (!existing) throw new AppError("Merge job not found", "NOT_FOUND", 404);
+  if (!actorId || !actorRole) throw new AppError("Authentication required", "UNAUTHORIZED", 401);
+  await assertSubtitleProjectManage(existing.project_id, actorId, actorRole);
+
   const updateData: Record<string, unknown> = { status };
 
   if (status === "running") {
@@ -1629,15 +1693,6 @@ export async function resolveConflict(
   userRole: string,
   data: ResolveConflictInput
 ) {
-  // Only supervisors and designated reviewers can resolve conflicts
-  if (userRole !== "supervisor" && userRole !== "super_admin" && userRole !== "group_admin") {
-    throw new AppError(
-      "Only supervisors and designated reviewers can resolve conflicts",
-      "FORBIDDEN",
-      403
-    );
-  }
-
   const conflict = await prisma.subtitleConflict.findUnique({
     where: { id: conflictId },
   });
@@ -1645,6 +1700,8 @@ export async function resolveConflict(
   if (!conflict) {
     throw new AppError("Conflict not found", "NOT_FOUND", 404);
   }
+
+  await assertSubtitleProjectManage(conflict.project_id, resolverId, userRole as UserRole);
 
   if (conflict.resolution !== "unresolved") {
     throw new AppError("Conflict is already resolved", "BAD_REQUEST", 400);
@@ -1771,7 +1828,7 @@ export async function resolveConflict(
   };
 }
 
-export async function getConflictDetail(conflictId: string) {
+export async function getConflictDetail(conflictId: string, userId: string, userRole: UserRole) {
   const conflict = await prisma.subtitleConflict.findUnique({
     where: { id: conflictId },
   });
@@ -1779,6 +1836,7 @@ export async function getConflictDetail(conflictId: string) {
   if (!conflict) {
     throw new AppError("Conflict not found", "NOT_FOUND", 404);
   }
+  await assertSubtitleProjectRead(conflict.project_id, userId, userRole);
 
   // Get file details for both sides
   const fileA = await prisma.fileEntity.findUnique({
@@ -1832,12 +1890,18 @@ export async function getConflictDetail(conflictId: string) {
   };
 }
 
-export async function getConflicts(query: ConflictQueryInput) {
+export async function getConflicts(query: ConflictQueryInput, userId: string, userRole: UserRole) {
   const page = query.page || 1;
   const pageSize = query.pageSize || 20;
   const skip = (page - 1) * pageSize;
 
   const where: Record<string, unknown> = {};
+
+  if (query.project_id) {
+    await assertSubtitleProjectRead(query.project_id, userId, userRole);
+  } else if (!canReadAllProjects(userRole)) {
+    throw new AppError("project_id is required", "VALIDATION_ERROR", 400);
+  }
 
   if (query.project_id) {
     where.project_id = query.project_id;
@@ -1870,7 +1934,7 @@ export async function getConflicts(query: ConflictQueryInput) {
   };
 }
 
-export async function getConflictById(conflictId: string) {
+export async function getConflictById(conflictId: string, userId: string, userRole: UserRole) {
   const conflict = await prisma.subtitleConflict.findUnique({
     where: { id: conflictId },
   });
@@ -1878,6 +1942,8 @@ export async function getConflictById(conflictId: string) {
   if (!conflict) {
     throw new AppError("Conflict not found", "NOT_FOUND", 404);
   }
+
+  await assertSubtitleProjectRead(conflict.project_id, userId, userRole);
 
   return conflict;
 }
@@ -1926,7 +1992,9 @@ export interface VersionComparison {
 
 export async function compareVersions(
   fileVersionId1: string,
-  fileVersionId2: string
+  fileVersionId2: string,
+  userId: string,
+  userRole: UserRole
 ): Promise<VersionComparison> {
   const [version1, version2] = await Promise.all([
     prisma.fileVersion.findUnique({
@@ -1942,6 +2010,11 @@ export async function compareVersions(
   if (!version1 || !version2) {
     throw new AppError("One or both file versions not found", "NOT_FOUND", 404);
   }
+
+  await Promise.all([
+    assertSubtitleProjectRead(version1.file.project_id, userId, userRole),
+    assertSubtitleProjectRead(version2.file.project_id, userId, userRole),
+  ]);
 
   // Get content from submissions
   const [sub1, sub2] = await Promise.all([
@@ -2037,7 +2110,9 @@ export interface TimelineVisualization {
 }
 
 export async function getTimelineVisualization(
-  fileVersionId: string
+  fileVersionId: string,
+  userId: string,
+  userRole: UserRole
 ): Promise<TimelineVisualization> {
   const version = await prisma.fileVersion.findUnique({
     where: { id: fileVersionId },
@@ -2047,6 +2122,8 @@ export async function getTimelineVisualization(
   if (!version) {
     throw new AppError("File version not found", "NOT_FOUND", 404);
   }
+
+  await assertSubtitleProjectRead(version.file.project_id, userId, userRole);
 
   const submission = await prisma.translationSubmission.findFirst({
     where: { file_version_id: fileVersionId },
@@ -2130,47 +2207,55 @@ export async function getTimelineVisualization(
 
 // ==================== REVIEWS ====================
 
-export async function createReview(reviewerId: string, data: ReviewInput) {
-  const review = await prisma.review.create({
-    data: {
-      project_id: data.project_id,
-      task_id: data.task_id,
-      file_version_id: data.file_version_id,
-      reviewer_id: reviewerId,
-      status: data.status,
-      comments: data.comments,
-      line_comments: data.line_comments,
-    },
-    include: {
-      reviewer: {
-        select: {
-          id: true,
-          username: true,
-          nickname: true,
-        },
-      },
-    },
-  });
+export async function createReview(reviewerId: string, reviewerRole: UserRole, data: ReviewInput) {
+  await assertSubtitleProjectManage(data.project_id, reviewerId, reviewerRole);
 
-  // Update task status if review is for a task
   if (data.task_id) {
-    const taskStatus =
-      data.status === "approved"
-        ? "review_approved"
-        : data.status === "rejected"
-        ? "review_rejected"
-        : "in_progress";
-
-    await prisma.task.update({
-      where: { id: data.task_id },
-      data: { status: taskStatus },
+    const task = await prisma.task.findUnique({ where: { id: data.task_id }, select: { project_id: true } });
+    if (!task || task.project_id !== data.project_id) {
+      throw new AppError("Review task does not belong to the project", "VALIDATION_ERROR", 400);
+    }
+  }
+  if (data.file_version_id) {
+    const version = await prisma.fileVersion.findUnique({
+      where: { id: data.file_version_id },
+      select: { file: { select: { project_id: true } } },
     });
+    if (!version || version.file.project_id !== data.project_id) {
+      throw new AppError("Review file does not belong to the project", "VALIDATION_ERROR", 400);
+    }
   }
 
-  return review;
+  return prisma.$transaction(async (tx) => {
+    const review = await tx.review.create({
+      data: {
+        project_id: data.project_id,
+        task_id: data.task_id,
+        file_version_id: data.file_version_id,
+        reviewer_id: reviewerId,
+        status: data.status,
+        comments: data.comments,
+        line_comments: data.line_comments,
+      },
+      include: {
+        reviewer: { select: { id: true, username: true, nickname: true } },
+      },
+    });
+
+    if (data.task_id) {
+      const taskStatus = data.status === "approved"
+        ? "review_approved"
+        : data.status === "rejected"
+          ? "review_rejected"
+          : "in_progress";
+      await tx.task.update({ where: { id: data.task_id }, data: { status: taskStatus } });
+    }
+    return review;
+  });
 }
 
-export async function getReviews(projectId: string) {
+export async function getReviews(projectId: string, userId: string, userRole: UserRole) {
+  await assertSubtitleProjectRead(projectId, userId, userRole);
   const reviews = await prisma.review.findMany({
     where: { project_id: projectId },
     orderBy: { submitted_at: "desc" },
@@ -2196,7 +2281,7 @@ export async function getReviews(projectId: string) {
   return reviews;
 }
 
-export async function getReviewById(reviewId: string) {
+export async function getReviewById(reviewId: string, userId: string, userRole: UserRole) {
   const review = await prisma.review.findUnique({
     where: { id: reviewId },
     include: {
@@ -2215,10 +2300,25 @@ export async function getReviewById(reviewId: string) {
     throw new AppError("Review not found", "NOT_FOUND", 404);
   }
 
+
+  await assertSubtitleProjectRead(review.project_id, userId, userRole);
+
   return review;
 }
 
-export async function updateReview(reviewId: string, data: Partial<ReviewInput>) {
+export async function updateReview(
+  reviewId: string,
+  data: Partial<ReviewInput>,
+  actorId: string,
+  actorRole: UserRole
+) {
+  const existing = await prisma.review.findUnique({
+    where: { id: reviewId },
+    select: { project_id: true },
+  });
+  if (!existing) throw new AppError("Review not found", "NOT_FOUND", 404);
+  await assertSubtitleProjectManage(existing.project_id, actorId, actorRole);
+
   const review = await prisma.review.update({
     where: { id: reviewId },
     data: {

@@ -40,13 +40,13 @@ export function resetAuthRateLimiters() {
 // Auth routes
 router.post("/register", registerRateLimit, validateBody(registerSchema), controller.register);
 router.post("/login", rateLimitMiddleware, validateBody(loginSchema), controller.login);
-router.post("/refresh", rateLimitMiddleware, validateBody(refreshTokenSchema), controller.refresh);
+router.post("/refresh", validateBody(refreshTokenSchema), controller.refresh);
 router.post("/logout", authenticate, controller.logout);
 router.get("/me", authenticate, controller.me);
 router.put("/profile", authenticate, validateBody(updateProfileSchema), controller.updateProfile);
 router.post("/qq-rebind/request", authenticate, validateBody(requestQQRebindSchema), controller.requestQQRebind);
 router.post("/change-password", authenticate, validateBody(changePasswordSchema), controller.changePassword);
-router.post("/verify-qq", rateLimitMiddleware, validateBody(verifyQQSchema), controller.verifyQQ);
+router.post("/verify-qq", validateBody(verifyQQSchema), controller.verifyQQ);
 router.post("/request-password-reset", rateLimitMiddleware, validateBody(requestPasswordResetSchema), controller.requestPasswordReset);
 router.post("/confirm-password-reset", rateLimitMiddleware, validateBody(confirmPasswordResetSchema), controller.confirmPasswordReset);
 router.get("/registration-policy", controller.getRegistrationPolicy);

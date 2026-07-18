@@ -364,7 +364,9 @@ Dialogue: 0,0:00:11.00,0:00:15.00,Default,,0,0,0,,New line`;
 
       const comparison = await subtitleService.compareVersions(
         versions1[0].id,
-        versions2[0].id
+        versions2[0].id,
+        user.id,
+        "member"
       );
 
       expect(comparison.added.length).toBe(1); // New line
@@ -484,6 +486,36 @@ Dialogue: 0,0:00:11.00,0:00:15.00,Default,,0,0,0,,New line`;
       expect(resolved.resolution).toBe("resolved_auto");
       expect(resolved.resolved_by).toBe(supervisor.id);
       expect(resolved.resolved_at).not.toBeNull();
+    });
+
+    it("should allow a project supervisor to resolve conflicts through the project route", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: supervisor, token: supervisorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: supervisor.id, role: "supervisor" },
+      });
+      const { file: fileA } = await createTestFile({ project_id: project.id, uploader_id: owner.id });
+      const { file: fileB } = await createTestFile({ project_id: project.id, uploader_id: owner.id });
+      const conflict = await prisma.subtitleConflict.create({
+        data: {
+          project_id: project.id,
+          conflict_type: "content_mismatch",
+          description: "Project supervisor conflict",
+          file_a_id: fileA.id,
+          file_b_id: fileB.id,
+          resolution: "unresolved",
+        },
+      });
+
+      const response = await post(
+        app,
+        `/api/v1/projects/${project.id}/conflicts/${conflict.id}/resolve`,
+        { resolution: "resolved_auto", resolution_note: "Resolved in project" },
+        supervisorToken
+      );
+      expectSuccess(response, 200);
+      expect(response.body.data.resolved_by).toBe(supervisor.id);
     });
 
     it("should write resolved conflicts back as a new merged subtitle version with audit trail", async () => {
@@ -609,8 +641,12 @@ Dialogue: 0,0:00:06.00,0:00:10.00,Default,,0,0,0,,Shared line`;
     });
 
     it("should reject non-supervisors from resolving conflicts", async () => {
+      const { user: owner } = await createTestUser({ role: "member" });
       const { user: regular } = await createTestUser({ role: "member" });
-      const project = await createTestProject({ owner_id: regular.id });
+      const project = await createTestProject({ owner_id: owner.id });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: regular.id, role: "translation" },
+      });
       const { file: fileA } = await createTestFile({
         project_id: project.id,
         uploader_id: regular.id,
@@ -638,7 +674,7 @@ Dialogue: 0,0:00:06.00,0:00:10.00,Default,,0,0,0,,Shared line`;
           "member",
           { resolution: "resolved_manual" }
         )
-      ).rejects.toThrow("Only supervisors and designated reviewers can resolve conflicts");
+      ).rejects.toThrow("Insufficient permissions to manage this project");
     });
 
     it("should reject resolving already-resolved conflicts", async () => {

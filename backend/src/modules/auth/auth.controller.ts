@@ -414,7 +414,7 @@ export async function resetUserPassword(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await authService.resetUserPassword(String(req.params.id), req.body);
+    const result = await authService.resetUserPassword(String(req.params.id), req.body, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -427,7 +427,7 @@ export async function updateUserStatus(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await authService.updateUserStatus(String(req.params.id), req.body);
+    const result = await authService.updateUserStatus(String(req.params.id), req.body, req.user?.id);
     successResponse(res, result);
   } catch (error) {
     next(error);

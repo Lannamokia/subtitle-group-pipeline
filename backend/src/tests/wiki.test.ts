@@ -470,6 +470,38 @@ const x = 1;
       expect(updated!.status).toBe("draft");
     });
 
+    it("should allow project supervisors and reject ordinary members for project Wiki review", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: supervisor, token: supervisorToken } = await createTestUser();
+      const { user: member, token: memberToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      await prisma.projectMember.createMany({
+        data: [
+          { project_id: project.id, user_id: supervisor.id, role: "supervisor" },
+          { project_id: project.id, user_id: member.id, role: "translation" },
+        ],
+      });
+      const wiki = await createTestWiki({
+        project_id: project.id,
+        title: "Project review",
+        slug: "project-review",
+        content: "Original",
+        pending_content: "Pending",
+        status: "pending",
+        created_by: member.id,
+      });
+
+      expectError(
+        await post(app, `/api/v1/wiki/${wiki.id}/approve`, { approved: true }, memberToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectSuccess(
+        await post(app, `/api/v1/wiki/${wiki.id}/approve`, { approved: true }, supervisorToken),
+        200
+      );
+    });
+
     it("should not require approval for draft wiki edits", async () => {
       const { user, token } = await createTestUser();
       const wiki = await createTestWiki({

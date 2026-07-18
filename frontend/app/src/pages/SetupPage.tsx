@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -17,6 +18,43 @@ import { CheckCircle2, Database, HardDrive, KeyRound, Loader2, RefreshCw, UserPl
 
 type DatabaseProvider = "sqlite" | "mysql" | "mariadb" | "postgresql";
 type StorageType = "local" | "s3" | "s3_compatible";
+
+type DatabaseFields = {
+  sqlitePath: string;
+  host: string;
+  port: string;
+  databaseName: string;
+  username: string;
+  password: string;
+  schema: string;
+};
+
+const DEFAULT_DATABASE_FIELDS: DatabaseFields = {
+  sqlitePath: "./dev.db",
+  host: "localhost",
+  port: "3306",
+  databaseName: "subtitle_group",
+  username: "subtitle_group",
+  password: "",
+  schema: "public",
+};
+
+function buildDatabaseUrl(provider: DatabaseProvider, fields: DatabaseFields) {
+  if (provider === "sqlite") {
+    const sqlitePath = fields.sqlitePath.trim();
+    return sqlitePath.startsWith("file:") ? sqlitePath : `file:${sqlitePath}`;
+  }
+
+  const protocol = provider === "postgresql" ? "postgresql" : provider;
+  const username = encodeURIComponent(fields.username.trim());
+  const password = fields.password ? `:${encodeURIComponent(fields.password)}` : "";
+  const databaseName = encodeURIComponent(fields.databaseName.trim());
+  const schema = provider === "postgresql" && fields.schema.trim()
+    ? `?schema=${encodeURIComponent(fields.schema.trim())}`
+    : "";
+
+  return `${protocol}://${username}${password}@${fields.host.trim()}:${fields.port}/${databaseName}${schema}`;
+}
 
 function generateJwtSecret() {
   const bytes = new Uint8Array(48);
@@ -35,7 +73,7 @@ export function SetupPage() {
   const [submitting, setSubmitting] = useState(false);
   const [completeMessage, setCompleteMessage] = useState<string | null>(null);
   const [provider, setProvider] = useState<DatabaseProvider>("sqlite");
-  const [databaseUrl, setDatabaseUrl] = useState("file:./dev.db");
+  const [database, setDatabase] = useState<DatabaseFields>(DEFAULT_DATABASE_FIELDS);
   const [jwtSecret, setJwtSecret] = useState(() => generateJwtSecret());
   const [admin, setAdmin] = useState({ username: "admin", password: "", nickname: "", email: "" });
   const [storageType, setStorageType] = useState<StorageType>("local");
@@ -94,9 +132,20 @@ export function SetupPage() {
   };
 
   const handleSubmit = async () => {
-    if (!databaseUrl.trim()) {
-      toast.error("请填写数据库连接");
+    if (provider === "sqlite" && !database.sqlitePath.trim()) {
+      toast.error("请填写 SQLite 数据库文件路径");
       return;
+    }
+    if (provider !== "sqlite") {
+      if (!database.host.trim() || !database.databaseName.trim() || !database.username.trim()) {
+        toast.error("请填写数据库主机、数据库名和用户名");
+        return;
+      }
+      const port = Number(database.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        toast.error("数据库端口必须在 1 到 65535 之间");
+        return;
+      }
     }
     if (jwtSecret.trim().length < 32) {
       toast.error("JWT 密钥至少 32 位");
@@ -121,6 +170,7 @@ export function SetupPage() {
 
     setSubmitting(true);
     try {
+      const databaseUrl = buildDatabaseUrl(provider, database);
       const result = await setupApi.complete({
         database: { provider, url: databaseUrl },
         security: { jwt_secret: jwtSecret.trim() },
@@ -169,23 +219,20 @@ export function SetupPage() {
           <p className="mt-1 text-sm text-gray-500">配置数据库、超级管理员和默认存储后端后开始使用。</p>
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
-          <SetupStep icon={Database} title="数据库">
-            <Label>数据库类型</Label>
+        <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
+          <SetupStep icon={Database} title="数据库" className="lg:col-span-2">
+            <Label htmlFor="database-provider">数据库类型</Label>
             <Select value={provider} onValueChange={(value) => {
               const next = value as DatabaseProvider;
               setProvider(next);
-              setDatabaseUrl(
-                next === "sqlite"
-                  ? "file:./dev.db"
-                  : next === "mariadb"
-                    ? "mysql://user:password@localhost:3306/subtitle_group"
-                  : next === "mysql"
-                    ? "mysql://user:password@localhost:3306/subtitle_group"
-                    : "postgresql://user:password@localhost:5432/subtitle_group"
-              );
+              if (next !== "sqlite") {
+                setDatabase((current) => ({
+                  ...current,
+                  port: next === "postgresql" ? "5432" : "3306",
+                }));
+              }
             }}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="database-provider" className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="sqlite">SQLite</SelectItem>
                 <SelectItem value="mysql">MySQL</SelectItem>
@@ -193,16 +240,93 @@ export function SetupPage() {
                 <SelectItem value="postgresql">PostgreSQL</SelectItem>
               </SelectContent>
             </Select>
-            <Label>连接地址</Label>
-            <Input value={databaseUrl} onChange={(event) => setDatabaseUrl(event.target.value)} />
+
+            {provider === "sqlite" ? (
+              <div className="space-y-2">
+                <Label htmlFor="database-sqlite-path">数据库文件路径</Label>
+                <Input
+                  id="database-sqlite-path"
+                  value={database.sqlitePath}
+                  onChange={(event) => setDatabase({ ...database, sqlitePath: event.target.value })}
+                  placeholder="./dev.db"
+                  spellCheck={false}
+                />
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="database-host">主机</Label>
+                  <Input
+                    id="database-host"
+                    value={database.host}
+                    onChange={(event) => setDatabase({ ...database, host: event.target.value })}
+                    placeholder="localhost"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="database-port">端口</Label>
+                  <Input
+                    id="database-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={database.port}
+                    onChange={(event) => setDatabase({ ...database, port: event.target.value })}
+                    placeholder={provider === "postgresql" ? "5432" : "3306"}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="database-name">数据库名</Label>
+                  <Input
+                    id="database-name"
+                    value={database.databaseName}
+                    onChange={(event) => setDatabase({ ...database, databaseName: event.target.value })}
+                    placeholder="subtitle_group"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                {provider === "postgresql" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="database-schema">Schema</Label>
+                    <Input
+                      id="database-schema"
+                      value={database.schema}
+                      onChange={(event) => setDatabase({ ...database, schema: event.target.value })}
+                      placeholder="public"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                ) : null}
+                <div className="space-y-2">
+                  <Label htmlFor="database-username">用户名</Label>
+                  <Input
+                    id="database-username"
+                    value={database.username}
+                    onChange={(event) => setDatabase({ ...database, username: event.target.value })}
+                    autoComplete="username"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="database-password">密码</Label>
+                  <Input
+                    id="database-password"
+                    type="password"
+                    value={database.password}
+                    onChange={(event) => setDatabase({ ...database, password: event.target.value })}
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+            )}
+
             <p className="text-xs leading-5 text-gray-500">
-              初始化会按这里选择的类型同步数据库结构，并写入连接参数。MySQL/MariaDB/PostgreSQL 初始化完成后会自动重启后端。
+              数据库账号需要具备建表和修改表结构权限。
             </p>
-            {provider === "postgresql" ? (
-              <p className="text-xs leading-5 text-amber-700">
-                PostgreSQL 账号需要拥有目标 schema 的建表权限；如不使用 public，可在连接串末尾添加 ?schema=subtitle_group。
-              </p>
-            ) : null}
           </SetupStep>
 
           <SetupStep icon={KeyRound} title="安全密钥">
@@ -239,7 +363,7 @@ export function SetupPage() {
             <Input value={admin.email} onChange={(event) => setAdmin({ ...admin, email: event.target.value })} />
           </SetupStep>
 
-          <SetupStep icon={HardDrive} title="默认存储后端">
+          <SetupStep icon={HardDrive} title="默认存储后端" className="lg:col-span-2 xl:col-span-2">
             <Label>存储类型</Label>
             <Select value={storageType} onValueChange={(value) => setStorageType(value as StorageType)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -295,13 +419,15 @@ function SetupStep({
   icon: Icon,
   title,
   children,
+  className,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <Card>
+    <Card className={cn(className)}>
       <CardContent className="space-y-3 p-5">
         <div className="mb-2 flex items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-50 text-primary-600">

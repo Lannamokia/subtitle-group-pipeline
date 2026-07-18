@@ -42,7 +42,6 @@ export class JobScheduler {
           console.error(`[Scheduler] Job "${name}" failed after ${duration}ms:`, error);
         }
       }, {
-        scheduled: true,
         timezone: "UTC",
       });
 

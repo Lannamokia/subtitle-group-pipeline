@@ -1,10 +1,11 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
-import { TaskStatus, TaskRole, TimelineEventType, ReviewStatus, ClaimStatus, FileType } from "@prisma/client";
+import { TaskStatus, TaskRole, TimelineEventType, ReviewStatus, ClaimStatus, FileType, UserRole } from "@prisma/client";
 import { randomUUID } from "crypto";
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
+import { assertProjectViewPermission, getEligibleOpenClaimRoles } from "../project/project-access";
 import type {
   CreateTaskInput,
   UpdateTaskInput,
@@ -713,6 +714,12 @@ async function canManageProjectTasks(projectId: string, actorId?: string): Promi
   );
 }
 
+async function assertCanManageProjectTasks(projectId: string, actorId?: string): Promise<void> {
+  if (!(await canManageProjectTasks(projectId, actorId))) {
+    throw new AppError("Only project supervisors or administrators can manage tasks", "FORBIDDEN", 403);
+  }
+}
+
 async function getTaskRoleMaxSegmentLength(
   projectId: string,
   role: TaskRole
@@ -750,21 +757,19 @@ async function getTaskRoleMaxSegmentLength(
 }
 
 async function hasRequiredRoleTag(userId: string, role: TaskRole): Promise<boolean> {
-  const tag = await prisma.roleTag.findFirst({
-    where: {
-      name: { equals: role },
-    },
+  const tags = await prisma.roleTag.findMany({
+    where: { role_type: role },
     select: { id: true },
   });
 
-  if (!tag) {
+  if (tags.length === 0) {
     return true;
   }
 
   const approved = await prisma.tagApplication.findFirst({
     where: {
       user_id: userId,
-      tag_id: tag.id,
+      tag_id: { in: tags.map((tag) => tag.id) },
       approved: true,
     },
   });
@@ -1353,6 +1358,8 @@ export async function createTask(creatorId: string, data: CreateTaskInput) {
     throw new AppError("Cannot create tasks in archived project", "BAD_REQUEST", 400);
   }
 
+  await assertCanManageProjectTasks(data.project_id, creatorId);
+
   const requestedTranslationOrder = normalizeTranslationOrder(
     data.translation_order ?? data.translationOrder
   );
@@ -1408,6 +1415,20 @@ export async function createTask(creatorId: string, data: CreateTaskInput) {
     },
   });
 
+  if (data.assignee_id) {
+    await prisma.projectMember.upsert({
+      where: {
+        project_id_user_id: { project_id: data.project_id, user_id: data.assignee_id },
+      },
+      create: {
+        project_id: data.project_id,
+        user_id: data.assignee_id,
+        role: data.role,
+      },
+      update: { left_at: null, joined_at: new Date() },
+    });
+  }
+
   await timelineService.createTimelineEvent({
     project_id: data.project_id,
     event_type: TimelineEventType.task_created,
@@ -1428,7 +1449,7 @@ export async function createTask(creatorId: string, data: CreateTaskInput) {
   return task;
 }
 
-export async function getTasks(query: TaskQueryInput) {
+export async function getTasks(query: TaskQueryInput, userId: string, userRole: UserRole) {
   const page = query.page || 1;
   const pageSize = query.pageSize || 20;
   const skip = (page - 1) * pageSize;
@@ -1438,6 +1459,12 @@ export async function getTasks(query: TaskQueryInput) {
   const projectId = query.project_id ?? query.projectId;
   const unitId = query.unit_id ?? query.unitId;
   const assigneeId = query.assignee_id ?? query.assigneeId;
+
+  if (projectId) {
+    await assertProjectViewPermission(projectId, userId, userRole);
+  } else if (!["super_admin", "group_admin", "supervisor"].includes(userRole)) {
+    throw new AppError("project_id is required", "VALIDATION_ERROR", 400);
+  }
 
   if (projectId) {
     where.project_id = projectId;
@@ -1509,7 +1536,16 @@ export async function getTasks(query: TaskQueryInput) {
   };
 }
 
-export async function getTaskById(taskId: string) {
+export async function getTaskById(taskId: string, userId: string, userRole: UserRole) {
+  const taskProject = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { project_id: true },
+  });
+  if (!taskProject) {
+    throw new AppError("Task not found", "NOT_FOUND", 404);
+  }
+  await assertProjectViewPermission(taskProject.project_id, userId, userRole);
+
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     include: {
@@ -1647,6 +1683,8 @@ export async function updateTask(
   if (existing.project.is_archived) {
     throw new AppError("Cannot update task in archived project", "BAD_REQUEST", 400);
   }
+
+  await assertCanManageProjectTasks(existing.project_id, actorId);
 
   const updateData: Record<string, unknown> = {};
 
@@ -1896,10 +1934,18 @@ export async function claimTask(
     },
   });
 
+  const canManageTask = await canManageProjectTasks(task.project_id, userId);
+
+  const candidateRoles = membership
+    ? []
+    : await getEligibleOpenClaimRoles(task.project_id, userId);
+
   // Allow claim if member has matching role or is supervisor
-  const canClaim =
-    membership &&
-    (membership.role === task.role || membership.role === "supervisor");
+  const canClaim = Boolean(
+    canManageTask ||
+    (membership && (membership.role === task.role || membership.role === "supervisor")) ||
+      candidateRoles.includes(task.role)
+  );
 
   if (!canClaim) {
     throw new AppError(
@@ -1909,7 +1955,7 @@ export async function claimTask(
     );
   }
 
-  if (membership?.role !== "supervisor") {
+  if (!canManageTask) {
     await assertTaskClaimRoleTagAccess(
       userId,
       task.project_id,
@@ -1918,22 +1964,38 @@ export async function claimTask(
     );
   }
 
-  const updated = await prisma.task.update({
-    where: { id: taskId },
-    data: {
-      assignee_id: userId,
-      status: "assigned",
-    },
-    include: {
-      assignee: {
-        select: {
-          id: true,
-          username: true,
-          nickname: true,
-          avatar_url: true,
+  const updated = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.task.updateMany({
+      where: { id: taskId, status: "claimable", assignee_id: null },
+      data: { assignee_id: userId, status: "assigned" },
+    });
+    if (claimed.count !== 1) {
+      throw new AppError("Task was already claimed", "CONFLICT", 409);
+    }
+
+    if (!membership) {
+      await tx.projectMember.upsert({
+        where: {
+          project_id_user_id: { project_id: task.project_id, user_id: userId },
+        },
+        create: { project_id: task.project_id, user_id: userId, role: task.role },
+        update: { role: task.role, left_at: null, joined_at: new Date() },
+      });
+    }
+
+    return tx.task.findUniqueOrThrow({
+      where: { id: taskId },
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            username: true,
+            nickname: true,
+            avatar_url: true,
+          },
         },
       },
-    },
+    });
   });
 
   await timelineService.createTimelineEvent({
@@ -1976,6 +2038,8 @@ export async function assignTask(
   if (task.project.deleted_at || task.project.is_archived) {
     throw new AppError("Cannot assign task in archived/deleted project", "BAD_REQUEST", 400);
   }
+
+  await assertCanManageProjectTasks(task.project_id, actorId);
 
   if (
     task.status !== "pending_publish" &&
@@ -2038,6 +2102,18 @@ export async function assignTask(
         },
       },
     },
+  });
+
+  await prisma.projectMember.upsert({
+    where: {
+      project_id_user_id: { project_id: task.project_id, user_id: assigneeId },
+    },
+    create: {
+      project_id: task.project_id,
+      user_id: assigneeId,
+      role: task.role,
+    },
+    update: { left_at: null, joined_at: new Date() },
   });
 
   await timelineService.createTimelineEvent({
@@ -2162,6 +2238,7 @@ export async function returnTask(
 export async function startTask(
   taskId: string,
   userId: string,
+  userRole: UserRole,
   actorId?: string
 ) {
   const task = await prisma.task.findUnique({
@@ -2178,6 +2255,8 @@ export async function startTask(
   if (task.project.deleted_at || task.project.is_archived) {
     throw new AppError("Cannot start task in archived/deleted project", "BAD_REQUEST", 400);
   }
+
+  await assertProjectViewPermission(task.project_id, userId, userRole);
 
   if (task.status !== "assigned" && task.status !== "claimable") {
     throw new AppError(
@@ -2197,7 +2276,9 @@ export async function startTask(
     );
   }
 
-  if (task.role === TaskRole.translation) {
+  const canManageTask = await canManageProjectTasks(task.project_id, userId);
+
+  if (task.role === TaskRole.translation && !canManageTask) {
     const activeClaim = await prisma.translationClaim.findFirst({
       where: {
         task: translationClaimScope(task),
@@ -2213,6 +2294,13 @@ export async function startTask(
         403
       );
     }
+  } else if (!canManageTask) {
+    if (task.status === "claimable") {
+      throw new AppError("Claim the task before starting it", "BAD_REQUEST", 400);
+    }
+    if (task.assignee_id !== userId) {
+      throw new AppError("Only the assigned member can start this task", "FORBIDDEN", 403);
+    }
   }
 
   // If claimable, auto-assign to the user starting it
@@ -2221,7 +2309,7 @@ export async function startTask(
     started_at: new Date(),
   };
 
-  if (task.status === "claimable") {
+  if (task.status === "claimable" && !task.assignee_id) {
     updateData.assignee_id = userId;
   }
 
@@ -2270,7 +2358,7 @@ export async function submitTask(
     throw new AppError("Cannot submit task in archived/deleted project", "BAD_REQUEST", 400);
   }
 
-  if (task.status !== "in_progress") {
+  if (task.status !== "in_progress" && task.status !== "review_rejected") {
     throw new AppError(
       `Task cannot be submitted. Current status: ${task.status}`,
       "BAD_REQUEST",
@@ -2278,8 +2366,10 @@ export async function submitTask(
     );
   }
 
-  // Only the assignee can submit
-  if (task.assignee_id !== userId) {
+  const canManageTask = await canManageProjectTasks(task.project_id, userId);
+
+  // Project managers may operate any task without taking over its assignment.
+  if (task.assignee_id !== userId && !canManageTask) {
     throw new AppError("Only the assigned member can submit this task", "FORBIDDEN", 403);
   }
 
@@ -2288,7 +2378,7 @@ export async function submitTask(
     activeTranslationClaim = await prisma.translationClaim.findFirst({
       where: {
         task: translationClaimScope(task),
-        user_id: userId,
+        ...(canManageTask ? {} : { user_id: userId }),
         status: "active",
       },
       select: { id: true, user_id: true },
@@ -2325,6 +2415,8 @@ export async function submitTask(
     });
   }
 
+  const submissionOwnerId = activeTranslationClaim?.user_id ?? task.assignee_id ?? userId;
+
   await timelineService.createTimelineEvent({
     project_id: task.project_id,
     event_type: requiresReview ? TimelineEventType.task_submitted : TimelineEventType.task_completed,
@@ -2347,7 +2439,7 @@ export async function submitTask(
           project_id: task.project_id,
           task_id: taskId,
           reviewer_id: reviewerId,
-          requester_id: userId,
+          requester_id: submissionOwnerId,
           status: ReviewStatus.pending,
         },
       });
@@ -2394,6 +2486,8 @@ export async function cancelTask(
   if (task.project.deleted_at || task.project.is_archived) {
     throw new AppError("Cannot cancel task in archived/deleted project", "BAD_REQUEST", 400);
   }
+
+  await assertCanManageProjectTasks(task.project_id, actorId);
 
   if (
     task.status === "completed" ||
@@ -2456,6 +2550,8 @@ export async function approveTask(
   if (!task) {
     throw new AppError("Task not found", "NOT_FOUND", 404);
   }
+
+  await assertCanManageProjectTasks(task.project_id, actorId);
 
   if (task.project.deleted_at || task.project.is_archived) {
     throw new AppError("Cannot approve task in archived/deleted project", "BAD_REQUEST", 400);
@@ -2809,11 +2905,18 @@ export async function updateTaskDeadline(
 ) {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
+    include: { project: { select: { is_archived: true, deleted_at: true } } },
   });
 
   if (!task) {
     throw new AppError("Task not found", "NOT_FOUND", 404);
   }
+
+  if (task.project.deleted_at || task.project.is_archived) {
+    throw new AppError("Cannot update deadline in archived/deleted project", "BAD_REQUEST", 400);
+  }
+
+  await assertCanManageProjectTasks(task.project_id, actorId);
 
   const updated = await prisma.task.update({
     where: { id: taskId },
@@ -2890,10 +2993,19 @@ export async function claimTranslationSegment(
     },
   });
 
-  const canClaim =
-    membership &&
-    !membership.left_at &&
-    (membership.role === "translation" || membership.role === "supervisor");
+  const canManageTask = await canManageProjectTasks(task.project_id, userId);
+
+  const candidateRoles = membership
+    ? []
+    : await getEligibleOpenClaimRoles(task.project_id, userId);
+
+  const canClaim = Boolean(
+    canManageTask ||
+    (membership &&
+      !membership.left_at &&
+      (membership.role === "translation" || membership.role === "supervisor")) ||
+      candidateRoles.includes("translation")
+  );
 
   if (!canClaim) {
     throw new AppError(
@@ -2903,15 +3015,7 @@ export async function claimTranslationSegment(
     );
   }
 
-  if (membership.role !== "supervisor" && task.assignee_id !== userId) {
-    throw new AppError(
-      "Only the assigned member can claim segments in this translation task",
-      "FORBIDDEN",
-      403
-    );
-  }
-
-  if (membership.role !== "supervisor") {
+  if (!canManageTask) {
     await assertTaskClaimRoleTagAccess(
       userId,
       task.project_id,
@@ -2937,6 +3041,15 @@ export async function claimTranslationSegment(
       throw new AppError(
         `Segment end exceeds episode length (${task.unit.episode_length}s)`,
         "VALIDATION_ERROR",
+        400
+      );
+    }
+
+    const coveredSeconds = await getTranslationCoverageSeconds(task);
+    if (coveredSeconds >= task.unit.episode_length) {
+      throw new AppError(
+        "Translation segments are already fully claimed",
+        "BAD_REQUEST",
         400
       );
     }
@@ -2988,16 +3101,28 @@ export async function claimTranslationSegment(
     );
   }
 
-  const claim = await prisma.translationClaim.create({
-    data: {
-      task_id: taskId,
-      unit_id: task.unit_id,
-      user_id: userId,
-      segment_start: data.segment_start,
-      segment_end: data.segment_end,
-      status: "pending",
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-    },
+  const claim = await prisma.$transaction(async (tx) => {
+    if (!membership) {
+      await tx.projectMember.upsert({
+        where: {
+          project_id_user_id: { project_id: task.project_id, user_id: userId },
+        },
+        create: { project_id: task.project_id, user_id: userId, role: "translation" },
+        update: { role: "translation", left_at: null, joined_at: new Date() },
+      });
+    }
+
+    return tx.translationClaim.create({
+      data: {
+        task_id: taskId,
+        unit_id: task.unit_id,
+        user_id: userId,
+        segment_start: data.segment_start,
+        segment_end: data.segment_end,
+        status: "pending",
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
   });
 
   const activatedClaim = await activateNextTranslationClaim(task);
@@ -3075,7 +3200,8 @@ export async function abandonTranslationSegment(
     throw new AppError("Claim not found", "NOT_FOUND", 404);
   }
 
-  if (claim.user_id !== userId) {
+  const canManageTask = await canManageProjectTasks(claim.task.project_id, userId);
+  if (claim.user_id !== userId && !canManageTask) {
     throw new AppError("You can only abandon your own claims", "FORBIDDEN", 403);
   }
 
@@ -3101,7 +3227,7 @@ export async function abandonTranslationSegment(
     await prisma.task.updateMany({
       where: {
         id: claim.task_id,
-        assignee_id: userId,
+        assignee_id: claim.user_id,
       },
       data: { status: "claimable", assignee_id: null, started_at: null, submitted_at: null },
     });
@@ -3126,20 +3252,35 @@ export async function submitTranslation(
 ) {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
+    include: { project: { select: { is_archived: true, deleted_at: true } } },
   });
 
   if (!task) {
     throw new AppError("Task not found", "NOT_FOUND", 404);
   }
 
+  if (task.project.deleted_at || task.project.is_archived) {
+    throw new AppError("Cannot submit translation in archived/deleted project", "BAD_REQUEST", 400);
+  }
+
   if (task.role !== TaskRole.translation) {
     throw new AppError("Only translation tasks accept translation submissions", "BAD_REQUEST", 400);
   }
 
+  if (!["assigned", "in_progress", "review_rejected"].includes(task.status)) {
+    throw new AppError(
+      `Translation cannot be submitted. Current status: ${task.status}`,
+      "BAD_REQUEST",
+      400
+    );
+  }
+
+  const canManageTask = await canManageProjectTasks(task.project_id, userId);
+
   const activeClaim = await prisma.translationClaim.findFirst({
     where: {
       task: translationClaimScope(task),
-      user_id: userId,
+      ...(canManageTask ? {} : { user_id: userId }),
       status: "active",
     },
   });
@@ -3156,7 +3297,7 @@ export async function submitTranslation(
   const submission = await prisma.translationSubmission.create({
     data: {
       task_id: taskId,
-      user_id: userId,
+      user_id: activeClaim.user_id,
       claim_id: activeClaim.id,
       content: data.content,
       line_count: data.line_count,
@@ -3178,7 +3319,7 @@ export async function submitTranslation(
     where: { id: taskId },
     data: {
       status: "submitted",
-      assignee_id: userId,
+      assignee_id: activeClaim.user_id,
       submitted_at: submittedAt,
     },
   });
@@ -3198,7 +3339,8 @@ export async function submitTranslation(
 
 export async function createDependency(
   taskId: string,
-  data: CreateDependencyInput
+  data: CreateDependencyInput,
+  actorId?: string
 ) {
   if (taskId === data.depends_on_id) {
     throw new AppError("A task cannot depend on itself", "BAD_REQUEST", 400);
@@ -3222,6 +3364,8 @@ export async function createDependency(
   if (task.project_id !== dependsOn.project_id) {
     throw new AppError("Task dependencies must belong to the same project", "BAD_REQUEST", 400);
   }
+
+  await assertCanManageProjectTasks(task.project_id, actorId);
 
   if (
     dependsOn.status !== "completed" &&
@@ -3249,8 +3393,19 @@ export async function createDependency(
 
 export async function removeDependency(
   taskId: string,
-  dependencyId: string
+  dependencyId: string,
+  actorId?: string
 ) {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { project_id: true },
+  });
+  if (!task) {
+    throw new AppError("Task not found", "NOT_FOUND", 404);
+  }
+
+  await assertCanManageProjectTasks(task.project_id, actorId);
+
   await prisma.taskDependency.delete({
     where: {
       task_id_depends_on_id: {
@@ -3340,7 +3495,7 @@ export async function getPersonalWorkload(userId: string) {
   };
 }
 
-export async function getProjectWorkload(projectId: string) {
+export async function getProjectWorkload(projectId: string, actorId?: string) {
   const project = await prisma.project.findUnique({
     where: { id: projectId, deleted_at: null },
   });
@@ -3348,6 +3503,8 @@ export async function getProjectWorkload(projectId: string) {
   if (!project) {
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
+
+  await assertCanManageProjectTasks(projectId, actorId);
 
   const members = await prisma.projectMember.findMany({
     where: { project_id: projectId },

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { authenticate, requireRole } from "../../middleware/auth";
+import { authenticate } from "../../middleware/auth";
 import { validateBody, validateQuery, validateParams } from "../../middleware/validate";
 import * as controller from "./file.controller";
 import {
@@ -16,11 +16,16 @@ import {
   signMultipartPartSchema,
 } from "./file.schema";
 import { z } from "zod";
+import { env } from "../../config/env";
 
 const router = Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
+  limits: {
+    fileSize: Math.min(env.UPLOAD_MAX_SIZE, 100 * 1024 * 1024),
+    files: 1,
+  },
 });
 
 const fileIdParamSchema = z.object({ fileId: z.string().uuid("Invalid file ID") });
@@ -41,7 +46,6 @@ router.get(
 router.post(
   "/upload-policy",
   authenticate,
-  requireRole("super_admin", "group_admin", "supervisor"),
   validateBody(updateUploadPolicySchema),
   controller.updateUploadPolicy
 );
@@ -119,7 +123,6 @@ router.delete(
 router.post(
   "/batch/assign-tasks",
   authenticate,
-  requireRole("super_admin", "group_admin", "supervisor"),
   validateBody(batchAssignTasksSchema),
   controller.batchAssignTasks
 );
@@ -127,7 +130,6 @@ router.post(
 router.post(
   "/batch/archive-units",
   authenticate,
-  requireRole("super_admin", "group_admin", "supervisor"),
   validateBody(batchArchiveUnitsSchema),
   controller.batchArchiveUnits
 );

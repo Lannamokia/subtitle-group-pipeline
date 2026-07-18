@@ -949,12 +949,12 @@ export async function createLink(
 
 // GET /projects/:projectId/links - List links
 export async function getLinks(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await fileService.getLinkHistory(getProjectId(req));
+    const result = await fileService.getLinkHistory(getProjectId(req), req.user!.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -982,7 +982,7 @@ export async function deleteLink(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await fileService.deleteLinkAsset(getParam(req, "linkId"));
+    const result = await fileService.deleteLinkAsset(getParam(req, "linkId"), req.user!.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -1005,14 +1005,15 @@ export async function getUploadPolicy(
 
 // POST /upload-policy
 export async function updateUploadPolicy(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const result = await fileService.updateUploadPolicy(
       req.body,
-      req.query.project_id as string | undefined
+      req.query.project_id as string | undefined,
+      req.user!.id
     );
     successResponse(res, result);
   } catch (error) {
@@ -1033,11 +1034,14 @@ export async function batchAssignTasks(
       assignee_id?: string;
       assigneeId?: string;
       role?: TaskRole;
+      override_reason?: string;
     };
     const result = await fileService.batchAssignTasks(
       body.unit_id || body.unitId || "",
       body.assignee_id || body.assigneeId || "",
-      body.role
+      body.role,
+      req.user!.id,
+      body.override_reason
     );
     successResponse(res, result);
   } catch (error) {
@@ -1053,7 +1057,10 @@ export async function batchArchiveUnits(
 ): Promise<void> {
   try {
     const body = req.body as { project_id?: string; projectId?: string };
-    const result = await fileService.batchArchiveUnits(body.project_id || body.projectId || "");
+    const result = await fileService.batchArchiveUnits(
+      body.project_id || body.projectId || "",
+      req.user!.id
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);

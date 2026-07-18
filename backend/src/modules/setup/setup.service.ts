@@ -123,6 +123,7 @@ export async function upgradeConfiguredDatabaseSchema() {
 
   const provider = prismaProvider(inferred);
   await syncSchema(databaseUrl, provider);
+  await normalizeSuperAdministrator(databaseUrl, provider);
   await upgradeLegacyUploadPolicyLimits(databaseUrl, provider);
   await upgradeLegacyTranslationTaskOrder(databaseUrl, provider);
 
@@ -130,6 +131,43 @@ export async function upgradeConfiguredDatabaseSchema() {
     skipped: false as const,
     provider,
   };
+}
+
+async function normalizeSuperAdministrator(
+  databaseUrl: string,
+  provider: "sqlite" | "mysql" | "postgresql"
+) {
+  const client = new PrismaClient({
+    datasources: { db: { url: databaseUrlForPrismaCli(databaseUrl, provider) } },
+    log: process.env.NODE_ENV === "development" ? ["error"] : ["error"],
+  });
+
+  try {
+    await client.$connect();
+    const superAdmins = await client.user.findMany({
+      where: { role: "super_admin" },
+      orderBy: [{ created_at: "asc" }, { id: "asc" }],
+      select: { id: true },
+    });
+
+    const canonical = superAdmins[0];
+    await client.$transaction(async (tx) => {
+      if (superAdmins.length > 1) {
+        await tx.user.updateMany({
+          where: { id: { in: superAdmins.slice(1).map((user) => user.id) } },
+          data: { role: "group_admin", super_admin_marker: null },
+        });
+      }
+      if (canonical) {
+        await tx.user.update({
+          where: { id: canonical.id },
+          data: { super_admin_marker: "singleton" },
+        });
+      }
+    });
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 function isLegacyUploadLimit(value: unknown): boolean {
@@ -571,6 +609,7 @@ async function createInitialSetupRecords(
         nickname: input.admin.nickname || input.admin.username,
         email: input.admin.email,
         role: "super_admin",
+        super_admin_marker: "singleton",
         status: "active",
       },
       select: {

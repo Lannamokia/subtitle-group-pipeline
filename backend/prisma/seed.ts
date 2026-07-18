@@ -21,6 +21,7 @@ async function main(): Promise<void> {
       nickname: "Administrator",
       email: "admin@example.com",
       role: UserRole.super_admin,
+      super_admin_marker: "singleton",
       status: "active",
     },
   });

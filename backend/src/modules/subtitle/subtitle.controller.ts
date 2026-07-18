@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
+import { UserRole } from "@prisma/client";
 import * as subtitleService from "./subtitle.service";
 import type {
   CreateTranslationClaimInput,
@@ -51,14 +52,18 @@ export async function releaseTranslationClaim(
 }
 
 export async function getTranslationClaims(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const unitId = getParam(req, "unitId");
 
-    const result = await subtitleService.getTranslationClaims(unitId);
+    const result = await subtitleService.getTranslationClaims(
+      unitId,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -66,14 +71,18 @@ export async function getTranslationClaims(
 }
 
 export async function getTranslationClaimById(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const claimId = getParam(req, "claimId");
 
-    const result = await subtitleService.getTranslationClaimById(claimId);
+    const result = await subtitleService.getTranslationClaimById(
+      claimId,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -100,14 +109,18 @@ export async function submitTranslation(
 }
 
 export async function getSubmissionsByTask(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const taskId = getParam(req, "taskId");
 
-    const result = await subtitleService.getSubmissionsByTask(taskId);
+    const result = await subtitleService.getSubmissionsByTask(
+      taskId,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -134,14 +147,18 @@ export async function createMergeJob(
 }
 
 export async function getMergeJob(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const jobId = getParam(req, "jobId");
 
-    const result = await subtitleService.getMergeJobStatus(jobId);
+    const result = await subtitleService.getMergeJobStatus(
+      jobId,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -149,14 +166,18 @@ export async function getMergeJob(
 }
 
 export async function getMergeConflicts(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const jobId = getParam(req, "jobId");
 
-    const result = await subtitleService.getMergeConflicts(jobId);
+    const result = await subtitleService.getMergeConflicts(
+      jobId,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -165,12 +186,16 @@ export async function getMergeConflicts(
 
 // Legacy merge job endpoints
 export async function getMergeJobs(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getMergeJobs(req.query as unknown as Parameters<typeof subtitleService.getMergeJobs>[0]);
+    const result = await subtitleService.getMergeJobs(
+      req.query as unknown as Parameters<typeof subtitleService.getMergeJobs>[0],
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result.jobs, 200, result.meta);
   } catch (error) {
     next(error);
@@ -178,7 +203,7 @@ export async function getMergeJobs(
 }
 
 export async function updateMergeJobStatus(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
@@ -187,7 +212,9 @@ export async function updateMergeJobStatus(
       getParam(req, "id"),
       req.body.status,
       req.body.output_file_id,
-      req.body.log
+      req.body.log,
+      req.user!.id,
+      req.user!.role as UserRole
     );
     successResponse(res, result);
   } catch (error) {
@@ -198,12 +225,16 @@ export async function updateMergeJobStatus(
 // ==================== CONFLICTS ====================
 
 export async function getConflicts(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getConflicts(req.query as unknown as Parameters<typeof subtitleService.getConflicts>[0]);
+    const result = await subtitleService.getConflicts(
+      req.query as unknown as Parameters<typeof subtitleService.getConflicts>[0],
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result.conflicts, 200, result.meta);
   } catch (error) {
     next(error);
@@ -211,12 +242,16 @@ export async function getConflicts(
 }
 
 export async function getConflict(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getConflictById(getParam(req, "id"));
+    const result = await subtitleService.getConflictById(
+      getParam(req, "id"),
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -224,12 +259,16 @@ export async function getConflict(
 }
 
 export async function getConflictDetail(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getConflictDetail(getParam(req, "conflictId"));
+    const result = await subtitleService.getConflictDetail(
+      getParam(req, "conflictId"),
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -257,7 +296,7 @@ export async function resolveConflict(
 // ==================== VERSION COMPARISON ====================
 
 export async function compareVersions(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
@@ -265,7 +304,12 @@ export async function compareVersions(
     const fileId = getParam(req, "fileId");
     const otherFileId = getParam(req, "otherFileId");
 
-    const result = await subtitleService.compareVersions(fileId, otherFileId);
+    const result = await subtitleService.compareVersions(
+      fileId,
+      otherFileId,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -273,14 +317,18 @@ export async function compareVersions(
 }
 
 export async function getTimelineVisualization(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const fileId = getParam(req, "fileId");
 
-    const result = await subtitleService.getTimelineVisualization(fileId);
+    const result = await subtitleService.getTimelineVisualization(
+      fileId,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -295,7 +343,11 @@ export async function createReview(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.createReview(req.user!.id, req.body as ReviewInput);
+    const result = await subtitleService.createReview(
+      req.user!.id,
+      req.user!.role as UserRole,
+      req.body as ReviewInput
+    );
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -303,12 +355,16 @@ export async function createReview(
 }
 
 export async function getReviews(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getReviews(getParam(req, "projectId"));
+    const result = await subtitleService.getReviews(
+      getParam(req, "projectId"),
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -316,12 +372,16 @@ export async function getReviews(
 }
 
 export async function getReview(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.getReviewById(getParam(req, "id"));
+    const result = await subtitleService.getReviewById(
+      getParam(req, "id"),
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -329,12 +389,17 @@ export async function getReview(
 }
 
 export async function updateReview(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await subtitleService.updateReview(getParam(req, "id"), req.body);
+    const result = await subtitleService.updateReview(
+      getParam(req, "id"),
+      req.body,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);

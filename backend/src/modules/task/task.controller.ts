@@ -24,13 +24,15 @@ export async function createTask(
 }
 
 export async function getTasks(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const result = await taskService.getTasks(
-      req.query as unknown as Parameters<typeof taskService.getTasks>[0]
+      req.query as unknown as Parameters<typeof taskService.getTasks>[0],
+      req.user!.id,
+      req.user!.role as Parameters<typeof taskService.getTasks>[2]
     );
     successResponse(res, result.tasks, 200, result.meta);
   } catch (error) {
@@ -39,12 +41,16 @@ export async function getTasks(
 }
 
 export async function getTask(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.getTaskById(getParam(req, "id"));
+    const result = await taskService.getTaskById(
+      getParam(req, "id"),
+      req.user!.id,
+      req.user!.role as Parameters<typeof taskService.getTaskById>[2]
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -130,7 +136,12 @@ export async function startTask(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.startTask(getParam(req, "id"), req.user!.id, req.user?.id);
+    const result = await taskService.startTask(
+      getParam(req, "id"),
+      req.user!.id,
+      req.user!.role as Parameters<typeof taskService.startTask>[2],
+      req.user?.id
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -280,12 +291,12 @@ export async function submitTranslation(
 // ==================== DEPENDENCIES ====================
 
 export async function createDependency(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.createDependency(getParam(req, "id"), req.body);
+    const result = await taskService.createDependency(getParam(req, "id"), req.body, req.user!.id);
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -293,14 +304,15 @@ export async function createDependency(
 }
 
 export async function removeDependency(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const result = await taskService.removeDependency(
       getParam(req, "id"),
-      getParam(req, "dependencyId")
+      getParam(req, "dependencyId"),
+      req.user!.id
     );
     successResponse(res, result);
   } catch (error) {
@@ -324,12 +336,12 @@ export async function getPersonalWorkload(
 }
 
 export async function getProjectWorkload(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await taskService.getProjectWorkload(getParam(req, "projectId"));
+    const result = await taskService.getProjectWorkload(getParam(req, "projectId"), req.user!.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -352,12 +364,16 @@ export async function getGlobalWorkload(
 // ==================== TASK COMMENTS ====================
 
 export async function getTaskComments(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.getTaskComments(getParam(req, "id"));
+    const result = await wikiService.getTaskComments(
+      getParam(req, "id"),
+      req.user!.id,
+      req.user!.role as Parameters<typeof wikiService.getTaskComments>[2]
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -370,10 +386,14 @@ export async function createTaskComment(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.createComment(req.user!.id, {
-      ...req.body,
-      task_id: getParam(req, "id"),
-    } as CreateCommentInput);
+    const result = await wikiService.createComment(
+      req.user!.id,
+      req.user!.role as Parameters<typeof wikiService.createComment>[1],
+      {
+        ...req.body,
+        task_id: getParam(req, "id"),
+      } as CreateCommentInput
+    );
     successResponse(res, result, 201);
   } catch (error) {
     next(error);

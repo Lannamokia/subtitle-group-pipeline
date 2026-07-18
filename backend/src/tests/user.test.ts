@@ -338,6 +338,37 @@ describe("User Profile & Storage Tests", () => {
   });
 
   describe("Storage Backend CRUD with Quota Enforcement", () => {
+    it("should require authentication and redact stored S3 credentials", async () => {
+      const { token } = await createTestUser();
+      const backend = await createTestStorageBackend({
+        backend_type: "s3",
+        is_default: true,
+        config: {
+          endpoint: "https://s3.example.com",
+          bucket: "subtitle-files",
+          region: "us-east-1",
+          accessKeyId: "active-access-key",
+          secretAccessKey: "active-secret-key",
+        },
+      });
+
+      expectError(await get(app, "/api/v1/storage/backends"), 401, "UNAUTHORIZED");
+
+      for (const path of [
+        "/api/v1/storage/backends",
+        `/api/v1/storage/backends/${backend.id}`,
+        "/api/v1/storage/backends/default",
+      ]) {
+        const res = await get(app, path, token);
+        expectSuccess(res, 200);
+        const item = Array.isArray(res.body.data) ? res.body.data[0] : res.body.data;
+        const config = JSON.parse(item.config);
+        expect(config.accessKeyId).toBeUndefined();
+        expect(config.secretAccessKey).toBeUndefined();
+        expect(item.credentials_configured).toBe(true);
+      }
+    });
+
     it("should create storage backend", async () => {
       const { user, token } = await createTestUser({ role: "super_admin" });
 
@@ -383,10 +414,11 @@ describe("User Profile & Storage Tests", () => {
       expectSuccess(res, 201);
 
       const config = JSON.parse(res.body.data.config);
-      expect(config.accessKeyId).toBe("access-key");
-      expect(config.secretAccessKey).toBe("secret-key");
+      expect(config.accessKeyId).toBeUndefined();
+      expect(config.secretAccessKey).toBeUndefined();
       expect(config.accessKey).toBeUndefined();
       expect(config.secretKey).toBeUndefined();
+      expect(res.body.data.credentials_configured).toBe(true);
     });
 
     it("should reject incomplete S3 storage config before upload", async () => {
@@ -553,8 +585,9 @@ describe("User Profile & Storage Tests", () => {
       const config = JSON.parse(res.body.data.config);
       expect(config.bucket).toBe("new-bucket");
       expect(config.region).toBe("us-west-2");
-      expect(config.accessKeyId).toBe("new-access-key");
-      expect(config.secretAccessKey).toBe("old-secret-key");
+      expect(config.accessKeyId).toBeUndefined();
+      expect(config.secretAccessKey).toBeUndefined();
+      expect(res.body.data.credentials_configured).toBe(true);
     });
 
     it("should reject invalid S3 config on update before saving", async () => {

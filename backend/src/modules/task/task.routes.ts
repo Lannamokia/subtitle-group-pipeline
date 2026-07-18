@@ -37,8 +37,8 @@ router.get("/workload/project/:projectId", authenticate, validateParams(projectI
 router.get("/workload/global", authenticate, requireRole("super_admin", "group_admin"), controller.getGlobalWorkload);
 
 // Basic CRUD
-router.get("/", validateQuery(taskQuerySchema), controller.getTasks);
-router.get("/:id", validateParams(idParamSchema), controller.getTask);
+router.get("/", authenticate, validateQuery(taskQuerySchema), controller.getTasks);
+router.get("/:id", authenticate, validateParams(idParamSchema), controller.getTask);
 router.post("/", authenticate, validateBody(createTaskSchema), controller.createTask);
 router.patch("/:id", authenticate, validateParams(idParamSchema), validateBody(updateTaskSchema), controller.updateTask);
 router.put("/:id", authenticate, validateParams(idParamSchema), validateBody(updateTaskSchema), controller.updateTask);

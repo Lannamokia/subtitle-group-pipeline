@@ -1135,6 +1135,82 @@ describe("Auth & Registration Tests", () => {
       expect(unchanged!.role).toBe("super_admin");
     });
 
+    it("should enforce a single super administrator across management entry points", async () => {
+      const superAdmin = await createTestUser({ role: "super_admin" });
+      const groupAdmin = await createTestUser({ role: "group_admin" });
+      const member = await createTestUser({ role: "member" });
+
+      const createSecond = await post(
+        app,
+        "/api/v1/members",
+        {
+          username: "second_super_admin",
+          password: "Password123!",
+          role: "super_admin",
+          status: "active",
+        },
+        superAdmin.token
+      );
+      expectError(createSecond, 409, "DUPLICATE_ERROR");
+
+      const promoteSecond = await put(
+        app,
+        `/api/v1/members/${member.user.id}/role`,
+        { role: "super_admin" },
+        superAdmin.token
+      );
+      expectError(promoteSecond, 409, "DUPLICATE_ERROR");
+
+      const unauthorizedPromotion = await put(
+        app,
+        `/api/v1/members/${member.user.id}/role`,
+        { role: "super_admin" },
+        groupAdmin.token
+      );
+      expectError(unauthorizedPromotion, 403, "FORBIDDEN");
+
+      await expect(
+        prisma.user.create({
+          data: {
+            username: "direct_second_super_admin",
+            password_hash: "not-used",
+            role: "super_admin",
+            super_admin_marker: "singleton",
+          },
+        })
+      ).rejects.toMatchObject({ code: "P2002" });
+      await expect(prisma.user.count({ where: { role: "super_admin" } })).resolves.toBe(1);
+    });
+
+    it("should prevent group administrators from taking over the super administrator account", async () => {
+      const superAdmin = await createTestUser({ role: "super_admin" });
+      const groupAdmin = await createTestUser({ role: "group_admin" });
+
+      const statusRes = await put(
+        app,
+        `/api/v1/members/${superAdmin.user.id}/status`,
+        { status: "disabled" },
+        groupAdmin.token
+      );
+      expectError(statusRes, 403, "FORBIDDEN");
+
+      const passwordRes = await put(
+        app,
+        `/api/v1/members/${superAdmin.user.id}/password`,
+        { password: "HijackedPassword123!" },
+        groupAdmin.token
+      );
+      expectError(passwordRes, 403, "FORBIDDEN");
+
+      const profileRes = await put(
+        app,
+        `/api/v1/members/${superAdmin.user.id}/profile`,
+        { username: "hijacked_super_admin" },
+        groupAdmin.token
+      );
+      expectError(profileRes, 403, "FORBIDDEN");
+    });
+
     it("should prevent supervisors from creating privileged accounts", async () => {
       const supervisor = await createTestUser({ role: "supervisor" });
 

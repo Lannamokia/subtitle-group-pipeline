@@ -71,6 +71,7 @@ export async function createTestUser(data: TestUserData = {}) {
       email: data.email || `test_${suffix}@example.com`,
       qq_number: data.qq_number || null,
       role: data.role || "member",
+      super_admin_marker: data.role === "super_admin" ? "singleton" : null,
       status: data.status || "active",
     },
   });
@@ -222,6 +223,7 @@ export interface TestTaskData {
   due_date?: Date;
   completed_at?: Date;
   frozen_at?: Date;
+  status_before_archive?: TestTaskData["status"];
 }
 
 export async function createTestTask(data: TestTaskData) {
@@ -240,6 +242,7 @@ export async function createTestTask(data: TestTaskData) {
       due_date: data.due_date || null,
       completed_at: data.completed_at || null,
       frozen_at: data.frozen_at || null,
+      status_before_archive: data.status_before_archive || null,
     },
   });
   return task;

@@ -13,8 +13,8 @@ const router = Router();
 
 const idParamSchema = z.object({ id: z.string().uuid("Invalid announcement ID") });
 
-router.get("/", validateQuery(announcementQuerySchema), controller.getAnnouncements);
-router.get("/:id", validateParams(idParamSchema), controller.getAnnouncement);
+router.get("/", authenticate, validateQuery(announcementQuerySchema), controller.getAnnouncements);
+router.get("/:id", authenticate, validateParams(idParamSchema), controller.getAnnouncement);
 router.post(
   "/",
   authenticate,

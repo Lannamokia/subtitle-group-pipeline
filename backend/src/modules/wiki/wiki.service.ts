@@ -1,9 +1,10 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
-import { TimelineEventType } from "@prisma/client";
+import { TimelineEventType, UserRole } from "@prisma/client";
 import * as timelineService from "../timeline/timeline.service";
 import * as auditService from "../audit/audit.service";
 import * as notificationService from "../notification/notification.service";
+import { assertProjectViewPermission } from "../project/project-access";
 import type {
   CreateWikiInput,
   UpdateWikiInput,
@@ -39,6 +40,65 @@ async function isWikiApprovalRequired(projectId: string | null | undefined): Pro
   return settings?.wiki_approval_required ?? false;
 }
 
+async function assertWikiWritePermission(
+  projectId: string | null | undefined,
+  actorId: string,
+  ownerId?: string
+) {
+  const actor = await prisma.user.findUnique({
+    where: { id: actorId },
+    select: { role: true },
+  });
+  if (!actor) throw new AppError("Actor not found", "NOT_FOUND", 404);
+
+  if (projectId) {
+    await assertProjectViewPermission(projectId, actorId, actor.role, {
+      allowOpenClaimCandidate: false,
+    });
+    return;
+  }
+
+  if (ownerId !== undefined && ownerId !== actorId && !["super_admin", "group_admin"].includes(actor.role)) {
+    throw new AppError("Not authorized to update this wiki", "FORBIDDEN", 403);
+  }
+}
+
+async function assertWikiApprovalPermission(
+  projectId: string | null | undefined,
+  actorId: string
+): Promise<void> {
+  const actor = await prisma.user.findUnique({
+    where: { id: actorId },
+    select: { role: true },
+  });
+  if (!actor) throw new AppError("Actor not found", "NOT_FOUND", 404);
+  if (["super_admin", "group_admin", "supervisor"].includes(actor.role)) return;
+
+  if (!projectId) {
+    throw new AppError("Only supervisors can review Wiki changes", "FORBIDDEN", 403);
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      owner_id: true,
+      members: {
+        where: {
+          user_id: actorId,
+          left_at: null,
+          OR: [{ role: "supervisor" }, { is_lead: true }],
+        },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+  if (!project) throw new AppError("Project not found", "NOT_FOUND", 404);
+  if (project.owner_id !== actorId && project.members.length === 0) {
+    throw new AppError("Only project supervisors can review Wiki changes", "FORBIDDEN", 403);
+  }
+}
+
 async function withWikiPresentation<T extends { project_id: string | null; content: string; pending_content: string | null; status: string }>(
   wiki: T
 ): Promise<WikiWithPresentation<T>> {
@@ -57,6 +117,10 @@ export async function createWiki(
   creatorId: string,
   data: CreateWikiInput
 ) {
+  if (data.project_id) {
+    await assertWikiWritePermission(data.project_id, creatorId);
+  }
+
   const existing = await prisma.wikiDocument.findFirst({
     where: {
       project_id: data.project_id ?? null,
@@ -113,12 +177,18 @@ export async function createWiki(
   return withWikiPresentation(wiki);
 }
 
-export async function getWikis(query: WikiQueryInput) {
+export async function getWikis(query: WikiQueryInput, userId: string, userRole: UserRole) {
   const page = query.page || 1;
   const pageSize = query.pageSize || 20;
   const skip = (page - 1) * pageSize;
 
   const where: Record<string, unknown> = {};
+
+  if (query.project_id) {
+    await assertProjectViewPermission(query.project_id, userId, userRole);
+  } else if (!["super_admin", "group_admin", "supervisor"].includes(userRole)) {
+    where.project_id = null;
+  }
 
   if (query.project_id) {
     where.project_id = query.project_id;
@@ -169,7 +239,7 @@ export async function getWikis(query: WikiQueryInput) {
   };
 }
 
-export async function getWikiById(wikiId: string) {
+export async function getWikiById(wikiId: string, userId: string, userRole: UserRole) {
   const wiki = await prisma.wikiDocument.findUnique({
     where: { id: wikiId },
     include: {
@@ -200,13 +270,22 @@ export async function getWikiById(wikiId: string) {
     throw new AppError("Wiki document not found", "NOT_FOUND", 404);
   }
 
+  if (wiki.project_id) {
+    await assertProjectViewPermission(wiki.project_id, userId, userRole);
+  }
+
   return withWikiPresentation(wiki);
 }
 
 export async function getWikiBySlug(
   projectId: string | null | undefined,
-  slug: string
+  slug: string,
+  userId: string,
+  userRole: UserRole
 ) {
+  if (projectId) {
+    await assertProjectViewPermission(projectId, userId, userRole);
+  }
   const wiki = await prisma.wikiDocument.findFirst({
     where: {
       project_id: projectId ?? null,
@@ -243,7 +322,14 @@ export async function getWikiBySlug(
   return withWikiPresentation(wiki);
 }
 
-export async function getWikiByProjectId(projectId: string) {
+export async function getWikiByProjectId(projectId: string, userId: string, userRole: UserRole) {
+  const projectExists = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!projectExists) return null;
+
+  await assertProjectViewPermission(projectId, userId, userRole);
   const wiki = await prisma.wikiDocument.findFirst({
     where: {
       project_id: projectId,
@@ -287,6 +373,9 @@ export async function updateWiki(
   if (!existing) {
     throw new AppError("Wiki document not found", "NOT_FOUND", 404);
   }
+
+  if (!actorId) throw new AppError("Authentication required", "UNAUTHORIZED", 401);
+  await assertWikiWritePermission(existing.project_id, actorId, existing.created_by);
 
   const updateData: Record<string, unknown> = {};
 
@@ -353,6 +442,8 @@ export async function approveWikiChange(
   if (!wiki) {
     throw new AppError("Wiki document not found", "NOT_FOUND", 404);
   }
+
+  await assertWikiApprovalPermission(wiki.project_id, approverId);
 
   if (data.approved) {
     // Approve: move pending_content to content
@@ -429,6 +520,8 @@ export async function rejectWikiChange(
   if (!wiki) {
     throw new AppError("Wiki document not found", "NOT_FOUND", 404);
   }
+
+  await assertWikiApprovalPermission(wiki.project_id, approverId);
 
   const updated = await prisma.wikiDocument.update({
     where: { id: wikiId },
@@ -515,6 +608,7 @@ export async function deleteWiki(wikiId: string, actorId?: string) {
 // Comments
 export async function createComment(
   userId: string,
+  userRole: UserRole,
   data: CreateCommentInput
 ) {
   if (!data.file_version_id && !data.wiki_id && !data.task_id) {
@@ -523,6 +617,68 @@ export async function createComment(
       "BAD_REQUEST",
       400
     );
+  }
+
+  const [fileVersion, wiki, task, parent] = await Promise.all([
+    data.file_version_id
+      ? prisma.fileVersion.findUnique({
+          where: { id: data.file_version_id },
+          select: { file: { select: { project_id: true } } },
+        })
+      : null,
+    data.wiki_id
+      ? prisma.wikiDocument.findUnique({
+          where: { id: data.wiki_id },
+          select: { project_id: true },
+        })
+      : null,
+    data.task_id
+      ? prisma.task.findUnique({
+          where: { id: data.task_id },
+          select: { project_id: true },
+        })
+      : null,
+    data.parent_id
+      ? prisma.comment.findUnique({
+          where: { id: data.parent_id },
+          select: {
+            file_version: { select: { file: { select: { project_id: true } } } },
+            wiki: { select: { project_id: true } },
+            task: { select: { project_id: true } },
+          },
+        })
+      : null,
+  ]);
+
+  if (data.file_version_id && !fileVersion) {
+    throw new AppError("File version not found", "NOT_FOUND", 404);
+  }
+  if (data.wiki_id && !wiki) {
+    throw new AppError("Wiki document not found", "NOT_FOUND", 404);
+  }
+  if (data.task_id && !task) {
+    throw new AppError("Task not found", "NOT_FOUND", 404);
+  }
+  if (data.parent_id && !parent) {
+    throw new AppError("Parent comment not found", "NOT_FOUND", 404);
+  }
+
+  const projectIds = new Set<string>();
+  if (fileVersion?.file.project_id) projectIds.add(fileVersion.file.project_id);
+  if (wiki?.project_id) projectIds.add(wiki.project_id);
+  if (task?.project_id) projectIds.add(task.project_id);
+  if (parent?.file_version?.file.project_id) projectIds.add(parent.file_version.file.project_id);
+  if (parent?.wiki?.project_id) projectIds.add(parent.wiki.project_id);
+  if (parent?.task?.project_id) projectIds.add(parent.task.project_id);
+
+  if (projectIds.size > 1) {
+    throw new AppError("Comment references must belong to the same project", "BAD_REQUEST", 400);
+  }
+  const projectId = [...projectIds][0];
+  if (projectId) {
+    await assertProjectViewPermission(projectId, userId, userRole, {
+      allowOpenClaimCandidate: false,
+    });
   }
 
   const comment = await prisma.comment.create({
@@ -617,7 +773,19 @@ async function processMentions(
   }
 }
 
-export async function getComments(wikiId: string) {
+export async function getComments(wikiId: string, userId: string, userRole: UserRole) {
+  const wiki = await prisma.wikiDocument.findUnique({
+    where: { id: wikiId },
+    select: { project_id: true },
+  });
+  if (!wiki) {
+    throw new AppError("Wiki document not found", "NOT_FOUND", 404);
+  }
+
+  if (wiki.project_id) {
+    await assertProjectViewPermission(wiki.project_id, userId, userRole);
+  }
+
   const comments = await prisma.comment.findMany({
     where: {
       wiki_id: wikiId,
@@ -665,7 +833,18 @@ export async function getComments(wikiId: string) {
   return comments;
 }
 
-export async function getTaskComments(taskId: string) {
+export async function getTaskComments(taskId: string, userId: string, userRole: UserRole) {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { project_id: true },
+  });
+  if (!task) {
+    throw new AppError("Task not found", "NOT_FOUND", 404);
+  }
+  await assertProjectViewPermission(task.project_id, userId, userRole, {
+    allowOpenClaimCandidate: false,
+  });
+
   const comments = await prisma.comment.findMany({
     where: {
       task_id: taskId,

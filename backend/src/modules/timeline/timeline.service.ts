@@ -1,5 +1,6 @@
 import { prisma } from "../../config/database";
-import { TimelineEventType } from "@prisma/client";
+import { TimelineEventType, UserRole } from "@prisma/client";
+import { assertProjectViewPermission } from "../project/project-access";
 
 export interface CreateTimelineEventInput {
   project_id: string;
@@ -37,12 +38,15 @@ export async function createTimelineEvent(data: CreateTimelineEventInput) {
 
 export async function getProjectTimeline(
   projectId: string,
+  userId: string,
+  userRole: UserRole,
   options: {
     page?: number;
     pageSize?: number;
     event_type?: TimelineEventType;
   } = {}
 ) {
+  await assertProjectViewPermission(projectId, userId, userRole);
   const page = options.page || 1;
   const pageSize = options.pageSize || 50;
   const skip = (page - 1) * pageSize;

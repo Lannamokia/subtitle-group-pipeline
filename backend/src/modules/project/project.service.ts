@@ -6,7 +6,7 @@ import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
 import { permanentlyDeleteProjectById } from "../../jobs/recyclebin.cleanup";
 import { normalizeUploadPolicyJson } from "../../utils/uploadPolicy";
-import { assertProjectViewPermission } from "../file/file.service";
+import { assertProjectViewPermission } from "./project-access";
 import type {
   CreateProjectInput,
   CreateProjectFromTemplateInput,
@@ -29,6 +29,17 @@ const UNIT_DELETE_ACTIVE_TASK_STATUSES: TaskStatus[] = [
   "completed",
   "overdue",
   "frozen",
+];
+
+const PROJECT_ARCHIVE_TASK_STATUSES: TaskStatus[] = [
+  "pending_publish",
+  "claimable",
+  "assigned",
+  "in_progress",
+  "submitted",
+  "review_approved",
+  "review_rejected",
+  "overdue",
 ];
 
 function parseJsonObject(value: string): Record<string, unknown> {
@@ -217,6 +228,12 @@ async function canManageProjectSettings(projectId: string, actorId?: string): Pr
       project?.owner_id === actorId ||
       membership?.role === "supervisor"
   );
+}
+
+async function assertCanManageProjectSettings(projectId: string, actorId?: string): Promise<void> {
+  if (!(await canManageProjectSettings(projectId, actorId))) {
+    throw new AppError("Only project supervisors or administrators can manage this project", "FORBIDDEN", 403);
+  }
 }
 
 function booleanFromPolicy(policy: Record<string, unknown>, ...keys: string[]): boolean | undefined {
@@ -697,9 +714,7 @@ export async function updateProject(
     throw new AppError("Cannot update a deleted project", "BAD_REQUEST", 400);
   }
 
-  if (!(await canManageProjectSettings(projectId, actorId))) {
-    throw new AppError("Only project supervisors or administrators can update project settings", "FORBIDDEN", 403);
-  }
+  await assertCanManageProjectSettings(projectId, actorId);
 
   const updateData: Record<string, unknown> = {
     name: data.name,
@@ -754,6 +769,8 @@ export async function archiveProject(
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
 
+  await assertCanManageProjectSettings(projectId, actorId);
+
   if (existing.deleted_at) {
     throw new AppError("Cannot archive a deleted project", "BAD_REQUEST", 400);
   }
@@ -762,26 +779,25 @@ export async function archiveProject(
     throw new AppError("Project is already archived", "BAD_REQUEST", 400);
   }
 
+  const archivedAt = new Date();
   const project = await prisma.project.update({
     where: { id: projectId },
     data: {
       is_archived: true,
-      archived_at: new Date(),
+      archived_at: archivedAt,
       status: "archived",
     },
   });
 
-  // Freeze all active tasks
-  await prisma.task.updateMany({
-    where: {
-      project_id: projectId,
-      status: { in: ["in_progress", "submitted", "claimable", "assigned"] },
-    },
-    data: {
-      status: "frozen",
-      frozen_at: new Date(),
-    },
-  });
+  // Preserve each task's state so unarchive does not change assignment semantics.
+  await prisma.$transaction(
+    PROJECT_ARCHIVE_TASK_STATUSES.map((status) =>
+      prisma.task.updateMany({
+        where: { project_id: projectId, status },
+        data: { status: "frozen", frozen_at: archivedAt, status_before_archive: status },
+      })
+    )
+  );
 
   await timelineService.createTimelineEvent({
     project_id: projectId,
@@ -815,6 +831,8 @@ export async function unarchiveProject(
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
 
+  await assertCanManageProjectSettings(projectId, actorId);
+
   if (!existing.is_archived) {
     throw new AppError("Project is not archived", "BAD_REQUEST", 400);
   }
@@ -832,17 +850,15 @@ export async function unarchiveProject(
     },
   });
 
-  // Unfreeze tasks that were frozen during archive
-  await prisma.task.updateMany({
-    where: {
-      project_id: projectId,
-      status: "frozen",
-    },
-    data: {
-      status: "claimable",
-      frozen_at: null,
-    },
-  });
+  // Restore only tasks frozen by project archive; manually frozen tasks stay frozen.
+  await prisma.$transaction(
+    PROJECT_ARCHIVE_TASK_STATUSES.map((status) =>
+      prisma.task.updateMany({
+        where: { project_id: projectId, status: "frozen", status_before_archive: status },
+        data: { status, frozen_at: null, status_before_archive: null },
+      })
+    )
+  );
 
   await timelineService.createTimelineEvent({
     project_id: projectId,
@@ -875,6 +891,8 @@ export async function softDeleteProject(
   if (!existing) {
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
+
+  await assertCanManageProjectSettings(projectId, actorId);
 
   if (!existing.is_archived) {
     throw new AppError(
@@ -939,6 +957,8 @@ export async function restoreProject(
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
 
+  await assertCanManageProjectSettings(projectId, actorId);
+
   if (!existing.deleted_at) {
     throw new AppError("Project is not in recycle bin", "BAD_REQUEST", 400);
   }
@@ -995,6 +1015,13 @@ export async function permanentlyDeleteProject(
 
   if (!existing) {
     throw new AppError("Project not found", "NOT_FOUND", 404);
+  }
+
+  const actor = actorId
+    ? await prisma.user.findUnique({ where: { id: actorId }, select: { role: true } })
+    : null;
+  if (!actor || !["super_admin", "group_admin"].includes(actor.role)) {
+    throw new AppError("Only administrators can permanently delete projects", "FORBIDDEN", 403);
   }
 
   if (!existing.deleted_at) {
@@ -1059,6 +1086,8 @@ export async function addMember(
   if (project.is_archived) {
     throw new AppError("Cannot modify archived project", "BAD_REQUEST", 400);
   }
+
+  await assertCanManageProjectSettings(projectId, actorId);
 
   const existing = await prisma.projectMember.findUnique({
     where: {
@@ -1129,6 +1158,8 @@ export async function removeMember(
     throw new AppError("Cannot modify archived project", "BAD_REQUEST", 400);
   }
 
+  await assertCanManageProjectSettings(projectId, actorId);
+
   const member = await prisma.projectMember.findUnique({
     where: {
       project_id_user_id: {
@@ -1151,15 +1182,27 @@ export async function removeMember(
     throw new AppError("Member not found", "NOT_FOUND", 404);
   }
 
-  // Unassign any tasks assigned to this member
+  await prisma.translationClaim.updateMany({
+    where: {
+      user_id: userId,
+      task: { project_id: projectId },
+      status: { in: ["pending", "active"] },
+    },
+    data: { status: "abandoned" },
+  });
+
+  // Return only unfinished work; preserve completed and submitted attribution.
   await prisma.task.updateMany({
     where: {
       project_id: projectId,
       assignee_id: userId,
+      status: { in: ["assigned", "in_progress", "review_rejected", "overdue"] },
     },
     data: {
       assignee_id: null,
       status: "claimable",
+      started_at: null,
+      submitted_at: null,
     },
   });
 
@@ -1195,8 +1238,11 @@ export async function removeMember(
 export async function updateMember(
   projectId: string,
   userId: string,
-  data: UpdateMemberInput
+  data: UpdateMemberInput,
+  actorId?: string
 ) {
+  await assertCanManageProjectSettings(projectId, actorId);
+
   const member = await prisma.projectMember.update({
     where: {
       project_id_user_id: {
@@ -1235,6 +1281,8 @@ export async function createUnit(
   if (!project) {
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
+
+  await assertCanManageProjectSettings(projectId, actorId);
 
   const unit = await prisma.projectUnit.create({
     data: {
@@ -1275,6 +1323,8 @@ export async function updateProjectUnits(
   if (project.is_archived) {
     throw new AppError("Cannot change units in archived project", "BAD_REQUEST", 400);
   }
+
+  await assertCanManageProjectSettings(projectId, actorId);
 
   const existingUnits = await prisma.projectUnit.findMany({
     where: { project_id: projectId, season_number: data.season_number },
@@ -1678,6 +1728,8 @@ export async function respondToJoinRequest(
     throw new AppError("Join request not found", "NOT_FOUND", 404);
   }
 
+  await assertCanManageProjectSettings(request.project_id, approverId);
+
   if (request.approved !== null) {
     throw new AppError("Join request has already been processed", "BAD_REQUEST", 400);
   }
@@ -1692,11 +1744,22 @@ export async function respondToJoinRequest(
   });
 
   if (data.approved) {
-    await prisma.projectMember.create({
-      data: {
+    await prisma.projectMember.upsert({
+      where: {
+        project_id_user_id: {
+          project_id: request.project_id,
+          user_id: request.user_id,
+        },
+      },
+      create: {
         project_id: request.project_id,
         user_id: request.user_id,
         role: request.role,
+      },
+      update: {
+        role: request.role,
+        left_at: null,
+        joined_at: new Date(),
       },
     });
 
@@ -1751,7 +1814,9 @@ export async function respondToJoinRequest(
   return updated;
 }
 
-export async function getJoinRequests(projectId: string) {
+export async function getJoinRequests(projectId: string, actorId?: string) {
+  await assertCanManageProjectSettings(projectId, actorId);
+
   const requests = await prisma.joinRequest.findMany({
     where: { project_id: projectId },
     include: {

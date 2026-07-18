@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
+import { UserRole } from "@prisma/client";
 import * as wikiService from "./wiki.service";
 
 function getParam(req: Request, name: string): string {
@@ -22,13 +23,15 @@ export async function createWiki(
 }
 
 export async function getWikis(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const result = await wikiService.getWikis(
-      req.query as unknown as Parameters<typeof wikiService.getWikis>[0]
+      req.query as unknown as Parameters<typeof wikiService.getWikis>[0],
+      req.user!.id,
+      req.user!.role as UserRole
     );
     successResponse(res, { wikis: result.wikis }, 200, result.meta);
   } catch (error) {
@@ -37,12 +40,16 @@ export async function getWikis(
 }
 
 export async function getWiki(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.getWikiById(getParam(req, "id"));
+    const result = await wikiService.getWikiById(
+      getParam(req, "id"),
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -50,14 +57,16 @@ export async function getWiki(
 }
 
 export async function getWikiBySlug(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const result = await wikiService.getWikiBySlug(
       req.query.project_id as string | null,
-      getParam(req, "slug")
+      getParam(req, "slug"),
+      req.user!.id,
+      req.user!.role as UserRole
     );
     successResponse(res, result);
   } catch (error) {
@@ -67,20 +76,28 @@ export async function getWikiBySlug(
 
 // Smart handler for GET /wiki/:id - tries project_id first, then falls back to wiki id
 export async function getWikiOrByProjectId(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const param = getParam(req, "id");
     // Try to find by project_id first (for frontend compatibility)
-    const byProject = await wikiService.getWikiByProjectId(param);
+    const byProject = await wikiService.getWikiByProjectId(
+      param,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     if (byProject) {
       successResponse(res, byProject);
       return;
     }
     // Fall back to wiki id lookup
-    const result = await wikiService.getWikiById(param);
+    const result = await wikiService.getWikiById(
+      param,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -148,10 +165,14 @@ export async function createComment(
 ): Promise<void> {
   try {
     const wikiId = req.params.wikiId as string | undefined;
-    const result = await wikiService.createComment(req.user!.id, {
-      ...req.body,
-      wiki_id: req.body.wiki_id ?? wikiId,
-    });
+    const result = await wikiService.createComment(
+      req.user!.id,
+      req.user!.role as UserRole,
+      {
+        ...req.body,
+        wiki_id: req.body.wiki_id ?? wikiId,
+      }
+    );
     successResponse(res, result, 201);
   } catch (error) {
     next(error);
@@ -159,12 +180,16 @@ export async function createComment(
 }
 
 export async function getComments(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await wikiService.getComments(getParam(req, "wikiId"));
+    const result = await wikiService.getComments(
+      getParam(req, "wikiId"),
+      req.user!.id,
+      req.user!.role as UserRole
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
