@@ -139,7 +139,12 @@ export async function createMergeJob(
     const userId = req.user!.id;
     const data = req.body as CreateUnitMergeJobInput;
 
-    const result = await subtitleService.createMergeJob(unitId, data.claim_ids, userId);
+    const result = await subtitleService.createMergeJob(
+      unitId,
+      data.claim_ids,
+      userId,
+      req.user!.role as UserRole
+    );
     successResponse(res, result, 201);
   } catch (error) {
     next(error);

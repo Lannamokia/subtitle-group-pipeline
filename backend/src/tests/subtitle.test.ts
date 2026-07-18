@@ -6,6 +6,7 @@ import {
   createTestUnit,
   createTestTask,
   createTestFile,
+  createTestTranslationClaim,
   cleanDatabase,
 } from "./setup";
 import { post, get, expectSuccess, expectError } from "./helpers";
@@ -246,6 +247,109 @@ Dialogue: 0,0:00:06.00,0:00:09.00,Default,,0,0,0,,Second`;
       });
 
       expect(jobs.length).toBe(2);
+    });
+  });
+
+  describe("Merge Jobs Authorization", () => {
+    it("should reject non-project members from creating merge jobs", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: outsider, token: outsiderToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: owner.id,
+        role: "translation",
+      });
+      const { claim } = await createTestTranslationClaim({
+        project_id: project.id,
+        task_id: task.id,
+        unit_id: unit.id,
+        user_id: owner.id,
+        status: "submitted",
+      });
+
+      const response = await post(
+        app,
+        `/api/v1/subtitles/units/${unit.id}/merge-jobs`,
+        { claim_ids: [claim.id] },
+        outsiderToken
+      );
+
+      expectError(response, 403, "FORBIDDEN");
+    });
+
+    it("should reject open-claim candidates from creating merge jobs", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: candidate, token: candidateToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: owner.id,
+        role: "translation",
+        status: "claimable",
+      });
+      const { claim } = await createTestTranslationClaim({
+        project_id: project.id,
+        task_id: task.id,
+        unit_id: unit.id,
+        user_id: owner.id,
+        status: "submitted",
+      });
+
+      const tag = await prisma.roleTag.create({
+        data: { name: "Translator", role_type: "translation", color: "#3b82f6" },
+      });
+      await prisma.tagApplication.create({
+        data: { user_id: candidate.id, tag_id: tag.id, approved: true },
+      });
+
+      const response = await post(
+        app,
+        `/api/v1/subtitles/units/${unit.id}/merge-jobs`,
+        { claim_ids: [claim.id] },
+        candidateToken
+      );
+
+      expectError(response, 403, "FORBIDDEN");
+    });
+
+    it("should allow project members to create merge jobs", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: member, token: memberToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: member.id, role: "translation" },
+      });
+      const unit = await createTestUnit({ project_id: project.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        creator_id: owner.id,
+        role: "translation",
+      });
+      const { claim } = await createTestTranslationClaim({
+        project_id: project.id,
+        task_id: task.id,
+        unit_id: unit.id,
+        user_id: member.id,
+        status: "submitted",
+      });
+
+      const response = await post(
+        app,
+        `/api/v1/subtitles/units/${unit.id}/merge-jobs`,
+        { claim_ids: [claim.id] },
+        memberToken
+      );
+
+      expectSuccess(response, 201);
+      expect(response.body.data).toHaveProperty("id");
+      expect(response.body.data.unit_id).toBe(unit.id);
+      expect(response.body.data.project_id).toBe(project.id);
     });
   });
 
