@@ -402,6 +402,55 @@ export async function createTestAnnouncement(data: {
   return announcement;
 }
 
+export interface TestTranslationClaimData {
+  project_id: string;
+  task_id: string;
+  unit_id: string;
+  user_id: string;
+  segment_start?: number;
+  segment_end?: number;
+  status?: "pending" | "active" | "submitted" | "approved";
+  content?: string;
+}
+
+export async function createTestTranslationClaim(data: TestTranslationClaimData) {
+  const claim = await prisma.translationClaim.create({
+    data: {
+      task_id: data.task_id,
+      unit_id: data.unit_id,
+      user_id: data.user_id,
+      segment_start: data.segment_start ?? 0,
+      segment_end: data.segment_end ?? 60,
+      status: data.status ?? "submitted",
+      submitted_at: data.status === "submitted" || data.status === "approved" ? new Date() : null,
+      approved_at: data.status === "approved" ? new Date() : null,
+    },
+  });
+
+  let submission = null;
+  let version = null;
+  if (data.status === "submitted" || data.status === "approved") {
+    const fileResult = await createTestFile({
+      project_id: data.project_id,
+      uploader_id: data.user_id,
+      name: `${claim.id}.ass`,
+    });
+    version = fileResult.version;
+    submission = await prisma.translationSubmission.create({
+      data: {
+        task_id: data.task_id,
+        user_id: data.user_id,
+        claim_id: claim.id,
+        file_version_id: fileResult.version.id,
+        content: data.content ?? "",
+        line_count: null,
+      },
+    });
+  }
+
+  return { claim, submission, version };
+}
+
 // ==================== Database Cleanup ====================
 
 const tableNames = [

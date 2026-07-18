@@ -840,18 +840,21 @@ async function processSerialTranslationMerge(job: {
 export async function createMergeJob(
   projectUnitId: string,
   claimIds: string[],
-  userId: string
+  userId: string,
+  userRole: UserRole
 ) {
   const unit = await prisma.projectUnit.findUnique({
     where: { id: projectUnitId },
-    include: {
-      project: true,
-    },
+    select: { project_id: true },
   });
 
   if (!unit) {
     throw new AppError("Project unit not found", "NOT_FOUND", 404);
   }
+
+  await assertProjectViewPermission(unit.project_id, userId, userRole, {
+    allowOpenClaimCandidate: false,
+  });
 
   // Get all approved translation submissions for the specified claims
   const claims = await prisma.translationClaim.findMany({
