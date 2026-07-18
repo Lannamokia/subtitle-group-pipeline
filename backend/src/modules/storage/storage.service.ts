@@ -822,7 +822,7 @@ export async function resolveAvatarImage(userId: string): Promise<AvatarImageSou
   }
 
   if (avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://")) {
-    return { kind: "redirect", url: avatarUrl };
+    throw new AppError("External avatar URLs are not supported", "VALIDATION_ERROR", 400);
   }
 
   if (avatarUrl.startsWith("/uploads/")) {

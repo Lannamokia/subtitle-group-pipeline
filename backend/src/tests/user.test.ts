@@ -77,18 +77,17 @@ describe("User Profile & Storage Tests", () => {
       expect(res.body.data.bio).toBe("I love translating anime!");
     });
 
-    it("should update avatar URL", async () => {
-      const { user, token } = await createTestUser();
+    it("should reject external avatar URL in profile update", async () => {
+      const { token } = await createTestUser();
 
       const res = await put(
         app,
         "/api/v1/auth/profile",
-        { avatar_url: "https://example.com/avatar.png" },
+        { avatar_url: "https://evil.com/x.png" },
         token
       );
 
-      expectSuccess(res, 200);
-      expect(res.body.data.avatar_url).toBe("https://example.com/avatar.png");
+      expectError(res, 400, "VALIDATION_ERROR");
     });
 
     it("should update local stored avatar path", async () => {
@@ -279,6 +278,19 @@ describe("User Profile & Storage Tests", () => {
 
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toContain("image/png");
+    });
+
+    it("should reject external avatar URL stored directly in database", async () => {
+      const { user } = await createTestUser();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { avatar_url: "https://evil.com/x.png" },
+      });
+
+      const res = await get(app, `/api/v1/storage/avatar/${user.id}/image`);
+
+      expectError(res, 400, "VALIDATION_ERROR");
+      expect(res.headers.location).toBeUndefined();
     });
 
     it("should redirect S3 avatar image requests to a presigned URL", async () => {

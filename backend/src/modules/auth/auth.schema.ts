@@ -25,15 +25,12 @@ const storedAvatarUrlSchema = z
   .string()
   .trim()
   .max(2048)
-  .refine((value) => {
-    if (value.startsWith("/uploads/projects/avatars/")) {
-      return true;
-    }
-    if (value.startsWith("s3://")) {
-      return true;
-    }
-    return z.string().url().safeParse(value).success;
-  }, "Invalid avatar URL");
+  .refine(
+    (value) =>
+      value.startsWith("/uploads/projects/avatars/") ||
+      value.startsWith("s3://"),
+    "Avatar must be uploaded through the avatar upload endpoint"
+  );
 
 export const registerSchema = z.object({
   username: z
