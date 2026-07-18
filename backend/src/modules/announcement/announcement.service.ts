@@ -1,12 +1,39 @@
 import { prisma } from "../../config/database";
 import { AppError } from "../../utils/response";
-import { TimelineEventType } from "@prisma/client";
+import { TimelineEventType, UserRole } from "@prisma/client";
 import * as timelineService from "../timeline/timeline.service";
+import { assertProjectViewPermission } from "../project/project-access";
 import type {
   CreateAnnouncementInput,
   UpdateAnnouncementInput,
   AnnouncementQueryInput,
 } from "./announcement.schema";
+
+async function canManageProjectAnnouncement(
+  projectId: string | null,
+  userId: string,
+  userRole: string
+): Promise<boolean> {
+  if (!projectId) return false;
+  if (["super_admin", "group_admin", "supervisor"].includes(userRole)) return true;
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      owner_id: true,
+      members: {
+        where: {
+          user_id: userId,
+          left_at: null,
+          OR: [{ role: "supervisor" }, { is_lead: true }],
+        },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+  return Boolean(project && (project.owner_id === userId || project.members.length > 0));
+}
 
 export async function createGlobalAnnouncement(
   creatorId: string,
@@ -87,7 +114,7 @@ export async function createProjectAnnouncement(
   });
 
   const isSupervisor = membership?.is_lead || membership?.role === "supervisor";
-  const isAdmin = creator?.role === "super_admin" || creator?.role === "group_admin";
+  const isAdmin = ["super_admin", "group_admin", "supervisor"].includes(creator?.role ?? "");
   const isOwner = project?.owner_id === creatorId;
 
   if (!isSupervisor && !isAdmin && !isOwner) {
@@ -133,12 +160,22 @@ export async function createProjectAnnouncement(
   return announcement;
 }
 
-export async function getAnnouncements(query: AnnouncementQueryInput, userId?: string) {
+export async function getAnnouncements(
+  query: AnnouncementQueryInput,
+  userId: string,
+  userRole: string
+) {
   const page = query.page || 1;
   const pageSize = query.pageSize || 20;
   const skip = (page - 1) * pageSize;
 
   const where: Record<string, unknown> = {};
+
+  if (query.project_id) {
+    await assertProjectViewPermission(query.project_id, userId, userRole as UserRole);
+  } else if (!["super_admin", "group_admin", "supervisor"].includes(userRole)) {
+    where.project_id = null;
+  }
 
   if (!query.include_inactive) {
     where.is_active = true;
@@ -199,7 +236,11 @@ export async function getAnnouncements(query: AnnouncementQueryInput, userId?: s
   };
 }
 
-export async function getAnnouncementById(announcementId: string) {
+export async function getAnnouncementById(
+  announcementId: string,
+  userId: string,
+  userRole: string
+) {
   const announcement = await prisma.announcement.findUnique({
     where: { id: announcementId },
     include: {
@@ -223,6 +264,14 @@ export async function getAnnouncementById(announcementId: string) {
     throw new AppError("Announcement not found", "NOT_FOUND", 404);
   }
 
+  if (announcement.project_id) {
+    await assertProjectViewPermission(
+      announcement.project_id,
+      userId,
+      userRole as UserRole
+    );
+  }
+
   return announcement;
 }
 
@@ -243,8 +292,9 @@ export async function updateAnnouncement(
   // Check permissions
   const isOwner = existing.created_by === userId;
   const isAdmin = userRole === "super_admin" || userRole === "group_admin";
+  const isProjectManager = await canManageProjectAnnouncement(existing.project_id, userId, userRole);
 
-  if (!isOwner && !isAdmin) {
+  if (!isOwner && !isAdmin && !isProjectManager) {
     throw new AppError("You can only edit your own announcements", "FORBIDDEN", 403);
   }
 
@@ -296,8 +346,9 @@ export async function deleteAnnouncement(
 
   const isOwner = existing.created_by === userId;
   const isAdmin = userRole === "super_admin" || userRole === "group_admin";
+  const isProjectManager = await canManageProjectAnnouncement(existing.project_id, userId, userRole);
 
-  if (!isOwner && !isAdmin) {
+  if (!isOwner && !isAdmin && !isProjectManager) {
     throw new AppError("You can only delete your own announcements", "FORBIDDEN", 403);
   }
 
@@ -324,8 +375,9 @@ export async function pinAnnouncement(
 
   const isOwner = existing.created_by === userId;
   const isAdmin = userRole === "super_admin" || userRole === "group_admin";
+  const isProjectManager = await canManageProjectAnnouncement(existing.project_id, userId, userRole);
 
-  if (!isOwner && !isAdmin) {
+  if (!isOwner && !isAdmin && !isProjectManager) {
     throw new AppError("You can only pin your own announcements", "FORBIDDEN", 403);
   }
 

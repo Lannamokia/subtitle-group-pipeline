@@ -224,20 +224,21 @@ enum BackendType {
 // ==================== CORE TABLES ====================
 
 model User {
-  id            String     @id @default(uuid())
-  username      String     @unique
-  nickname      String?
-  email         String?    @unique
-  password_hash String
-  avatar_url    String?
-  role          UserRole   @default(member)
-  status        UserStatus @default(active)
-  qq_number     String?
-  bio           String?
-  last_login_at DateTime?
-  created_at    DateTime   @default(now())
-  updated_at    DateTime   @updatedAt
-  deleted_at    DateTime?
+  id                 String     @id @default(uuid())
+  username           String     @unique
+  nickname           String?
+  email              String?    @unique
+  password_hash      String
+  avatar_url         String?
+  role               UserRole   @default(member)
+  super_admin_marker String?    @unique
+  status             UserStatus @default(active)
+  qq_number          String?
+  bio                String?
+  last_login_at      DateTime?
+  created_at         DateTime   @default(now())
+  updated_at         DateTime   @updatedAt
+  deleted_at         DateTime?
 
   // Relations
   owned_projects           Project[]               @relation("ProjectOwner")
@@ -460,25 +461,26 @@ model JoinRequest {
 // ==================== TASK TABLES ====================
 
 model Task {
-  id                String     @id @default(uuid())
-  project_id        String
-  unit_id           String?
-  title             String
-  description       String?
-  role              TaskRole
-  translation_order Int?
-  status            TaskStatus @default(pending_publish)
-  assignee_id       String?
-  creator_id        String
-  blocked_by        String? // JSON: array of task IDs
-  due_date          DateTime?
-  started_at        DateTime?
-  submitted_at      DateTime?
-  completed_at      DateTime?
-  cancelled_at      DateTime?
-  frozen_at         DateTime?
-  created_at        DateTime   @default(now())
-  updated_at        DateTime   @updatedAt
+  id                    String      @id @default(uuid())
+  project_id            String
+  unit_id               String?
+  title                 String
+  description           String?
+  role                  TaskRole
+  translation_order     Int?
+  status                TaskStatus  @default(pending_publish)
+  assignee_id           String?
+  creator_id            String
+  blocked_by            String? // JSON: array of task IDs
+  due_date              DateTime?
+  started_at            DateTime?
+  submitted_at          DateTime?
+  completed_at          DateTime?
+  cancelled_at          DateTime?
+  frozen_at             DateTime?
+  status_before_archive TaskStatus?
+  created_at            DateTime    @default(now())
+  updated_at            DateTime    @updatedAt
 
   // Relations
   project       Project                 @relation(fields: [project_id], references: [id], onDelete: Cascade)

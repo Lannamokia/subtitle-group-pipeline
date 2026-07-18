@@ -25,13 +25,15 @@ export async function createAnnouncement(
 }
 
 export async function getAnnouncements(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const result = await announcementService.getAnnouncements(
-      req.query as unknown as Parameters<typeof announcementService.getAnnouncements>[0]
+      req.query as unknown as Parameters<typeof announcementService.getAnnouncements>[0],
+      req.user!.id,
+      req.user!.role
     );
     successResponse(res, { announcements: result.announcements }, 200, result.meta);
   } catch (error) {
@@ -40,12 +42,16 @@ export async function getAnnouncements(
 }
 
 export async function getAnnouncement(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await announcementService.getAnnouncementById(req.params.id as string);
+    const result = await announcementService.getAnnouncementById(
+      req.params.id as string,
+      req.user!.id,
+      req.user!.role
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);

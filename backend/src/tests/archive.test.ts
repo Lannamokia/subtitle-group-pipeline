@@ -59,22 +59,34 @@ describe("Archive & Lifecycle Tests", () => {
       expect(tasks.every((t) => t.frozen_at !== null)).toBe(true);
     });
 
-    it("should unarchive a project and restore frozen tasks", async () => {
+    it("should restore archived task states without unfreezing manually frozen tasks", async () => {
       const { user, token } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const archivedAt = new Date();
       const project = await createTestProject({
         owner_id: user.id,
         status: "archived",
         is_archived: true,
-        archived_at: new Date(),
+        archived_at: archivedAt,
       });
       const unit = await createTestUnit({ project_id: project.id });
 
-      await createTestTask({
+      const archivedTask = await createTestTask({
         project_id: project.id,
         unit_id: unit.id,
         role: "translation",
         status: "frozen",
-        frozen_at: new Date(),
+        frozen_at: archivedAt,
+        status_before_archive: "assigned",
+        assignee_id: worker.id,
+        creator_id: user.id,
+      });
+      const manuallyFrozenTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "frozen",
+        frozen_at: new Date(archivedAt.getTime() - 1000),
         creator_id: user.id,
       });
 
@@ -85,11 +97,16 @@ describe("Archive & Lifecycle Tests", () => {
       expect(res.body.data.status).toBe("active");
       expect(res.body.data.archived_at).toBeNull();
 
-      const tasks = await prisma.task.findMany({
-        where: { project_id: project.id },
+      await expect(prisma.task.findUnique({ where: { id: archivedTask.id } })).resolves.toMatchObject({
+        status: "assigned",
+        assignee_id: worker.id,
+        frozen_at: null,
+        status_before_archive: null,
       });
-      expect(tasks.every((t) => t.status === "claimable")).toBe(true);
-      expect(tasks.every((t) => t.frozen_at === null)).toBe(true);
+      await expect(prisma.task.findUnique({ where: { id: manuallyFrozenTask.id } })).resolves.toMatchObject({
+        status: "frozen",
+        assignee_id: null,
+      });
     });
 
     it("should reject archiving an already archived project", async () => {
@@ -491,6 +508,31 @@ describe("Archive & Lifecycle Tests", () => {
       expectSuccess(res, 201);
       expect(res.body.data.type).toBe("project");
       expect(res.body.data.project_id).toBe(project.id);
+    });
+
+    it("should allow project supervisors to manage another author's project announcement", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: author } = await createTestUser();
+      const { user: supervisor, token: supervisorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: supervisor.id, role: "supervisor" },
+      });
+      const announcement = await createTestAnnouncement({
+        type: "project",
+        project_id: project.id,
+        title: "Original project notice",
+        created_by: author.id,
+      });
+
+      const response = await put(
+        app,
+        `/api/v1/announcements/${announcement.id}`,
+        { title: "Updated by project supervisor" },
+        supervisorToken
+      );
+      expectSuccess(response, 200);
+      expect(response.body.data.title).toBe("Updated by project supervisor");
     });
 
     it("should reject project announcement by non-supervisor", async () => {

@@ -56,7 +56,7 @@ export async function getDefaultBackend(
 ): Promise<void> {
   try {
     const result = await storageService.getDefaultBackend();
-    successResponse(res, result);
+    successResponse(res, storageService.serializeStorageBackend(result));
   } catch (error) {
     next(error);
   }

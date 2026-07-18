@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { TimelineEventType } from "@prisma/client";
+import { TimelineEventType, UserRole } from "@prisma/client";
 import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import * as timelineService from "./timeline.service";
@@ -10,16 +10,21 @@ function getParam(req: Request, name: string): string {
 }
 
 export async function getProjectTimeline(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await timelineService.getProjectTimeline(getParam(req, "projectId"), {
-      page: Number(req.query.page) || 1,
-      pageSize: Number(req.query.pageSize) || 50,
-      event_type: req.query.event_type as TimelineEventType | undefined,
-    });
+    const result = await timelineService.getProjectTimeline(
+      getParam(req, "projectId"),
+      req.user!.id,
+      req.user!.role as UserRole,
+      {
+        page: Number(req.query.page) || 1,
+        pageSize: Number(req.query.pageSize) || 50,
+        event_type: req.query.event_type as TimelineEventType | undefined,
+      }
+    );
     successResponse(res, { events: result.events }, 200, result.meta);
   } catch (error) {
     next(error);

@@ -27,6 +27,9 @@ import {
 } from "../../utils/defaultUploadPolicy";
 import { normalizeUploadPolicyJson } from "../../utils/uploadPolicy";
 import * as storageService from "../storage/storage.service";
+import { assertProjectViewPermission as assertSharedProjectViewPermission } from "../project/project-access";
+import * as taskService from "../task/task.service";
+import * as projectService from "../project/project.service";
 
 // ============ Upload Policy ============
 
@@ -43,6 +46,49 @@ const TEXT_PREVIEW_EXTENSIONS = new Set([
   ".csv",
   ".md",
 ]);
+
+async function getActorRole(actorId: string): Promise<UserRole> {
+  const actor = await prisma.user.findUnique({ where: { id: actorId }, select: { role: true } });
+  if (!actor) throw new AppError("User not found", "NOT_FOUND", 404);
+  return actor.role;
+}
+
+async function assertProjectParticipant(projectId: string, actorId: string): Promise<void> {
+  await assertSharedProjectViewPermission(projectId, actorId, await getActorRole(actorId), {
+    allowOpenClaimCandidate: false,
+  });
+}
+
+async function assertFileProjectManager(
+  projectId: string,
+  actorId: string,
+  options: { allowLead?: boolean } = { allowLead: true }
+): Promise<void> {
+  const actorRole = await getActorRole(actorId);
+  if (["super_admin", "group_admin", "supervisor"].includes(actorRole)) return;
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      owner_id: true,
+      members: {
+        where: {
+          user_id: actorId,
+          left_at: null,
+          OR: options.allowLead === false
+            ? [{ role: "supervisor" }]
+            : [{ role: "supervisor" }, { is_lead: true }],
+        },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+  if (!project) throw new AppError("Project not found", "NOT_FOUND", 404);
+  if (project.owner_id !== actorId && project.members.length === 0) {
+    throw new AppError("Insufficient permissions to manage project files", "FORBIDDEN", 403);
+  }
+}
 
 function defaultUploadPolicyRecord() {
   return {
@@ -65,8 +111,16 @@ export async function getUploadPolicy(projectId?: string) {
 
 export async function updateUploadPolicy(
   data: UpdateUploadPolicyInput,
-  projectId?: string
+  projectId?: string,
+  actorId?: string
 ) {
+  if (!actorId) throw new AppError("Authentication required", "UNAUTHORIZED", 401);
+  if (projectId) {
+    await assertFileProjectManager(projectId, actorId, { allowLead: false });
+  } else if (!["super_admin", "group_admin", "supervisor"].includes(await getActorRole(actorId))) {
+    throw new AppError("Only supervisors can update the global upload policy", "FORBIDDEN", 403);
+  }
+
   const normalizedPolicy = normalizeUploadPolicyJson(data.allowed_types, { rejectInvalid: true });
   const extensionWhitelist = data.extension_whitelist === undefined
     ? data.extension_whitelist
@@ -1589,6 +1643,8 @@ export async function approveVersion(
     throw new AppError("File not found", "NOT_FOUND", 404);
   }
 
+  await assertFileProjectManager(file.project_id, approverId);
+
   const version = file.versions.find((v) => v.id === versionId);
   if (!version) {
     throw new AppError("Version not found", "NOT_FOUND", 404);
@@ -1753,39 +1809,9 @@ export async function assertProjectViewPermission(
   userId: string,
   userRole: UserRole
 ): Promise<void> {
-  if (!projectId) {
-    throw new AppError("Insufficient permissions to view this project", "FORBIDDEN", 403);
-  }
-
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { owner_id: true },
+  await assertSharedProjectViewPermission(projectId, userId, userRole, {
+    allowOpenClaimCandidate: false,
   });
-
-  if (!project) {
-    throw new AppError("Project not found", "NOT_FOUND", 404);
-  }
-
-  if (["super_admin", "group_admin", "supervisor"].includes(userRole)) {
-    return;
-  }
-
-  if (project.owner_id === userId) {
-    return;
-  }
-
-  const membership = await prisma.projectMember.findFirst({
-    where: {
-      project_id: projectId,
-      user_id: userId,
-      left_at: null,
-    },
-    select: { id: true },
-  });
-
-  if (!membership) {
-    throw new AppError("Insufficient permissions to view this project", "FORBIDDEN", 403);
-  }
 }
 
 async function assertSensitiveFileAccess(file: {
@@ -2273,6 +2299,8 @@ export async function createLinkAsset(
     throw new AppError("Project not found", "NOT_FOUND", 404);
   }
 
+  await assertProjectParticipant(projectId, creatorId);
+
   const taskContext = await resolveTaskUploadContext(projectId, data);
   if (taskContext.role && taskContext.role !== TaskRole.source && taskContext.role !== TaskRole.encoding) {
     throw new AppError("Only source and encoding tasks can submit cloud drive links", "VALIDATION_ERROR", 400);
@@ -2410,7 +2438,9 @@ export async function createLinkAsset(
   return decorateLinkWithMetadata(link);
 }
 
-export async function getLinkHistory(projectId: string) {
+export async function getLinkHistory(projectId: string, actorId: string) {
+  await assertProjectParticipant(projectId, actorId);
+
   const where: Record<string, unknown> = {};
   if (projectId) {
     where.project_id = projectId;
@@ -2435,13 +2465,17 @@ export async function getLinkHistory(projectId: string) {
   return links.map(decorateLinkWithMetadata);
 }
 
-export async function deleteLinkAsset(linkId: string) {
+export async function deleteLinkAsset(linkId: string, actorId: string) {
   const link = await prisma.linkHistory.findUnique({
     where: { id: linkId },
   });
 
   if (!link) {
     throw new AppError("Link not found", "NOT_FOUND", 404);
+  }
+
+  if (link.created_by !== actorId) {
+    await assertFileProjectManager(link.project_id, actorId);
   }
 
   await prisma.linkHistory.delete({
@@ -2456,7 +2490,9 @@ export async function deleteLinkAsset(linkId: string) {
 export async function batchAssignTasks(
   unitId: string,
   assigneeId: string,
-  taskRole?: TaskRole
+  taskRole: TaskRole | undefined,
+  actorId: string,
+  overrideReason?: string
 ) {
   const unit = await prisma.projectUnit.findUnique({
     where: { id: unitId },
@@ -2469,59 +2505,28 @@ export async function batchAssignTasks(
     throw new AppError("Unit not found", "NOT_FOUND", 404);
   }
 
-  const where: Record<string, unknown> = {
-    unit_id: unitId,
-  };
-
-  if (taskRole) {
-    where.role = taskRole;
-  }
-
-  // Assign all matching tasks to the same person
-  const updated = await prisma.task.updateMany({
-    where,
-    data: {
-      assignee_id: assigneeId,
-      status: "assigned",
-      started_at: new Date(),
+  const tasks = await prisma.task.findMany({
+    where: {
+      unit_id: unitId,
+      status: { in: ["pending_publish", "claimable", "assigned"] },
+      ...(taskRole ? { role: taskRole } : {}),
     },
+    select: { id: true },
   });
 
+  for (const task of tasks) {
+    await taskService.assignTask(task.id, assigneeId, actorId, overrideReason);
+  }
+
   return {
-    assigned_count: updated.count,
+    assigned_count: tasks.length,
     unit_id: unitId,
     assignee_id: assigneeId,
   };
 }
 
-export async function batchArchiveUnits(projectId: string) {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-  });
-
-  if (!project) {
-    throw new AppError("Project not found", "NOT_FOUND", 404);
-  }
-
-  // Archive all units' tasks
-  await prisma.task.updateMany({
-    where: {
-      project_id: projectId,
-    },
-    data: {
-      status: "frozen",
-    },
-  });
-
-  // Archive the project itself
-  await prisma.project.update({
-    where: { id: projectId },
-    data: {
-      is_archived: true,
-      archived_at: new Date(),
-      status: "archived",
-    },
-  });
+export async function batchArchiveUnits(projectId: string, actorId: string) {
+  await projectService.archiveProject(projectId, actorId);
 
   return {
     success: true,

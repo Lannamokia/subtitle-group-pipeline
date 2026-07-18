@@ -5,11 +5,7 @@ import {
   api,
   fileApi,
   getErrorMessage,
-  normalizeAnnouncement,
   normalizeConflict,
-  normalizeFile,
-  normalizeProject,
-  normalizeTask,
   normalizeTimelineEvent,
   normalizeUser,
   memberApi,
@@ -212,7 +208,7 @@ export function ProjectDetailPage() {
       const [projectRes, tasksRes, filesRes, eventsRes, wikiRes] = await Promise.all([
         projectApi.getProject(projectId),
         taskApi.getTasks({ projectId }),
-        fileApi.getFiles({ projectId }),
+        fileApi.getFiles({ projectId }).catch(() => ({ items: [], meta: { page: 1, pageSize: 20, total: 0, totalPages: 0 } })),
         api.get<ApiEnvelope<{ events: unknown[] }>>(`/timeline/project/${projectId}`),
         wikiApi.getWiki(projectId).catch(() => null),
       ]);
@@ -238,7 +234,7 @@ export function ProjectDetailPage() {
     try {
       const res = await api.get<ApiEnvelope<unknown[]>>(`/projects/${projectId}/conflicts`);
       setConflicts(res.data.data.map((conflict) => normalizeConflict(conflict as Record<string, unknown>)));
-    } catch (error) {
+    } catch {
       // Conflicts endpoint may not exist
       setConflicts([]);
     }
@@ -991,7 +987,7 @@ function TasksTab({
   );
   const selectedTaskDeliveryRule = useMemo(
     () => selectedTask ? getPolicyAwareTaskDeliveryRule(selectedTask.role, project.uploadPolicy) : null,
-    [project.uploadPolicy, selectedTask?.id, selectedTask?.role]
+    [project.uploadPolicy, selectedTask]
   );
   const selectedTaskPreviousResultTarget = useMemo(
     () => selectedTask ? getPreviousResultTarget(project, tasks, selectedTask) : null,
@@ -1019,7 +1015,7 @@ function TasksTab({
   })();
 
   useEffect(() => {
-    if (!selectedTask || !selectedTaskDeliveryRule) return;
+    if (!selectedTaskDeliveryRule) return;
     setTaskUploadType((current) =>
       selectedTaskDeliveryRule.fileTypes.includes(current)
         ? current
@@ -2243,7 +2239,8 @@ function TasksTab({
                         认领
                       </Button>
                     )}
-                    {selectedTask.status === "assigned" && (
+                    {selectedTask.status === "assigned" &&
+                      (selectedTaskAssigneeId === currentUser?.id || canManageTasks) && (
                       <Button
                         size="sm"
                         onClick={() => handleTaskAction(selectedTask, "start")}
@@ -2253,14 +2250,15 @@ function TasksTab({
                         开始
                       </Button>
                     )}
-                    {selectedTask.status === "in_progress" && (
+                    {["in_progress", "review_rejected"].includes(selectedTask.status) &&
+                      (selectedTaskAssigneeId === currentUser?.id || canManageTasks) && (
                       <Button
                         size="sm"
                         onClick={() => handleTaskAction(selectedTask, "submit")}
                         disabled={updating}
                       >
                         <CheckCircle className="w-3.5 h-3.5 mr-1" />
-                        提交
+                        {selectedTask.status === "review_rejected" ? "重新提交" : "提交"}
                       </Button>
                     )}
                     {canManageTasks && selectedTask.status === "submitted" && (

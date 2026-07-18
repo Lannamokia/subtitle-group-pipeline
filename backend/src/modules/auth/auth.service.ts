@@ -1305,6 +1305,19 @@ export async function createMember(actorId: string, data: CreateMemberInput) {
     throw new AppError("Supervisors can only create member accounts", "FORBIDDEN", 403);
   }
 
+  if (data.role === "super_admin") {
+    if (actor.role !== "super_admin") {
+      throw new AppError("Only the super administrator can assign that role", "FORBIDDEN", 403);
+    }
+    const existingSuperAdmin = await prisma.user.findFirst({
+      where: { role: "super_admin" },
+      select: { id: true },
+    });
+    if (existingSuperAdmin) {
+      throw new AppError("A super administrator account already exists", "DUPLICATE_ERROR", 409);
+    }
+  }
+
   const qqNumber = getMemberQQNumber(data);
   await assertUniqueAccountIdentifiers({
     username: data.username,
@@ -1334,6 +1347,7 @@ export async function createMember(actorId: string, data: CreateMemberInput) {
         email: data.email,
         qq_number: qqNumber,
         role: data.role,
+        super_admin_marker: data.role === "super_admin" ? "singleton" : null,
         status: data.status,
       },
       select: privilegedUserSelect,
@@ -1375,11 +1389,12 @@ export async function updateMemberProfile(
         email: true,
         avatar_url: true,
         qq_number: true,
+        role: true,
       },
     }),
     prisma.user.findUnique({
       where: { id: actorId },
-      select: { id: true },
+      select: { id: true, role: true },
     }),
   ]);
 
@@ -1388,6 +1403,10 @@ export async function updateMemberProfile(
   }
   if (!actor) {
     throw new AppError("Actor not found", "NOT_FOUND", 404);
+  }
+
+  if (target.role === "super_admin" && actor.role !== "super_admin") {
+    throw new AppError("Only the super administrator can modify that account", "FORBIDDEN", 403);
   }
 
   const qqNumber = getUpdateMemberQQNumber(data);
@@ -1509,20 +1528,42 @@ export async function updateUserRole(userId: string, data: UpdateUserRoleInput, 
     throw new AppError("Super administrators cannot change their own role", "FORBIDDEN", 403);
   }
 
+
+  if ((user.role === "super_admin" || data.role === "super_admin") && actor.role !== "super_admin") {
+    throw new AppError("Only the super administrator can change that role", "FORBIDDEN", 403);
+  }
+
+  if (data.role === "super_admin" && user.role !== "super_admin") {
+    const existingSuperAdmin = await prisma.user.findFirst({
+      where: { role: "super_admin", id: { not: userId } },
+      select: { id: true, role: true },
+    });
+    if (existingSuperAdmin) {
+      throw new AppError("A super administrator account already exists", "DUPLICATE_ERROR", 409);
+    }
+  }
+
   const updated = await prisma.user.update({
     where: { id: userId },
-    data: { role: data.role },
+    data: {
+      role: data.role,
+      super_admin_marker: data.role === "super_admin" ? "singleton" : null,
+    },
     select: privilegedUserSelect,
   });
   return serializeManagedUser(updated);
 }
 
-export async function updateUserStatus(userId: string, data: UpdateUserStatusInput) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
+export async function updateUserStatus(userId: string, data: UpdateUserStatusInput, actorId?: string) {
+  const [user, actor] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    actorId ? prisma.user.findUnique({ where: { id: actorId }, select: { role: true } }) : null,
+  ]);
   if (!user) {
     throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+  if (user.role === "super_admin" && actor?.role !== "super_admin") {
+    throw new AppError("Only the super administrator can modify that account", "FORBIDDEN", 403);
   }
   const updated = await prisma.user.update({
     where: { id: userId },
@@ -1545,7 +1586,6 @@ export async function approveUserVerification(userId: string, actorId?: string) 
   if (!actor) {
     throw new AppError("Actor not found", "NOT_FOUND", 404);
   }
-
   if (user.status !== "pending_verification") {
     throw new AppError("User is not pending verification", "VALIDATION_ERROR", 400);
   }
@@ -1572,12 +1612,17 @@ export async function approveUserVerification(userId: string, actorId?: string) 
   return serializeManagedUser(updated);
 }
 
-export async function resetUserPassword(userId: string, data: ResetUserPasswordInput) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
+export async function resetUserPassword(userId: string, data: ResetUserPasswordInput, actorId?: string) {
+  const [user, actor] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    actorId ? prisma.user.findUnique({ where: { id: actorId }, select: { role: true } }) : null,
+  ]);
   if (!user) {
     throw new AppError("User not found", "NOT_FOUND", 404);
+  }
+
+  if (user.role === "super_admin" && actor?.role !== "super_admin") {
+    throw new AppError("Only the super administrator can modify that account", "FORBIDDEN", 403);
   }
 
   const newHash = await hashPassword(data.password);

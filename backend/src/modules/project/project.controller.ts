@@ -3,6 +3,7 @@ import { successResponse } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middleware/auth";
 import { UserRole } from "@prisma/client";
 import * as projectService from "./project.service";
+import { assertProjectViewPermission } from "./project-access";
 import * as subtitleService from "../subtitle/subtitle.service";
 import * as announcementService from "../announcement/announcement.service";
 import * as wikiService from "../wiki/wiki.service";
@@ -91,10 +92,16 @@ export async function getProjectConflicts(
   next: NextFunction
 ): Promise<void> {
   try {
+    await assertProjectViewPermission(
+      getParam(req, "id"),
+      req.user!.id,
+      req.user!.role as UserRole,
+      { allowOpenClaimCandidate: false }
+    );
     const result = await subtitleService.getConflicts({
       ...(req.query as Record<string, unknown>),
       project_id: getParam(req, "id"),
-    } as Parameters<typeof subtitleService.getConflicts>[0]);
+    } as Parameters<typeof subtitleService.getConflicts>[0], req.user!.id, req.user!.role as UserRole);
     successResponse(res, result.conflicts, 200, result.meta);
   } catch (error) {
     next(error);
@@ -228,12 +235,17 @@ export async function removeMember(
 }
 
 export async function updateMember(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.updateMember(getParam(req, "id"), getParam(req, "userId"), req.body);
+    const result = await projectService.updateMember(
+      getParam(req, "id"),
+      getParam(req, "userId"),
+      req.body,
+      req.user!.id
+    );
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -297,12 +309,12 @@ export async function respondJoinRequest(
 }
 
 export async function getJoinRequests(
-  req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await projectService.getJoinRequests(getParam(req, "id"));
+    const result = await projectService.getJoinRequests(getParam(req, "id"), req.user!.id);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -375,7 +387,11 @@ export async function updateProjectWiki(
     const projectId = getParam(req, "id");
 
     // Find existing wiki by project_id, or create one
-    let wiki = await wikiService.getWikiByProjectId(projectId);
+    let wiki = await wikiService.getWikiByProjectId(
+      projectId,
+      req.user!.id,
+      req.user!.role as UserRole
+    );
 
     const updateData: {
       title: string;

@@ -7,10 +7,13 @@ import {
   createTestUnit,
   createTestTask,
   createTestFile,
+  createTestWiki,
+  createTestAnnouncement,
   createTestStorageBackend,
   cleanDatabase,
 } from "./setup";
-import { post, get, put, del, expectSuccess, expectError } from "./helpers";
+import { post, get, put, patch, del, expectSuccess, expectError } from "./helpers";
+import * as timelineService from "../modules/timeline/timeline.service";
 import type { Application } from "express";
 
 describe("Project & Workflow Tests", () => {
@@ -105,6 +108,397 @@ describe("Project & Workflow Tests", () => {
       expect(listedProject).toBeDefined();
       expect(listedProject.members.some((item: { user: { id: string } }) => item.user.id === member.id)).toBe(true);
       expect(listedProject.assigned_user_ids).toContain(assignee.id);
+    });
+
+    it("should allow matching open-claim candidates to read and claim a project", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: candidate, token: candidateToken } = await createTestUser();
+      const { token: outsiderToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      const tag = await prisma.roleTag.create({
+        data: { name: "Timing Specialist", role_type: "timing" },
+      });
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          workflow_config: JSON.stringify([
+            {
+              role: "timing",
+              enabled: true,
+              assignmentStrategy: "open_claim",
+              requiredTagIds: [tag.id],
+            },
+          ]),
+        },
+      });
+      await prisma.tagApplication.create({
+        data: {
+          user_id: candidate.id,
+          tag_id: tag.id,
+          approved: true,
+          approved_by: owner.id,
+          approved_at: new Date(),
+        },
+      });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+      const wiki = await createTestWiki({
+        project_id: project.id,
+        title: "Candidate Wiki",
+        slug: "candidate-wiki",
+        content: "Claim instructions",
+        status: "approved",
+        created_by: owner.id,
+      });
+      await createTestAnnouncement({
+        type: "project",
+        project_id: project.id,
+        title: "Candidate Announcement",
+        created_by: owner.id,
+      });
+      await timelineService.createTimelineEvent({
+        project_id: project.id,
+        event_type: "task_created",
+        title: "Open claim task created",
+        actor_id: owner.id,
+      });
+
+      const projectRes = await get(app, `/api/v1/projects/${project.id}`, candidateToken);
+      expectSuccess(projectRes, 200);
+      expectError(await get(app, `/api/v1/wiki/${project.id}`), 401, "UNAUTHORIZED");
+      expectError(
+        await get(app, `/api/v1/announcements?type=project&project_id=${project.id}`),
+        401,
+        "UNAUTHORIZED"
+      );
+      expectError(
+        await get(app, `/api/v1/subtitles/conflicts?project_id=${project.id}`),
+        401,
+        "UNAUTHORIZED"
+      );
+      expectSuccess(await get(app, `/api/v1/projects/${project.id}/members`, candidateToken), 200);
+      const tasksRes = await get(app, `/api/v1/tasks?project_id=${project.id}`, candidateToken);
+      expectSuccess(tasksRes, 200);
+      expect(tasksRes.body.data.some((item: { id: string }) => item.id === task.id)).toBe(true);
+      const taskRes = await get(app, `/api/v1/tasks/${task.id}`, candidateToken);
+      expectSuccess(taskRes, 200);
+      expectSuccess(await get(app, `/api/v1/timeline/project/${project.id}`, candidateToken), 200);
+      expectSuccess(await get(app, `/api/v1/wiki/${project.id}`, candidateToken), 200);
+      expectSuccess(
+        await get(app, `/api/v1/announcements?type=project&project_id=${project.id}`, candidateToken),
+        200
+      );
+      expectError(await get(app, `/api/v1/files?project_id=${project.id}`, candidateToken), 403, "FORBIDDEN");
+      expectError(await get(app, `/api/v1/projects/${project.id}/conflicts`, candidateToken), 403, "FORBIDDEN");
+      expectError(await get(app, `/api/v1/tasks/${task.id}/comments`, candidateToken), 403, "FORBIDDEN");
+      expectError(
+        await post(app, `/api/v1/tasks/${task.id}/comments`, { content: "Not joined yet" }, candidateToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await put(app, `/api/v1/wiki/${wiki.id}`, { content: "Unauthorized edit" }, candidateToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await get(app, `/api/v1/subtitles/conflicts?project_id=${project.id}`, candidateToken),
+        403,
+        "FORBIDDEN"
+      );
+
+      const outsiderRes = await get(app, `/api/v1/projects/${project.id}`, outsiderToken);
+      expectError(outsiderRes, 403, "FORBIDDEN");
+
+      const claimRes = await post(app, `/api/v1/tasks/${task.id}/claim`, {}, candidateToken);
+      expectSuccess(claimRes, 200);
+      await expect(
+        prisma.projectMember.findUnique({
+          where: { project_id_user_id: { project_id: project.id, user_id: candidate.id } },
+        })
+      ).resolves.toMatchObject({ role: "timing", left_at: null });
+      expectSuccess(await get(app, `/api/v1/files?project_id=${project.id}`, candidateToken), 200);
+      expectSuccess(await get(app, `/api/v1/tasks/${task.id}/comments`, candidateToken), 200);
+      expectSuccess(
+        await post(app, `/api/v1/tasks/${task.id}/comments`, { content: "Joined project" }, candidateToken),
+        201
+      );
+      expectSuccess(
+        await put(app, `/api/v1/wiki/${wiki.id}`, { content: "Claimed member edit" }, candidateToken),
+        200
+      );
+      expectSuccess(
+        await get(app, `/api/v1/subtitles/conflicts?project_id=${project.id}`, candidateToken),
+        200
+      );
+    });
+
+    it("should reject anonymous task reads", async () => {
+      const { user: owner } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        role: "timing",
+        creator_id: owner.id,
+      });
+
+      expectError(await get(app, `/api/v1/tasks?project_id=${project.id}`), 401, "UNAUTHORIZED");
+      expectError(await get(app, `/api/v1/tasks/${task.id}`), 401, "UNAUTHORIZED");
+    });
+
+    it("should enforce task management and collaboration boundaries", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker, token: workerToken } = await createTestUser();
+      const { user: outsider, token: outsiderToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: worker.id, role: "source" },
+      });
+
+      const assignedTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "assigned",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+      const managedTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+      const dependency = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "completed",
+        creator_id: owner.id,
+      });
+
+      expectError(
+        await post(app, "/api/v1/tasks", {
+          project_id: project.id,
+          unit_id: unit.id,
+          title: "Unauthorized task",
+          role: "timing",
+        }, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await put(app, `/api/v1/tasks/${managedTask.id}`, { title: "Unauthorized update" }, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await post(app, `/api/v1/tasks/${managedTask.id}/assign`, { assignee_id: outsider.id }, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await post(app, `/api/v1/tasks/${managedTask.id}/cancel`, {}, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await patch(app, `/api/v1/tasks/${managedTask.id}/deadline`, { due_date: new Date().toISOString() }, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await post(app, `/api/v1/tasks/${managedTask.id}/dependencies`, { depends_on_id: dependency.id }, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await get(app, `/api/v1/tasks/workload/project/${project.id}`, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(await get(app, `/api/v1/tasks/${managedTask.id}/comments`, outsiderToken), 403, "FORBIDDEN");
+      expectError(
+        await post(app, `/api/v1/tasks/${managedTask.id}/comments`, { content: "Unauthorized" }, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await post(app, `/api/v1/tasks/${assignedTask.id}/start`, {}, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+
+      const managerStart = await post(app, `/api/v1/tasks/${assignedTask.id}/start`, {}, ownerToken);
+      expectSuccess(managerStart, 200);
+      expect(managerStart.body.data.status).toBe("in_progress");
+      expect(managerStart.body.data.assignee_id).toBe(worker.id);
+
+      expectSuccess(await get(app, `/api/v1/tasks/${managedTask.id}/comments`, workerToken), 200);
+      expectSuccess(
+        await post(app, `/api/v1/tasks/${managedTask.id}/comments`, { content: "Project member note" }, workerToken),
+        201
+      );
+    });
+
+    it("should enforce project management boundaries on lifecycle, members, units, and join requests", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: outsider, token: outsiderToken } = await createTestUser();
+      const { user: target } = await createTestUser();
+      const { user: candidate } = await createTestUser();
+      const { user: projectSupervisor, token: supervisorToken } = await createTestUser();
+      const { user: lead, token: leadToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id, status: "active" });
+      const unit = await createTestUnit({ project_id: project.id });
+      await prisma.projectMember.createMany({
+        data: [
+          { project_id: project.id, user_id: target.id, role: "timing" },
+          { project_id: project.id, user_id: projectSupervisor.id, role: "supervisor" },
+          { project_id: project.id, user_id: lead.id, role: "source", is_lead: true },
+        ],
+      });
+      const joinRequest = await prisma.joinRequest.create({
+        data: { project_id: project.id, user_id: candidate.id, role: "translation" },
+      });
+      const activeTargetTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "in_progress",
+        assignee_id: target.id,
+        creator_id: owner.id,
+      });
+      const completedTargetTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "completed",
+        assignee_id: target.id,
+        creator_id: owner.id,
+      });
+      const { file: managedFile, version: managedVersion } = await createTestFile({
+        project_id: project.id,
+        uploader_id: target.id,
+      });
+      const managedLink = await prisma.linkHistory.create({
+        data: {
+          project_id: project.id,
+          file_id: managedFile.id,
+          url: "https://example.com/project-file",
+          link_type: "direct",
+          created_by: target.id,
+        },
+      });
+
+      expectError(
+        await post(
+          app,
+          `/api/v1/projects/${project.id}/members`,
+          { user_id: outsider.id, role: "source", is_lead: false },
+          outsiderToken
+        ),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await patch(
+          app,
+          `/api/v1/projects/${project.id}/members/${target.id}`,
+          { role: "translation" },
+          outsiderToken
+        ),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await del(app, `/api/v1/projects/${project.id}/members/${target.id}`, outsiderToken),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await post(
+          app,
+          `/api/v1/projects/${project.id}/units`,
+          { season_number: 1, unit_number: 2, title: "Unauthorized unit" },
+          outsiderToken
+        ),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(
+        await put(
+          app,
+          `/api/v1/projects/${project.id}/units/count`,
+          { season_number: 1, units_per_season: 2 },
+          outsiderToken
+        ),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(await get(app, `/api/v1/projects/${project.id}/join-requests`, outsiderToken), 403, "FORBIDDEN");
+      expectError(
+        await post(
+          app,
+          `/api/v1/projects/${project.id}/join-requests/${joinRequest.id}/respond`,
+          { approved: true },
+          outsiderToken
+        ),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(await post(app, `/api/v1/projects/${project.id}/archive`, {}, outsiderToken), 403, "FORBIDDEN");
+      expectError(await post(app, `/api/v1/projects/${project.id}/restore`, {}, outsiderToken), 403, "FORBIDDEN");
+      expectError(await patch(app, `/api/v1/projects/${project.id}`, { name: "Lead edit" }, leadToken), 403, "FORBIDDEN");
+      expectError(
+        await post(
+          app,
+          `/api/v1/files/${managedFile.id}/versions/${managedVersion.id}/approve`,
+          {},
+          outsiderToken
+        ),
+        403,
+        "FORBIDDEN"
+      );
+      expectError(await del(app, `/api/v1/files/links/${managedLink.id}`, outsiderToken), 403, "FORBIDDEN");
+
+      const createUnitRes = await post(
+        app,
+        `/api/v1/projects/${project.id}/units`,
+        { season_number: 1, unit_number: unit.unit_number + 1, title: "Supervisor unit" },
+        supervisorToken
+      );
+      expectSuccess(createUnitRes, 201);
+      expectSuccess(await get(app, `/api/v1/projects/${project.id}/join-requests`, supervisorToken), 200);
+      expectSuccess(
+        await post(
+          app,
+          `/api/v1/files/${managedFile.id}/versions/${managedVersion.id}/approve`,
+          {},
+          supervisorToken
+        ),
+        200
+      );
+      expectSuccess(await del(app, `/api/v1/files/links/${managedLink.id}`, supervisorToken), 200);
+      expectSuccess(
+        await del(app, `/api/v1/projects/${project.id}/members/${target.id}`, supervisorToken),
+        200
+      );
+      await expect(prisma.task.findUnique({ where: { id: activeTargetTask.id } })).resolves.toMatchObject({
+        status: "claimable",
+        assignee_id: null,
+      });
+      await expect(prisma.task.findUnique({ where: { id: completedTargetTask.id } })).resolves.toMatchObject({
+        status: "completed",
+        assignee_id: target.id,
+      });
     });
   });
 
@@ -2267,7 +2661,7 @@ describe("Project & Workflow Tests", () => {
       }
     );
 
-    it("should prevent assignees from approving or rejecting their own submitted tasks", async () => {
+    it("should prevent ordinary assignees from approving or rejecting submitted tasks", async () => {
       const { user: owner } = await createTestUser();
       const { user: worker, token: workerToken } = await createTestUser();
       const project = await createTestProject({ owner_id: owner.id });
@@ -2299,6 +2693,236 @@ describe("Project & Workflow Tests", () => {
       expect(await prisma.review.count({ where: { task_id: task.id } })).toBe(0);
       const unchanged = await prisma.task.findUnique({ where: { id: task.id } });
       expect(unchanged!.status).toBe("submitted");
+    });
+
+    it("should allow the original assignee to resubmit a rejected task", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker, token: workerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        role: "post_production",
+        status: "submitted",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+
+      const rejectRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/reject`,
+        { approved: false, comments: "Revise this result" },
+        ownerToken
+      );
+      expectSuccess(rejectRes, 200);
+      expect(rejectRes.body.data.task.status).toBe("review_rejected");
+      expect(rejectRes.body.data.task.assignee_id).toBe(worker.id);
+
+      const resubmitRes = await post(app, `/api/v1/tasks/${task.id}/submit`, {}, workerToken);
+      expectSuccess(resubmitRes, 200);
+      expect(resubmitRes.body.data.status).toBe("submitted");
+      expect(resubmitRes.body.data.assignee_id).toBe(worker.id);
+      const pendingReview = await prisma.review.findFirst({
+        where: { task_id: task.id, status: "pending" },
+        orderBy: { submitted_at: "desc" },
+      });
+      expect(pendingReview?.requester_id).toBe(worker.id);
+    });
+
+    it("should allow project supervisors to operate tasks and review their own submissions", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: supervisor, token: supervisorToken } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: supervisor.id, role: "supervisor" },
+      });
+
+      const approveTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "in_progress",
+        assignee_id: supervisor.id,
+        creator_id: owner.id,
+      });
+      expectSuccess(await post(app, `/api/v1/tasks/${approveTask.id}/submit`, {}, supervisorToken), 200);
+      const approveRes = await post(
+        app,
+        `/api/v1/tasks/${approveTask.id}/approve`,
+        { approved: true, comments: "Supervisor self review" },
+        supervisorToken
+      );
+      expectSuccess(approveRes, 200);
+      expect(approveRes.body.data.task.status).toBe("completed");
+
+      const rejectTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "encoding",
+        status: "submitted",
+        assignee_id: supervisor.id,
+        creator_id: owner.id,
+      });
+      const rejectRes = await post(
+        app,
+        `/api/v1/tasks/${rejectTask.id}/reject`,
+        { approved: false, comments: "Supervisor self rejection" },
+        supervisorToken
+      );
+      expectSuccess(rejectRes, 200);
+      expect(rejectRes.body.data.task.status).toBe("review_rejected");
+
+      const delegatedTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "in_progress",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+      const delegatedSubmit = await post(
+        app,
+        `/api/v1/tasks/${delegatedTask.id}/submit`,
+        {},
+        supervisorToken
+      );
+      expectSuccess(delegatedSubmit, 200);
+      expect(delegatedSubmit.body.data.assignee_id).toBe(worker.id);
+
+      const delegatedApprove = await post(
+        app,
+        `/api/v1/tasks/${delegatedTask.id}/approve`,
+        { approved: true, comments: "Supervisor delegated review" },
+        supervisorToken
+      );
+      expectSuccess(delegatedApprove, 200);
+      expect(delegatedApprove.body.data.task.assignee_id).toBe(worker.id);
+      expect(delegatedApprove.body.data.review.requester_id).toBe(worker.id);
+
+      const translationTask = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "assigned",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+      await prisma.translationClaim.create({
+        data: {
+          task_id: translationTask.id,
+          unit_id: unit.id,
+          user_id: worker.id,
+          segment_start: 0,
+          segment_end: 60,
+          status: "active",
+        },
+      });
+      const delegatedTranslation = await post(
+        app,
+        `/api/v1/tasks/${translationTask.id}/submit-translation`,
+        { content: "Worker translation submitted by supervisor" },
+        supervisorToken
+      );
+      expectSuccess(delegatedTranslation, 201);
+      expect(delegatedTranslation.body.data.user_id).toBe(worker.id);
+      await expect(prisma.task.findUnique({ where: { id: translationTask.id } })).resolves.toMatchObject({
+        status: "submitted",
+        assignee_id: worker.id,
+      });
+    });
+
+    it("should allow the super administrator to operate any project task", async () => {
+      const { user: superAdmin, token: superAdminToken } = await createTestUser({ role: "super_admin" });
+      const { user: owner } = await createTestUser();
+      const { user: worker } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+      await prisma.roleTag.create({ data: { name: "Source Operators", role_type: "source" } });
+
+      const claimable = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "source",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+      const claimRes = await post(app, `/api/v1/tasks/${claimable.id}/claim`, {}, superAdminToken);
+      expectSuccess(claimRes, 200);
+      expect(claimRes.body.data.assignee_id).toBe(superAdmin.id);
+
+      const assigned = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "post_production",
+        status: "in_progress",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+      const submitRes = await post(app, `/api/v1/tasks/${assigned.id}/submit`, {}, superAdminToken);
+      expectSuccess(submitRes, 200);
+      expect(submitRes.body.data.status).toBe("submitted");
+      expect(submitRes.body.data.assignee_id).toBe(worker.id);
+
+      const approveRes = await post(
+        app,
+        `/api/v1/tasks/${assigned.id}/approve`,
+        { approved: true, comments: "Super administrator override" },
+        superAdminToken
+      );
+      expectSuccess(approveRes, 200);
+      expect(approveRes.body.data.task.status).toBe("completed");
+      expect(approveRes.body.data.task.assignee_id).toBe(worker.id);
+
+      const review = await prisma.review.findFirst({
+        where: { task_id: assigned.id, status: "approved" },
+        orderBy: { submitted_at: "desc" },
+      });
+      expect(review!.reviewer_id).toBe(superAdmin.id);
+      expect(review!.requester_id).toBe(worker.id);
+
+      const translation = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "assigned",
+        assignee_id: worker.id,
+        creator_id: owner.id,
+      });
+      const workerClaim = await prisma.translationClaim.create({
+        data: {
+          task_id: translation.id,
+          unit_id: unit.id,
+          user_id: worker.id,
+          segment_start: 0,
+          segment_end: 60,
+          status: "active",
+        },
+      });
+      expectSuccess(
+        await post(
+          app,
+          `/api/v1/tasks/${translation.id}/abandon-segment/${workerClaim.id}`,
+          {},
+          superAdminToken
+        ),
+        200
+      );
+      const superClaim = await post(
+        app,
+        `/api/v1/tasks/${translation.id}/claim-segment`,
+        { segment_start: 0, segment_end: 60 },
+        superAdminToken
+      );
+      expectSuccess(superClaim, 201);
+      const translationSubmit = await post(
+        app,
+        `/api/v1/tasks/${translation.id}/submit-translation`,
+        { content: "Super administrator translation" },
+        superAdminToken
+      );
+      expectSuccess(translationSubmit, 201);
+      expect(translationSubmit.body.data.user_id).toBe(superAdmin.id);
     });
   });
 

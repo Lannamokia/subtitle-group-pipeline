@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, requireRole } from "../../middleware/auth";
+import { authenticate } from "../../middleware/auth";
 import { validateBody, validateQuery, validateParams } from "../../middleware/validate";
 import * as controller from "./subtitle.controller";
 import {
@@ -9,8 +9,6 @@ import {
   conflictQuerySchema,
   resolveConflictSchema,
   reviewSchema,
-  createTranslationClaimSchema,
-  submitTranslationSchema,
 } from "./subtitle.schema";
 import { z } from "zod";
 
@@ -29,25 +27,6 @@ const fileIdParamSchema = z.object({
 });
 const timelineFileIdParamSchema = z.object({ fileId: z.string().uuid("Invalid file ID") });
 
-// ==================== TRANSLATION CLAIMS ====================
-
-// POST /projects/:projectId/units/:unitId/claims - Claim segment
-router.post(
-  "/projects/:projectId/units/:unitId/claims",
-  authenticate,
-  validateParams(projectIdParamSchema.merge(unitIdParamSchema)),
-  validateBody(createTranslationClaimSchema),
-  controller.createTranslationClaim
-);
-
-// DELETE /claims/:claimId - Release claim
-router.delete(
-  "/claims/:claimId",
-  authenticate,
-  validateParams(claimIdParamSchema),
-  controller.releaseTranslationClaim
-);
-
 // GET /projects/:projectId/units/:unitId/claims - List claims
 router.get(
   "/projects/:projectId/units/:unitId/claims",
@@ -62,17 +41,6 @@ router.get(
   authenticate,
   validateParams(claimIdParamSchema),
   controller.getTranslationClaimById
-);
-
-// ==================== TRANSLATION SUBMISSIONS ====================
-
-// POST /tasks/:taskId/submissions - Submit translation
-router.post(
-  "/tasks/:taskId/submissions",
-  authenticate,
-  validateParams(taskIdParamSchema),
-  validateBody(submitTranslationSchema),
-  controller.submitTranslation
 );
 
 // GET /tasks/:taskId/submissions - List submissions for a task
@@ -111,7 +79,7 @@ router.get(
 );
 
 // Legacy merge job routes
-router.get("/merge-jobs", validateQuery(mergeJobQuerySchema), controller.getMergeJobs);
+router.get("/merge-jobs", authenticate, validateQuery(mergeJobQuerySchema), controller.getMergeJobs);
 router.patch(
   "/merge-jobs/:id/status",
   authenticate,
@@ -126,7 +94,6 @@ router.patch(
 router.post(
   "/conflicts/:conflictId/resolve",
   authenticate,
-  requireRole("supervisor", "super_admin", "group_admin"),
   validateParams(conflictIdParamSchema),
   validateBody(resolveConflictSchema),
   controller.resolveConflict
@@ -141,8 +108,8 @@ router.get(
 );
 
 // Legacy conflict routes
-router.get("/conflicts", validateQuery(conflictQuerySchema), controller.getConflicts);
-router.get("/conflicts/:id", validateParams(idParamSchema), controller.getConflict);
+router.get("/conflicts", authenticate, validateQuery(conflictQuerySchema), controller.getConflicts);
+router.get("/conflicts/:id", authenticate, validateParams(idParamSchema), controller.getConflict);
 
 // ==================== VERSION COMPARISON ====================
 
@@ -164,9 +131,9 @@ router.get(
 
 // ==================== REVIEWS ====================
 
-router.get("/projects/:projectId/reviews", validateParams(projectIdParamSchema), controller.getReviews);
+router.get("/projects/:projectId/reviews", authenticate, validateParams(projectIdParamSchema), controller.getReviews);
 router.post("/reviews", authenticate, validateBody(reviewSchema), controller.createReview);
-router.get("/reviews/:id", validateParams(idParamSchema), controller.getReview);
+router.get("/reviews/:id", authenticate, validateParams(idParamSchema), controller.getReview);
 router.patch("/reviews/:id", authenticate, validateParams(idParamSchema), validateBody(reviewSchema.partial()), controller.updateReview);
 
 export default router;

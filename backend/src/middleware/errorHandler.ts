@@ -35,6 +35,14 @@ export function errorHandler(
     return;
   }
 
+  if (
+    err.name === "MulterError" &&
+    (err as unknown as { code?: string }).code === "LIMIT_FILE_SIZE"
+  ) {
+    errorResponse(res, "Direct uploads are limited to 100MB; use multipart upload for larger files", "FILE_TOO_LARGE", 413);
+    return;
+  }
+
   if (err.name === "PrismaClientKnownRequestError") {
     if (isDatabaseConnectionError(err)) {
       errorResponse(

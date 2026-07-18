@@ -29,8 +29,33 @@ function toBigInt(value: bigint | number): bigint {
 }
 
 export function serializeStorageBackend<T extends NonNullable<StorageBackendRecord>>(backend: T) {
+  let credentialsConfigured = false;
+  let safeConfig = backend.config;
+  try {
+    const config = JSON.parse(backend.config) as StorageConfig;
+    credentialsConfigured = Boolean(
+      readOptionalString(config, ["accessKeyId", "accessKey", "access_key"]) &&
+      readOptionalString(config, ["secretAccessKey", "secretKey", "secret_key"])
+    );
+    for (const key of [
+      "accessKeyId",
+      "accessKey",
+      "access_key",
+      "secretAccessKey",
+      "secretKey",
+      "secret_key",
+    ]) {
+      delete config[key];
+    }
+    safeConfig = JSON.stringify(config);
+  } catch {
+    safeConfig = "{}";
+  }
+
   return {
     ...backend,
+    config: safeConfig,
+    credentials_configured: credentialsConfigured,
     quota_bytes: toNumber(backend.quota_bytes),
     used_bytes: toNumber(backend.used_bytes) ?? 0,
   };

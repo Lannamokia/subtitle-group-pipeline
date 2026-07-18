@@ -111,7 +111,6 @@ router.get(
 router.post(
   "/:id/conflicts/:conflictId/resolve",
   authenticate,
-  requireRole("supervisor", "super_admin", "group_admin"),
   validateParams(z.object({ id: z.string().uuid(), conflictId: z.string().uuid() })),
   validateBody(resolveConflictSchema),
   controller.resolveProjectConflict
