@@ -66,7 +66,12 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default("24h"),
   JWT_REFRESH_EXPIRES_IN: z.string().default("7d"),
   BCRYPT_ROUNDS: z.string().default("12").transform(Number),
-  CORS_ORIGIN: z.string().default("http://localhost:5173"),
+  CORS_ORIGIN: z
+    .string()
+    .default("http://localhost:5173")
+    .refine((value) => value.trim() !== "*", {
+      message: "CORS_ORIGIN must not be '*'; set an explicit origin",
+    }),
   UPLOAD_MAX_SIZE: z.string().default("536870912000").transform(Number), // 500GB
   UPLOAD_DIR: z.string().default("./uploads"),
   API_PREFIX: z.string().default("/api/v1"),
