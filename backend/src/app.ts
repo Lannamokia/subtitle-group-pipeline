@@ -11,6 +11,7 @@ import { z } from "zod";
 
 // Route imports
 import authRoutes from "./modules/auth/auth.routes";
+import { qqRouteRateLimit, qqVerifyRateLimit } from "./middleware/rateLimit";
 import projectRoutes from "./modules/project/project.routes";
 import templateRoutes from "./modules/template/template.routes";
 import taskRoutes from "./modules/task/task.routes";
@@ -40,11 +41,16 @@ import {
   updateMemberProfileSchema,
 } from "./modules/auth/auth.schema";
 
+const SAFE_COMBINED_LOG_FORMAT =
+  ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" ' +
+  ':status :res[content-length] ":referrer" ":user-agent"';
+
 export function createApp(options: { databaseReady?: boolean } = {}): Application {
   const app = express();
   setupState.databaseReady = options.databaseReady ?? setupState.databaseReady;
 
   // Security middleware
+  app.set("trust proxy", env.TRUST_PROXY_HOPS);
   app.use(helmet());
   app.use(
     cors({
@@ -54,10 +60,14 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
   );
 
   // Logging
+  morgan.token("safe-url", (req) => {
+    const url = ((req as typeof req & { originalUrl?: string }).originalUrl || req.url || "");
+    return url.replace(/^(\/download\/)[^/?]+/, "$1[REDACTED]");
+  });
   if (env.NODE_ENV === "development") {
     app.use(morgan("dev"));
   } else {
-    app.use(morgan("combined"));
+    app.use(morgan(SAFE_COMBINED_LOG_FORMAT));
   }
 
   // Body parsing
@@ -89,7 +99,7 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
   // NoneBot QQ verification webhook (public, but requires QQ bridge token).
   // R2: enforce bridge-token auth before any body parsing or Auth_Service calls.
   // group_id is attacker-controllable and MUST NOT be used as a trust credential.
-  app.post("/webhook/qq-verify", async (req, res, next) => {
+  app.post("/webhook/qq-verify", qqVerifyRateLimit, async (req, res, next) => {
     try {
       await ensureBridgeToken(req);
       const { message, group_id } = req.body || {};
@@ -160,7 +170,7 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
   app.use(`${apiPrefix}/storage`, storageRoutes);
   app.use(`${apiPrefix}/announcements`, announcementRoutes);
   app.use(`${apiPrefix}/timeline`, timelineRoutes);
-  app.use(`${apiPrefix}/qq`, qqRoutes);
+  app.use(`${apiPrefix}/qq`, qqRouteRateLimit, qqRoutes);
   app.use(`${apiPrefix}/system`, systemRoutes);
 
   // Compatibility aliases for frontend callers that use root-level member URLs.

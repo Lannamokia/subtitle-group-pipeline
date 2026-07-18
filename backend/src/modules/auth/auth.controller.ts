@@ -53,7 +53,9 @@ export async function logout(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await authService.logoutUser(req.user!.id);
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+    const result = await authService.logoutUser(req.user!.id, token);
     successResponse(res, result);
   } catch (error) {
     next(error);
@@ -351,12 +353,12 @@ export async function grantMemberTagStatuses(
 }
 
 export async function getAllUsers(
-  _req: Request,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await authService.getAllUsers();
+    const result = await authService.getAllUsers(req.user?.role);
     successResponse(res, { items: result });
   } catch (error) {
     next(error);

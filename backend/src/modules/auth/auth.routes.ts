@@ -1,5 +1,10 @@
 import { Router } from "express";
 import { authenticate, requireRole } from "../../middleware/auth";
+import {
+  authRateLimiter as rateLimitMiddleware,
+  registerRateLimit,
+  resetRateLimiters,
+} from "../../middleware/rateLimit";
 import { validateBody } from "../../middleware/validate";
 import * as controller from "./auth.controller";
 import {
@@ -28,102 +33,20 @@ import {
 
 const router = Router();
 
-const limiterStores: Array<Map<string, { count: number; resetTime: number }>> = [];
-
 export function resetAuthRateLimiters() {
-  for (const attempts of limiterStores) {
-    attempts.clear();
-  }
-}
-
-// In-memory rate limiter for auth endpoints (fallback when express-rate-limit not installed)
-const authRateLimiter = (windowMs: number, maxRequests: number) => {
-  const attempts = new Map<string, { count: number; resetTime: number }>();
-  limiterStores.push(attempts);
-
-  return (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction): void => {
-    const key = req.ip || "unknown";
-    const now = Date.now();
-    const record = attempts.get(key);
-
-    if (!record || now > record.resetTime) {
-      attempts.set(key, { count: 1, resetTime: now + windowMs });
-      next();
-      return;
-    }
-
-    if (record.count >= maxRequests) {
-      res.status(429).json({
-        success: false,
-        error: {
-          code: "RATE_LIMITED",
-          message: "Too many requests, please try again later.",
-        },
-      });
-      return;
-    }
-
-    record.count++;
-    next();
-  };
-};
-
-// Try to use express-rate-limit if available, otherwise fallback
-let rateLimitMiddleware: ReturnType<typeof authRateLimiter>;
-try {
-  const rl = require("express-rate-limit");
-  rateLimitMiddleware = rl({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10, // 10 requests per window
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (_req: import("express").Request, res: import("express").Response) => {
-      res.status(429).json({
-        success: false,
-        error: {
-          code: "RATE_LIMITED",
-          message: "Too many requests, please try again later.",
-        },
-      });
-    },
-  });
-} catch {
-  rateLimitMiddleware = authRateLimiter(15 * 60 * 1000, 10);
-}
-
-// Stricter rate limit for registration
-let registerRateLimit: ReturnType<typeof authRateLimiter>;
-try {
-  const rl = require("express-rate-limit");
-  registerRateLimit = rl({
-    windowMs: 60 * 60 * 1000, // 1 hour
-    max: 5, // 5 registrations per hour
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (_req: import("express").Request, res: import("express").Response) => {
-      res.status(429).json({
-        success: false,
-        error: {
-          code: "RATE_LIMITED",
-          message: "Too many registration attempts, please try again later.",
-        },
-      });
-    },
-  });
-} catch {
-  registerRateLimit = authRateLimiter(60 * 60 * 1000, 5);
+  resetRateLimiters();
 }
 
 // Auth routes
 router.post("/register", registerRateLimit, validateBody(registerSchema), controller.register);
 router.post("/login", rateLimitMiddleware, validateBody(loginSchema), controller.login);
-router.post("/refresh", validateBody(refreshTokenSchema), controller.refresh);
+router.post("/refresh", rateLimitMiddleware, validateBody(refreshTokenSchema), controller.refresh);
 router.post("/logout", authenticate, controller.logout);
 router.get("/me", authenticate, controller.me);
 router.put("/profile", authenticate, validateBody(updateProfileSchema), controller.updateProfile);
 router.post("/qq-rebind/request", authenticate, validateBody(requestQQRebindSchema), controller.requestQQRebind);
 router.post("/change-password", authenticate, validateBody(changePasswordSchema), controller.changePassword);
-router.post("/verify-qq", validateBody(verifyQQSchema), controller.verifyQQ);
+router.post("/verify-qq", rateLimitMiddleware, validateBody(verifyQQSchema), controller.verifyQQ);
 router.post("/request-password-reset", rateLimitMiddleware, validateBody(requestPasswordResetSchema), controller.requestPasswordReset);
 router.post("/confirm-password-reset", rateLimitMiddleware, validateBody(confirmPasswordResetSchema), controller.confirmPasswordReset);
 router.get("/registration-policy", controller.getRegistrationPolicy);

@@ -1,8 +1,7 @@
 import crypto from "crypto";
 import { prisma } from "../../config/database";
 import { hashPassword, comparePassword } from "../../utils/password";
-import { signToken, signRefreshToken, verifyToken } from "../../utils/jwt";
-import { AppError } from "../../utils/response";
+import { signToken, signRefreshToken, verifyRefreshToken, verifyToken, type JWTPayload } from "../../utils/jwt";import { AppError } from "../../utils/response";
 import { sendEmail } from "../notification/adapters/email.adapter";
 import { sendPrivateMessage } from "../notification/adapters/qq.adapter";
 import { deleteAvatarByUrl } from "../storage/storage.service";
@@ -516,7 +515,8 @@ export async function updateRegistrationPolicy(
 
 export async function refreshToken(data: RefreshTokenInput) {
   try {
-    const payload = verifyToken(data.refreshToken);
+    const payload = verifyRefreshToken(data.refreshToken);
+    await assertTokenNotRevoked(payload);
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -548,6 +548,7 @@ export async function refreshToken(data: RefreshTokenInput) {
       role: user.role,
     });
 
+    await revokeTokenPayload(payload);
     return { token, refreshToken: newRefreshToken };
   } catch (error) {
     if (error instanceof AppError) {
@@ -563,9 +564,61 @@ export async function refreshToken(data: RefreshTokenInput) {
   }
 }
 
-export async function logoutUser(_userId: string) {
-  // In a stateless JWT system, logout is handled client-side by deleting tokens.
-  // Server-side we could maintain a token blocklist, but for now we just return success.
+function tokenExpiresAt(payload: JWTPayload): Date {
+  if (typeof payload.exp === "number" && Number.isFinite(payload.exp)) {
+    return new Date(payload.exp * 1000);
+  }
+
+  return new Date();
+}
+
+async function assertTokenNotRevoked(payload: JWTPayload): Promise<void> {
+  if (!payload.jti) {
+    throw new AppError("Invalid token", "UNAUTHORIZED", 401);
+  }
+
+  const revoked = await prisma.revokedToken.findUnique({
+    where: { jti: payload.jti },
+    select: { jti: true },
+  });
+
+  if (revoked) {
+    throw new AppError("Invalid token", "UNAUTHORIZED", 401);
+  }
+}
+
+async function revokeTokenPayload(payload: JWTPayload): Promise<void> {
+  if (!payload.jti) {
+    throw new AppError("Invalid token", "UNAUTHORIZED", 401);
+  }
+
+  await prisma.revokedToken.upsert({
+    where: { jti: payload.jti },
+    update: {},
+    create: {
+      jti: payload.jti,
+      user_id: payload.userId,
+      expires_at: tokenExpiresAt(payload),
+    },
+  });
+}
+
+export async function cleanupExpiredRevokedTokens(now: Date = new Date()) {
+  const result = await prisma.revokedToken.deleteMany({
+    where: {
+      expires_at: { lt: now },
+    },
+  });
+
+  return { deletedCount: result.count };
+}
+
+export async function logoutUser(_userId: string, token?: string) {
+  if (token) {
+    const payload = verifyToken(token);
+    await revokeTokenPayload(payload);
+  }
+
   return { success: true };
 }
 
@@ -1225,6 +1278,10 @@ const privilegedUserSelect = {
   qq_number: true,
 };
 
+function canViewUserPii(role?: string | null): boolean {
+  return role === "super_admin" || role === "group_admin" || role === "supervisor";
+}
+
 function serializeManagedUser<T extends { tag_applications?: Array<{ tag: unknown }> }>(user: T) {
   const { tag_applications, ...rest } = user;
   return {
@@ -1425,9 +1482,10 @@ export async function grantMemberTagStatuses(
   return serializeManagedUser(updated);
 }
 
-export async function getAllUsers() {
+export async function getAllUsers(requesterRole?: string | null) {
+  const select = canViewUserPii(requesterRole) ? privilegedUserSelect : baseUserSelect;
   const users = await prisma.user.findMany({
-    select: privilegedUserSelect,
+    select,
     orderBy: { created_at: "desc" },
   });
   return users.map(serializeManagedUser);
