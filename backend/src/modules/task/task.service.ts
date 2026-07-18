@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import * as auditService from "../audit/audit.service";
 import * as timelineService from "../timeline/timeline.service";
 import * as notificationService from "../notification/notification.service";
-import { assertProjectViewPermission, getEligibleOpenClaimRoles } from "../project/project-access";
+import { assertProjectViewPermission } from "../project/project-access";
 import type {
   CreateTaskInput,
   UpdateTaskInput,
@@ -827,21 +827,26 @@ async function hasAnyRequiredRoleTag(userId: string, tagIds: string[]): Promise<
   return Boolean(approved);
 }
 
+async function hasTaskClaimRoleTagAccess(
+  userId: string,
+  projectId: string,
+  role: TaskRole
+): Promise<boolean> {
+  const requiredTagIds = await getTaskRoleRequiredTagIds(projectId, role);
+  if (requiredTagIds.length > 0) {
+    return hasAnyRequiredRoleTag(userId, requiredTagIds);
+  }
+
+  return hasRequiredRoleTag(userId, role);
+}
+
 async function assertTaskClaimRoleTagAccess(
   userId: string,
   projectId: string,
   role: TaskRole,
   message: string
 ): Promise<void> {
-  const requiredTagIds = await getTaskRoleRequiredTagIds(projectId, role);
-  if (requiredTagIds.length > 0) {
-    if (!(await hasAnyRequiredRoleTag(userId, requiredTagIds))) {
-      throw new AppError(message, "FORBIDDEN", 403);
-    }
-    return;
-  }
-
-  if (!(await hasRequiredRoleTag(userId, role))) {
+  if (!(await hasTaskClaimRoleTagAccess(userId, projectId, role))) {
     throw new AppError(message, "FORBIDDEN", 403);
   }
 }
@@ -1936,25 +1941,6 @@ export async function claimTask(
 
   const canManageTask = await canManageProjectTasks(task.project_id, userId);
 
-  const candidateRoles = membership
-    ? []
-    : await getEligibleOpenClaimRoles(task.project_id, userId);
-
-  // Allow claim if member has matching role or is supervisor
-  const canClaim = Boolean(
-    canManageTask ||
-    (membership && (membership.role === task.role || membership.role === "supervisor")) ||
-      candidateRoles.includes(task.role)
-  );
-
-  if (!canClaim) {
-    throw new AppError(
-      "You must be a project member with the appropriate role to claim this task",
-      "FORBIDDEN",
-      403
-    );
-  }
-
   if (!canManageTask) {
     await assertTaskClaimRoleTagAccess(
       userId,
@@ -2994,26 +2980,6 @@ export async function claimTranslationSegment(
   });
 
   const canManageTask = await canManageProjectTasks(task.project_id, userId);
-
-  const candidateRoles = membership
-    ? []
-    : await getEligibleOpenClaimRoles(task.project_id, userId);
-
-  const canClaim = Boolean(
-    canManageTask ||
-    (membership &&
-      !membership.left_at &&
-      (membership.role === "translation" || membership.role === "supervisor")) ||
-      candidateRoles.includes("translation")
-  );
-
-  if (!canClaim) {
-    throw new AppError(
-      "You must be a project translator to claim translation segments",
-      "FORBIDDEN",
-      403
-    );
-  }
 
   if (!canManageTask) {
     await assertTaskClaimRoleTagAccess(

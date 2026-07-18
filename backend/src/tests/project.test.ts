@@ -239,6 +239,21 @@ describe("Project & Workflow Tests", () => {
       );
     });
 
+    it("should allow open-claim candidates when a role has no configured labels", async () => {
+      const { user: owner } = await createTestUser();
+      const { token: candidateToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const task = await createTestTask({
+        project_id: project.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      expectSuccess(await get(app, `/api/v1/projects/${project.id}`, candidateToken), 200);
+      expectSuccess(await post(app, `/api/v1/tasks/${task.id}/claim`, {}, candidateToken), 200);
+    });
+
     it("should reject anonymous task reads", async () => {
       const { user: owner } = await createTestUser();
       const project = await createTestProject({ owner_id: owner.id });
@@ -1576,6 +1591,55 @@ describe("Project & Workflow Tests", () => {
       expectSuccess(reopenedClaim, 201);
     });
 
+    it("should let an active translator claim another segment via the default translation tag", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: translator, token: translatorToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id, episode_length: 600 });
+      const tag = await prisma.roleTag.create({
+        data: { name: "Default Translation", role_type: "translation" },
+      });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: translator.id, role: "timing" },
+      });
+      await prisma.tagApplication.create({
+        data: {
+          user_id: translator.id,
+          tag_id: tag.id,
+          approved: true,
+          approved_by: owner.id,
+          approved_at: new Date(),
+        },
+      });
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "translation",
+        status: "assigned",
+        assignee_id: translator.id,
+        creator_id: owner.id,
+      });
+      await prisma.translationClaim.create({
+        data: {
+          task_id: task.id,
+          unit_id: unit.id,
+          user_id: translator.id,
+          segment_start: 0,
+          segment_end: 120,
+          status: "active",
+        },
+      });
+
+      const res = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim-segment`,
+        { segment_start: 120, segment_end: 240 },
+        translatorToken
+      );
+
+      expectSuccess(res, 201);
+    });
+
     it("should enforce project max segment length and granted translation tags", async () => {
       const { user: owner } = await createTestUser();
       const { user: translator, token: translatorToken } = await createTestUser();
@@ -2399,6 +2463,35 @@ describe("Project & Workflow Tests", () => {
 
       const accepted = await post(app, `/api/v1/tasks/${task.id}/claim`, {}, workerToken);
       expectSuccess(accepted, 200);
+    });
+
+    it("should use approved default role tags instead of the existing project member role", async () => {
+      const { user: owner } = await createTestUser();
+      const { user: worker, token: workerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const tag = await prisma.roleTag.create({
+        data: { name: "Default Timing", role_type: "timing" },
+      });
+      await prisma.projectMember.create({
+        data: { project_id: project.id, user_id: worker.id, role: "source" },
+      });
+      await prisma.tagApplication.create({
+        data: {
+          user_id: worker.id,
+          tag_id: tag.id,
+          approved: true,
+          approved_by: owner.id,
+          approved_at: new Date(),
+        },
+      });
+      const task = await createTestTask({
+        project_id: project.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      expectSuccess(await post(app, `/api/v1/tasks/${task.id}/claim`, {}, workerToken), 200);
     });
   });
 

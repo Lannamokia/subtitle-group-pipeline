@@ -78,7 +78,7 @@ export async function getEligibleOpenClaimRoles(
   projectId: string,
   userId: string
 ): Promise<TaskRole[]> {
-  const [project, approvedTags] = await Promise.all([
+  const [project, approvedTags, roleTags] = await Promise.all([
     prisma.project.findUnique({
       where: { id: projectId },
       select: {
@@ -109,12 +109,16 @@ export async function getEligibleOpenClaimRoles(
       where: { user_id: userId, approved: true },
       select: { tag_id: true, tag: { select: { role_type: true } } },
     }),
+    prisma.roleTag.findMany({
+      select: { role_type: true },
+    }),
   ]);
 
   if (!project || project.deleted_at || project.is_archived) return [];
 
   const approvedTagIds = new Set(approvedTags.map((application) => application.tag_id));
   const approvedRoleTypes = new Set(approvedTags.map((application) => application.tag.role_type));
+  const configuredRoleTypes = new Set(roleTags.map((tag) => tag.role_type));
   const eligibleRoles = new Set<TaskRole>();
 
   for (const task of project.tasks) {
@@ -132,7 +136,7 @@ export async function getEligibleOpenClaimRoles(
     );
     const hasRequiredTag = requiredTagIds.length > 0
       ? requiredTagIds.some((tagId) => approvedTagIds.has(tagId))
-      : approvedRoleTypes.has(task.role);
+      : !configuredRoleTypes.has(task.role) || approvedRoleTypes.has(task.role);
 
     if (hasRequiredTag) eligibleRoles.add(task.role);
   }
