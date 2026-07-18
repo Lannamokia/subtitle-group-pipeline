@@ -27,7 +27,7 @@ import {
 } from "../../utils/defaultUploadPolicy";
 import { normalizeUploadPolicyJson } from "../../utils/uploadPolicy";
 import * as storageService from "../storage/storage.service";
-import { assertProjectViewPermission as assertSharedProjectViewPermission } from "../project/project-access";
+import { assertProjectViewPermission } from "../project/project-access";
 import * as taskService from "../task/task.service";
 import * as projectService from "../project/project.service";
 
@@ -54,7 +54,7 @@ async function getActorRole(actorId: string): Promise<UserRole> {
 }
 
 async function assertProjectParticipant(projectId: string, actorId: string): Promise<void> {
-  await assertSharedProjectViewPermission(projectId, actorId, await getActorRole(actorId), {
+  await assertProjectViewPermission(projectId, actorId, await getActorRole(actorId), {
     allowOpenClaimCandidate: false,
   });
 }
@@ -1000,6 +1000,10 @@ export async function uploadFile(
     throw new AppError("Uploader not found", "NOT_FOUND", 404);
   }
 
+  await assertProjectViewPermission(data.project_id, uploaderId, uploader.role, {
+    allowOpenClaimCandidate: false,
+  });
+
   const taskContext = await resolveTaskUploadContext(data.project_id, data);
 
   const uploadValidation = await validateUpload(
@@ -1146,6 +1150,10 @@ export async function replaceFile(
     throw new AppError("Uploader not found", "NOT_FOUND", 404);
   }
 
+  await assertProjectViewPermission(file.project_id, uploaderId, uploader.role, {
+    allowOpenClaimCandidate: false,
+  });
+
   const metadata = parseMetadata(data.metadata ?? file.metadata);
   const metadataRole = getMetadataStringValue(metadata, "role", "task_role");
   const validation = await validateUpload(
@@ -1275,7 +1283,9 @@ export async function getProjectFiles(
   if (!resolvedProjectId) {
     throw new AppError("project_id is required", "VALIDATION_ERROR", 400);
   }
-  await assertProjectViewPermission(resolvedProjectId, userId, userRole);
+  await assertProjectViewPermission(resolvedProjectId, userId, userRole, {
+    allowOpenClaimCandidate: false,
+  });
   const resolvedFileType = query.file_type || query.type;
   const resolvedUnitId = query.unit_id || query.unitId;
   const resolvedTaskId = query.task_id || query.taskId;
@@ -1802,16 +1812,6 @@ async function assertFileViewPermission(file: {
   if (!membership) {
     throw new AppError("Insufficient permissions to view this file", "FORBIDDEN", 403);
   }
-}
-
-export async function assertProjectViewPermission(
-  projectId: string,
-  userId: string,
-  userRole: UserRole
-): Promise<void> {
-  await assertSharedProjectViewPermission(projectId, userId, userRole, {
-    allowOpenClaimCandidate: false,
-  });
 }
 
 async function assertSensitiveFileAccess(file: {
