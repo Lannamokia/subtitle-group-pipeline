@@ -31,6 +31,8 @@ import { assertProjectViewPermission } from "../project/project-access";
 import * as taskService from "../task/task.service";
 import * as projectService from "../project/project.service";
 
+const MAX_DOWNLOAD_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+
 // ============ Upload Policy ============
 
 const TEXT_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
@@ -2071,7 +2073,8 @@ export async function getDownloadLink(
 
   // Calculate TTL
   const configuredTtl = await resolveConfiguredDownloadTtl(file.project, requestedTtl);
-  const ttlSeconds = getMinimumTtl(file.file_type, configuredTtl);
+  const cappedTtl = Math.min(configuredTtl, MAX_DOWNLOAD_TTL_SECONDS);
+  const ttlSeconds = getMinimumTtl(file.file_type, cappedTtl);
   const now = new Date();
   const nextSecond = Math.ceil(now.getTime() / 1000) * 1000;
   const expiresAt = new Date(nextSecond + ttlSeconds * 1000);

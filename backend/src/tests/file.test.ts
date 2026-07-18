@@ -1015,6 +1015,56 @@ describe("File Management Tests", () => {
         .toBeGreaterThanOrEqual(180);
     });
 
+    it("should cap project TTL to 7 days", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const tenYears = 10 * 365 * 24 * 60 * 60;
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { download_link_ttl_seconds: tenYears },
+      });
+
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+        name: "huge-ttl.ass",
+      });
+
+      const res = await post(app, `/api/v1/files/${file.id}/download-link`, {}, token);
+      expectSuccess(res, 200);
+
+      const now = Date.now();
+      const expiresAt = new Date(res.body.data.expiresAt).getTime();
+      const maxMs = 7 * 24 * 60 * 60 * 1000;
+      expect(expiresAt - now).toBeLessThanOrEqual(maxMs + 60_000); // + 1 min tolerance
+      expect(expiresAt - now).toBeGreaterThan(0);
+    });
+
+    it("should keep a normal 300s TTL unaffected", async () => {
+      const { user, token } = await createTestUser();
+      const project = await createTestProject({ owner_id: user.id });
+      const { file } = await createTestFile({
+        project_id: project.id,
+        uploader_id: user.id,
+        name: "normal-ttl.ass",
+      });
+
+      const res = await post(
+        app,
+        `/api/v1/files/${file.id}/download-link`,
+        { ttl: 300 },
+        token
+      );
+      expectSuccess(res, 200);
+
+      const now = new Date();
+      const expiresAt = new Date(res.body.data.expiresAt);
+      const ttlSeconds = (expiresAt.getTime() - now.getTime()) / 1000;
+      expect(ttlSeconds).toBeGreaterThanOrEqual(295);
+      expect(ttlSeconds).toBeLessThanOrEqual(400);
+    });
+
     it("should record S3 temporary links for reuse and cleanup", async () => {
       const { user, token } = await createTestUser();
       const backend = await createTestStorageBackend({
