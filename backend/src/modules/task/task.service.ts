@@ -720,6 +720,72 @@ async function assertCanManageProjectTasks(projectId: string, actorId?: string):
   }
 }
 
+/**
+ * Remove a project member after they no longer have any task or translation claim
+ * binding them to the project, unless they have project management permissions.
+ */
+async function removeProjectMemberIfNoBindings(
+  projectId: string,
+  userId: string,
+  actorId?: string
+): Promise<void> {
+  if (await canManageProjectTasks(projectId, userId)) {
+    return;
+  }
+
+  const otherTasks = await prisma.task.count({
+    where: {
+      project_id: projectId,
+      assignee_id: userId,
+    },
+  });
+  if (otherTasks > 0) {
+    return;
+  }
+
+  const reservedClaims = await prisma.translationClaim.count({
+    where: {
+      task: { project_id: projectId },
+      user_id: userId,
+      status: { in: RESERVED_TRANSLATION_CLAIM_STATUSES },
+    },
+  });
+  if (reservedClaims > 0) {
+    return;
+  }
+
+  const membership = await prisma.projectMember.findUnique({
+    where: {
+      project_id_user_id: { project_id: projectId, user_id: userId },
+    },
+  });
+  if (!membership) {
+    return;
+  }
+
+  await prisma.projectMember.delete({
+    where: { id: membership.id },
+  });
+
+  await timelineService.createTimelineEvent({
+    project_id: projectId,
+    event_type: TimelineEventType.member_left,
+    title: "成员自动离开项目",
+    description: "用户因无绑定任务而自动移出项目成员",
+    actor_id: actorId || userId,
+    metadata: { user_id: userId, reason: "no_bound_tasks" },
+  });
+
+  await auditService.log({
+    user_id: actorId || userId,
+    project_id: projectId,
+    action: "project.member_auto_remove",
+    resource_type: "project_member",
+    resource_id: membership.id,
+    new_value: { user_id: userId, reason: "no_bound_tasks" },
+  });
+}
+
 async function getTaskRoleMaxSegmentLength(
   projectId: string,
   role: TaskRole
@@ -2218,6 +2284,10 @@ export async function returnTask(
     new_value: updated,
   });
 
+  if (task.assignee_id) {
+    await removeProjectMemberIfNoBindings(task.project_id, task.assignee_id, actor);
+  }
+
   return updated;
 }
 
@@ -3198,6 +3268,8 @@ export async function abandonTranslationSegment(
       data: { status: "claimable", assignee_id: null, started_at: null, submitted_at: null },
     });
   }
+
+  await removeProjectMemberIfNoBindings(claim.task.project_id, claim.user_id, userId);
 
   await auditService.log({
     user_id: userId,

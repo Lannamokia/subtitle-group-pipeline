@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import axios from "axios";
 import { useParams, Link } from "react-router";
 import {
   announcementApi,
@@ -927,6 +928,7 @@ function TasksTab({
   const [taskUploading, setTaskUploading] = useState(false);
   const [previousResultFiles, setPreviousResultFiles] = useState<FileEntity[]>([]);
   const [previousResultsLoading, setPreviousResultsLoading] = useState(false);
+  const [previousResultsPermissionDenied, setPreviousResultsPermissionDenied] = useState(false);
   const [taskDragOver, setTaskDragOver] = useState(false);
   const [segmentStart, setSegmentStart] = useState<number | "">("");
   const [segmentEnd, setSegmentEnd] = useState<number | "">("");
@@ -1048,6 +1050,7 @@ function TasksTab({
     let cancelled = false;
     const localResults = filterPreviousResultFiles(files, selectedTask, selectedTaskPreviousResultTarget, tasks);
     setPreviousResultFiles(localResults);
+    setPreviousResultsPermissionDenied(false);
     setPreviousResultsLoading(true);
 
     fileApi
@@ -1065,7 +1068,11 @@ function TasksTab({
       })
       .catch((error) => {
         if (!cancelled) {
-          toast.error("加载上一流程结果失败: " + getErrorMessage(error));
+          if (axios.isAxiosError(error) && error.response?.status === 403) {
+            setPreviousResultsPermissionDenied(true);
+          } else {
+            toast.error("加载上一流程结果失败: " + getErrorMessage(error));
+          }
         }
       })
       .finally(() => {
@@ -1817,21 +1824,31 @@ function TasksTab({
                 )}
 
                 <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-gray-500">负责人</span>
-                    <div className="mt-1 flex items-center gap-2">
+                    <div className="mt-1 flex min-w-0 items-center gap-2">
                       {selectedTask.assignee ? (
                         <>
                           <UserAvatar user={selectedTask.assignee} size="sm" />
-                          <span>{selectedTask.assignee.nickname || selectedTask.assignee.username}</span>
+                          <span className="truncate">{selectedTask.assignee.nickname || selectedTask.assignee.username}</span>
                         </>
                       ) : (
                         <span className="text-gray-400 italic">待认领</span>
                       )}
+                      {selectedTask.status === "claimable" && selectedTask.role !== "translation" && (
+                        <Button
+                          size="sm"
+                          onClick={() => handleTaskAction(selectedTask, "claim")}
+                          disabled={updating}
+                        >
+                          <UserCheck className="w-3.5 h-3.5 mr-1" />
+                          认领
+                        </Button>
+                      )}
                     </div>
                   </div>
                   {selectedTask.deadline && (
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-gray-500">截止日期</span>
                       <div className="mt-1 flex items-center gap-1 text-gray-700">
                         <Clock className="w-3.5 h-3.5" />
@@ -1867,7 +1884,15 @@ function TasksTab({
                 )}
 
                 {selectedTaskPreviousResultTarget && (
-                  <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                  <div className="relative space-y-3 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                    {/* Permission denied overlay */}
+                    {previousResultsPermissionDenied && (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60 backdrop-blur-sm">
+                        <div className="mx-4 max-w-xs rounded-lg border border-gray-200 bg-white px-4 py-3 text-center text-sm text-gray-700 shadow-sm">
+                          当前您还未加入项目未获得该功能权限
+                        </div>
+                      </div>
+                    )}
                     <div className="flex min-w-0 items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h4 className="text-sm font-medium text-gray-700">上一流程结果</h4>
@@ -2229,16 +2254,6 @@ function TasksTab({
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-gray-700">操作</h4>
                   <div className="flex flex-wrap gap-2">
-                    {selectedTask.status === "claimable" && selectedTask.role !== "translation" && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleTaskAction(selectedTask, "claim")}
-                        disabled={updating}
-                      >
-                        <UserCheck className="w-3.5 h-3.5 mr-1" />
-                        认领
-                      </Button>
-                    )}
                     {selectedTask.status === "assigned" &&
                       (selectedTaskAssigneeId === currentUser?.id || canManageTasks) && (
                       <Button

@@ -2041,6 +2041,45 @@ describe("Project & Workflow Tests", () => {
       expect(updatedTask!.assignee_id).toBeNull();
     });
 
+    it("should auto remove member after return when they have no other bindings", async () => {
+      const { user: owner, token: ownerToken } = await createTestUser();
+      const { user: worker, token: workerToken } = await createTestUser();
+      const project = await createTestProject({ owner_id: owner.id });
+      const unit = await createTestUnit({ project_id: project.id });
+
+      const task = await createTestTask({
+        project_id: project.id,
+        unit_id: unit.id,
+        role: "timing",
+        status: "claimable",
+        creator_id: owner.id,
+      });
+
+      const claimRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/claim`,
+        {},
+        workerToken
+      );
+      expectSuccess(claimRes, 200);
+      expect(await prisma.projectMember.findUnique({
+        where: { project_id_user_id: { project_id: project.id, user_id: worker.id } },
+      })).not.toBeNull();
+
+      const returnRes = await post(
+        app,
+        `/api/v1/tasks/${task.id}/return`,
+        {},
+        workerToken
+      );
+      expectSuccess(returnRes, 200);
+
+      const membership = await prisma.projectMember.findUnique({
+        where: { project_id_user_id: { project_id: project.id, user_id: worker.id } },
+      });
+      expect(membership).toBeNull();
+    });
+
     it("should prevent non-assignee from returning a task", async () => {
       const { user: owner, token: ownerToken } = await createTestUser();
       const { user: worker, token: workerToken } = await createTestUser();

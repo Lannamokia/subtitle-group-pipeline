@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import axios from "axios";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
@@ -49,15 +50,29 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
   const [cursorPosition, setCursorPosition] = useState(0);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [fileVersions, setFileVersions] = useState<FileVersionOption[]>([]);
+  const [permissionDenied, setPermissionDenied] = useState(false);
 
   useEffect(() => {
     const fetchPanelData = async () => {
       setIsLoading(true);
+      setPermissionDenied(false);
       try {
         const [commentData, memberData, fileData] = await Promise.all([
-          taskApi.getComments(taskId),
+          taskApi.getComments(taskId).catch((error) => {
+            if (axios.isAxiosError(error) && error.response?.status === 403) {
+              setPermissionDenied(true);
+              return [] as TaskComment[];
+            }
+            throw error;
+          }),
           memberApi.getMembers().catch(() => ({ items: [] as User[] })),
-          fileApi.getFiles({ projectId, taskId }).catch(() => ({ items: [] })),
+          fileApi.getFiles({ projectId, taskId }).catch((error) => {
+            if (axios.isAxiosError(error) && error.response?.status === 403) {
+              setPermissionDenied(true);
+              return { items: [] };
+            }
+            throw error;
+          }),
         ]);
         setComments(commentData);
         setAllUsers(memberData.items || []);
@@ -168,7 +183,16 @@ export function TaskCommentPanel({ taskId, projectId }: TaskCommentPanelProps) {
   const canReferenceLine = selectedVersion?.fileType === "subtitle";
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="relative flex flex-col h-full">
+      {/* Permission denied overlay */}
+      {permissionDenied && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60 backdrop-blur-sm">
+          <div className="mx-4 max-w-xs rounded-lg border border-gray-200 bg-white px-4 py-3 text-center text-sm text-gray-700 shadow-sm">
+            当前您还未加入项目未获得该功能权限
+          </div>
+        </div>
+      )}
+
       {/* Comment list */}
       <div className="flex-1 overflow-y-auto space-y-4 p-4 min-h-[300px]">
         {isLoading ? (

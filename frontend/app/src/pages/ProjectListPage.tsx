@@ -27,7 +27,7 @@ export function ProjectListPage() {
   const canCreateProject = useAuthStore((s) => s.isSupervisor());
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus>("all");
-  const [scope, setScope] = useState<"mine" | "all">("mine");
+  const [scope, setScope] = useState<"mine" | "all">("all");
   const [projects, setProjects] = useState<Project[]>([]);
 
   useEffect(() => {
