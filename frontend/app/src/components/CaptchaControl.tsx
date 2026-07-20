@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { captchaApi, getErrorMessage } from "@/lib/api";
 import type { CaptchaPresentation, LoginResponse } from "@/types";
@@ -69,8 +69,10 @@ export function CaptchaControl({ username, password, beforeStart, onVerified, on
   const [recovering, setRecovering] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const vendorRef = useRef<HTMLDivElement>(null);
+  const iframeReadyRef = useRef(false);
+  const configFingerprintRef = useRef("");
 
-  useEffect(() => {
+  const clearChallenge = useCallback(() => {
     setStatus("idle");
     setError("");
     setPresentation(null);
@@ -78,7 +80,33 @@ export function CaptchaControl({ username, password, beforeStart, onVerified, on
     setOutageTicket("");
     setRecoveryKey("");
     setDialogOpen(false);
-  }, [username]);
+    iframeReadyRef.current = false;
+    vendorRef.current?.replaceChildren();
+  }, []);
+
+  useEffect(() => {
+    clearChallenge();
+  }, [clearChallenge, username]);
+
+  useEffect(() => {
+    const refreshConfig = async () => {
+      try {
+        const config = await captchaApi.getPublicConfig();
+        const fingerprint = `${config.enabled}:${config.configVersion}:${config.provider?.type || "none"}`;
+        if (configFingerprintRef.current && configFingerprintRef.current !== fingerprint) clearChallenge();
+        configFingerprintRef.current = fingerprint;
+      } catch {
+        // Starting verification still performs a foreground check and surfaces failures.
+      }
+    };
+    void refreshConfig();
+    const interval = window.setInterval(refreshConfig, 30_000);
+    window.addEventListener("captcha-config-changed", refreshConfig);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("captcha-config-changed", refreshConfig);
+    };
+  }, [clearChallenge]);
 
   useEffect(() => {
     if (presentation?.kind !== "custom_embed" || !dialogOpen) return;
@@ -89,6 +117,7 @@ export function CaptchaControl({ username, password, beforeStart, onVerified, on
         event.data?.protocolVersion !== 1 ||
         event.data?.sessionId !== presentation.sessionRef
       ) return;
+      if (event.data.event === "captcha.ready") iframeReadyRef.current = true;
       if (event.data.event === "captcha.resize" && typeof event.data.height === "number") {
         iframeRef.current?.style.setProperty("height", `${Math.min(560, Math.max(190, event.data.height))}px`);
       }
@@ -100,7 +129,14 @@ export function CaptchaControl({ username, password, beforeStart, onVerified, on
       if (event.data.event === "captcha.error") void fail("验证码服务暂时不可用");
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    iframeReadyRef.current = false;
+    const readyTimeout = window.setTimeout(() => {
+      if (!iframeReadyRef.current) void fail("验证码组件响应超时");
+    }, 10_000);
+    return () => {
+      window.clearTimeout(readyTimeout);
+      window.removeEventListener("message", onMessage);
+    };
   }, [dialogOpen, presentation]);
 
   async function fail(message: string) {
@@ -169,6 +205,7 @@ export function CaptchaControl({ username, password, beforeStart, onVerified, on
     setOutageTicket("");
     try {
       const config = await captchaApi.getPublicConfig();
+      configFingerprintRef.current = `${config.enabled}:${config.configVersion}:${config.provider?.type || "none"}`;
       if (!config.enabled) {
         await onVerified();
         setStatus("idle");

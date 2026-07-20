@@ -99,13 +99,25 @@ export class CustomCaptchaProvider implements CaptchaProvider {
 abstract class VendorProvider implements CaptchaProvider {
   abstract prepare(context: CaptchaContext): Promise<CaptchaPresentation>;
   abstract verify(input: CaptchaVerificationInput): Promise<CaptchaResult>;
+  abstract healthCheck(): Promise<CaptchaProviderHealth>;
   protected abstract verificationUrl(): string;
 
-  async healthCheck(): Promise<CaptchaProviderHealth> {
+  protected async checkCredentials(secretKey: string): Promise<CaptchaProviderHealth> {
     try {
-      const url = new URL(this.verificationUrl());
-      const response = await request(`${url.protocol}//${url.host}`, { method: "HEAD" });
+      const body = new URLSearchParams({
+        secret: secretKey,
+        response: `health-check-${crypto.randomBytes(16).toString("base64url")}`,
+      });
+      const response = await request(this.verificationUrl(), { method: "POST", body });
       if (response.status >= 500) return unavailableHealth("PROVIDER_5XX");
+      if (response.status === 401 || response.status === 403) {
+        return { status: "misconfigured", errorCode: "PROVIDER_CREDENTIALS", checkedAt: new Date().toISOString() };
+      }
+      if (!response.ok) return { status: "healthy", checkedAt: new Date().toISOString() };
+      const payload = await response.json() as { "error-codes"?: string[] };
+      if (payload["error-codes"]?.some((code) => code === "invalid-input-secret" || code === "missing-input-secret")) {
+        return { status: "misconfigured", errorCode: "PROVIDER_CREDENTIALS", checkedAt: new Date().toISOString() };
+      }
       return { status: "healthy", checkedAt: new Date().toISOString() };
     } catch {
       return unavailableHealth("PROVIDER_NETWORK");
@@ -138,6 +150,10 @@ export class CloudflareTurnstileProvider extends VendorProvider {
     };
   }
 
+  async healthCheck(): Promise<CaptchaProviderHealth> {
+    return this.checkCredentials(this.config.secretKey);
+  }
+
   async verify(input: CaptchaVerificationInput): Promise<CaptchaResult> {
     const body = new URLSearchParams({ secret: this.config.secretKey, response: input.token });
     try {
@@ -166,6 +182,10 @@ export class GoogleRecaptchaV2Provider extends VendorProvider {
 
   async prepare(): Promise<CaptchaPresentation> {
     return { kind: "recaptcha_v2_invisible", siteKey: this.config.siteKey, badge: "bottomright" };
+  }
+
+  async healthCheck(): Promise<CaptchaProviderHealth> {
+    return this.checkCredentials(this.config.secretKey);
   }
 
   async verify(input: CaptchaVerificationInput): Promise<CaptchaResult> {

@@ -83,13 +83,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [openNavTooltip, setOpenNavTooltip] = useState<string | null>(null);
   const [captchaDisabled, setCaptchaDisabled] = useState(false);
+  const adminUser = user ? ["super_admin", "group_admin"].includes(user.role) : false;
 
   useEffect(() => {
     setOpenNavTooltip(null);
   }, [sidebarCollapsed]);
 
   useEffect(() => {
-    if (!location.pathname.startsWith("/admin")) return;
+    if (!adminUser) {
+      setCaptchaDisabled(false);
+      return;
+    }
     const refreshCaptchaStatus = () => {
       void captchaApi.getPublicConfig().then((config) => setCaptchaDisabled(!config.enabled)).catch(() => undefined);
     };
@@ -100,7 +104,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.clearInterval(interval);
       window.removeEventListener("captcha-config-changed", refreshCaptchaStatus);
     };
-  }, [location.pathname]);
+  }, [adminUser]);
 
   const handleLogout = () => {
     logout();
@@ -342,7 +346,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </DropdownMenu>
           </header>
 
-          {(user?.restrictedRecovery || (location.pathname.startsWith("/admin") && captchaDisabled)) && (
+          {(user?.restrictedRecovery || (adminUser && captchaDisabled)) && (
             <div className={`flex shrink-0 items-center gap-2 border-b px-4 py-2 text-sm font-medium ${user?.restrictedRecovery ? "border-amber-300 bg-amber-100 text-amber-950" : "border-red-300 bg-red-100 text-red-900"}`}>
               {user?.restrictedRecovery ? <ShieldAlert className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
               {user?.restrictedRecovery ? "受限恢复会话：仅可修复登录验证配置" : "安全警告：登录验证码当前已关闭"}

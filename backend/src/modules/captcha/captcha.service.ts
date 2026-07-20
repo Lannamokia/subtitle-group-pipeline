@@ -14,7 +14,8 @@ import {
   verifyRecoveryKey,
 } from "./captcha.crypto";
 import { createProvider } from "./captcha.providers";
-import type { CaptchaPolicyLevel, CaptchaProviderType } from "./captcha.types";
+import { parseProviderConfig } from "./captcha.schema";
+import type { CaptchaPolicyLevel, CaptchaProviderType, CaptchaResult } from "./captcha.types";
 
 const ATTEMPT_TTL_MS = 5 * 60 * 1000;
 const VERIFICATION_TTL_MS = 5 * 60 * 1000;
@@ -174,22 +175,42 @@ export async function completeAttempt(attemptId: string, providerToken: string) 
     include: { provider: true },
   });
   const policy = await getPolicy();
-  if (!attempt || attempt.status !== "pending" || attempt.expires_at <= new Date()) {
+  if (!attempt || attempt.expires_at <= new Date()) {
     throw new AppError("Captcha attempt expired", "CAPTCHA_ATTEMPT_EXPIRED", 410);
+  }
+  if (attempt.status !== "pending") {
+    throw new AppError("Captcha attempt was already used", "CAPTCHA_ATTEMPT_USED", 409);
   }
   if (!policy.enabled || policy.config_version !== attempt.config_version || policy.active_provider_id !== attempt.provider_id) {
     throw new AppError("Captcha configuration changed", "CAPTCHA_CONFIG_CHANGED", 409);
   }
 
-  const provider = createProvider(attempt.provider_type, decryptConfig(attempt.provider.encrypted_config));
-  const result = await provider.verify({
-    token: providerToken,
-    sessionRef: attempt.provider_session_ref || undefined,
-    expectedAction: attempt.action,
+  const reserved = await prisma.captchaAttempt.updateMany({
+    where: { id: attempt.id, status: "pending", expires_at: { gt: new Date() } },
+    data: { status: "verifying" },
   });
+  if (reserved.count !== 1) {
+    throw new AppError("Captcha attempt was already used", "CAPTCHA_ATTEMPT_USED", 409);
+  }
+
+  let result: CaptchaResult;
+  try {
+    const provider = createProvider(attempt.provider_type, decryptConfig(attempt.provider.encrypted_config));
+    result = await provider.verify({
+      token: providerToken,
+      sessionRef: attempt.provider_session_ref || undefined,
+      expectedAction: attempt.action,
+    });
+  } catch {
+    await prisma.captchaAttempt.updateMany({
+      where: { id: attempt.id, status: "verifying" },
+      data: { status: "failed", failure_code: "PROVIDER_UNAVAILABLE" },
+    });
+    throw new AppError("Captcha provider is unavailable", "CAPTCHA_PROVIDER_UNAVAILABLE", 503);
+  }
   if (!result.success) {
-    await prisma.captchaAttempt.update({
-      where: { id: attempt.id },
+    await prisma.captchaAttempt.updateMany({
+      where: { id: attempt.id, status: "verifying" },
       data: { status: "failed", failure_code: result.errorCode || "CAPTCHA_REJECTED" },
     });
     if (result.unavailable) {
@@ -206,10 +227,22 @@ export async function completeAttempt(attemptId: string, providerToken: string) 
     throw new AppError("Captcha verification failed", "CAPTCHA_REJECTED", 400);
   }
 
+  const currentPolicy = await getPolicy();
+  if (
+    !currentPolicy.enabled || currentPolicy.config_version !== attempt.config_version ||
+    currentPolicy.active_provider_id !== attempt.provider_id
+  ) {
+    await prisma.captchaAttempt.updateMany({
+      where: { id: attempt.id, status: "verifying" },
+      data: { status: "failed", failure_code: "CAPTCHA_CONFIG_CHANGED" },
+    });
+    throw new AppError("Captcha configuration changed", "CAPTCHA_CONFIG_CHANGED", 409);
+  }
+
   const verificationToken = opaqueToken();
   const expiresAt = new Date(Date.now() + VERIFICATION_TTL_MS);
-  await prisma.captchaAttempt.update({
-    where: { id: attempt.id },
+  const completed = await prisma.captchaAttempt.updateMany({
+    where: { id: attempt.id, status: "verifying" },
     data: {
       status: "verified",
       verification_digest: sha256(verificationToken),
@@ -218,31 +251,44 @@ export async function completeAttempt(attemptId: string, providerToken: string) 
       failure_code: null,
     },
   });
+  if (completed.count !== 1) {
+    throw new AppError("Captcha attempt was already used", "CAPTCHA_ATTEMPT_USED", 409);
+  }
   return { verificationToken, expiresAt };
 }
 
 export async function requireVerification(username: string, verificationToken?: string): Promise<string | null> {
-  const policy = await getPolicy();
-  if (!policy.enabled) return null;
-  if (!verificationToken) throw new AppError("Captcha verification required", "CAPTCHA_REQUIRED", 400);
+  return prisma.$transaction(async (tx) => {
+    const policy = await tx.captchaPolicy.upsert({
+      where: { id: "default" },
+      update: {},
+      create: { id: "default", enabled: false, level: "medium" },
+    });
+    if (!policy.enabled) return null;
+    if (!verificationToken) throw new AppError("Captcha verification required", "CAPTCHA_REQUIRED", 400);
 
-  const attempt = await prisma.captchaAttempt.findUnique({ where: { verification_digest: sha256(verificationToken) } });
-  if (
-    !attempt ||
-    attempt.status !== "verified" ||
-    attempt.verification_expires_at === null ||
-    attempt.verification_expires_at <= new Date() ||
-    attempt.username_digest !== usernameDigest(username) ||
-    attempt.config_version !== policy.config_version ||
-    attempt.provider_id !== policy.active_provider_id
-  ) {
-    throw new AppError("Captcha verification is invalid", "CAPTCHA_PROOF_INVALID", 400);
-  }
-  await prisma.captchaAttempt.update({
-    where: { id: attempt.id },
-    data: { status: "consumed", consumed_at: new Date(), verification_digest: null },
+    const proofDigest = sha256(verificationToken);
+    const attempt = await tx.captchaAttempt.findUnique({ where: { verification_digest: proofDigest } });
+    if (
+      !attempt ||
+      attempt.status !== "verified" ||
+      attempt.verification_expires_at === null ||
+      attempt.verification_expires_at <= new Date() ||
+      attempt.username_digest !== usernameDigest(username) ||
+      attempt.config_version !== policy.config_version ||
+      attempt.provider_id !== policy.active_provider_id
+    ) {
+      throw new AppError("Captcha verification is invalid", "CAPTCHA_PROOF_INVALID", 400);
+    }
+    const consumed = await tx.captchaAttempt.updateMany({
+      where: { id: attempt.id, status: "verified", verification_digest: proofDigest },
+      data: { status: "consumed", consumed_at: new Date(), verification_digest: null },
+    });
+    if (consumed.count !== 1) {
+      throw new AppError("Captcha verification is invalid", "CAPTCHA_PROOF_INVALID", 400);
+    }
+    return attempt.id;
   });
-  return attempt.id;
 }
 
 export async function recordCredentialFailure(attemptId: string | null) {
@@ -273,9 +319,13 @@ export async function issueOutageTicket(username: string, ip: string) {
   }
   const profile = await prisma.captchaProviderProfile.findUnique({ where: { id: policy.active_provider_id } });
   if (!profile) throw new AppError("Recovery is not available", "CAPTCHA_RECOVERY_UNAVAILABLE", 503);
+  const priorConfirmed5xx = profile.health_status === "unavailable" && profile.health_error_code === "PROVIDER_5XX";
   const health = await checkHealth(profile);
   if (health.status === "healthy") {
     throw new AppError("Captcha provider is healthy", "CAPTCHA_PROVIDER_HEALTHY", 409);
+  }
+  if (health.errorCode === "PROVIDER_5XX" && !priorConfirmed5xx) {
+    throw new AppError("Captcha outage is not yet confirmed", "CAPTCHA_OUTAGE_NOT_CONFIRMED", 503);
   }
   const ticket = opaqueToken();
   const expiresAt = new Date(Date.now() + OUTAGE_TICKET_TTL_MS);
@@ -347,13 +397,16 @@ export async function recoveryLogin(input: {
     return deny("INVALID_CREDENTIALS");
   }
 
-  const token = signRecoveryToken({ userId: user.id, username: user.username, role: user.role });
-  await prisma.$transaction([
-    prisma.captchaOutageTicket.update({ where: { id: ticket.id }, data: { used_at: new Date() } }),
-    prisma.captchaRecoveryAttempt.create({
+  const recorded = await prisma.$transaction(async (tx) => {
+    const consumed = await tx.captchaOutageTicket.updateMany({
+      where: { id: ticket.id, used_at: null, expires_at: { gt: new Date() } },
+      data: { used_at: new Date() },
+    });
+    if (consumed.count !== 1) return false;
+    await tx.captchaRecoveryAttempt.create({
       data: { username_digest: userDigest, ip_digest: clientDigest, success: true, reason_code: "SUCCESS" },
-    }),
-    prisma.auditLog.create({
+    });
+    await tx.auditLog.create({
       data: {
         user_id: user.id,
         action: "captcha.recovery_login",
@@ -362,8 +415,11 @@ export async function recoveryLogin(input: {
         user_agent: input.userAgent,
         new_value: JSON.stringify({ restricted: true }),
       },
-    }),
-  ]);
+    });
+    return true;
+  });
+  if (!recorded) return deny("INVALID_TICKET");
+  const token = signRecoveryToken({ userId: user.id, username: user.username, role: user.role });
   return {
     user: {
       id: user.id,
@@ -393,7 +449,7 @@ export async function createProfile(input: { name: string; type: CaptchaProvider
     data: {
       name: input.name,
       type: input.type,
-      encrypted_config: encryptConfig(input.config),
+      encrypted_config: encryptConfig(parseProviderConfig(input.type, input.config)),
       recovery_key_salt: keyHash.salt,
       recovery_key_hash: keyHash.hash,
     },
@@ -411,6 +467,7 @@ export async function createProfile(input: { name: string; type: CaptchaProvider
 export async function updateProfile(id: string, input: { name?: string; config?: ProviderConfig }, actorId: string) {
   const current = await prisma.captchaProviderProfile.findUnique({ where: { id } });
   if (!current) throw new AppError("Captcha provider not found", "NOT_FOUND", 404);
+  const validatedConfig = input.config ? parseProviderConfig(current.type, input.config) : undefined;
   let keyData: Awaited<ReturnType<typeof hashRecoveryKey>> | undefined;
   let recoveryKey: string | undefined;
   if (input.config) {
@@ -421,7 +478,7 @@ export async function updateProfile(id: string, input: { name?: string; config?:
     where: { id },
     data: {
       name: input.name,
-      encrypted_config: input.config ? encryptConfig(input.config) : undefined,
+      encrypted_config: validatedConfig ? encryptConfig(validatedConfig) : undefined,
       recovery_key_salt: keyData?.salt,
       recovery_key_hash: keyData?.hash,
       config_version: input.config ? { increment: 1 } : undefined,

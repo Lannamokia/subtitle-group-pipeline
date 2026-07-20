@@ -25,6 +25,12 @@ const recaptchaConfigSchema = z.object({
   verifyUrl: z.string().url().optional(),
 });
 
+export function parseProviderConfig(type: "custom" | "turnstile" | "recaptcha_v2_invisible", value: unknown) {
+  if (type === "custom") return customConfigSchema.parse(value);
+  if (type === "turnstile") return turnstileConfigSchema.parse(value);
+  return recaptchaConfigSchema.parse(value);
+}
+
 export const createAttemptSchema = z.object({
   username: z.string().trim().min(1).max(100),
   theme: z.enum(["light", "dark"]).optional(),
