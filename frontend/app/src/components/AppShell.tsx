@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { getBrandLogoUrl, useBrandingStore } from "@/stores/brandingStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useNotificationStore } from "@/stores/notificationStore";
+import { captchaApi } from "@/lib/api";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,8 @@ import {
   Award,
   Archive,
   BarChart3,
+  AlertTriangle,
+  ShieldAlert,
 } from "lucide-react";
 
 interface NavItem {
@@ -79,10 +82,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [openNavTooltip, setOpenNavTooltip] = useState<string | null>(null);
+  const [captchaDisabled, setCaptchaDisabled] = useState(false);
 
   useEffect(() => {
     setOpenNavTooltip(null);
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith("/admin")) return;
+    const refreshCaptchaStatus = () => {
+      void captchaApi.getPublicConfig().then((config) => setCaptchaDisabled(!config.enabled)).catch(() => undefined);
+    };
+    refreshCaptchaStatus();
+    const interval = window.setInterval(refreshCaptchaStatus, 30_000);
+    window.addEventListener("captcha-config-changed", refreshCaptchaStatus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("captcha-config-changed", refreshCaptchaStatus);
+    };
+  }, [location.pathname]);
 
   const handleLogout = () => {
     logout();
@@ -94,7 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return location.pathname.startsWith(path);
   };
 
-  const filteredNavItems = [
+  const allNavItems = [
     ...mainNavItems,
     ...memberNavItems,
     ...adminNavItems.filter((item) => {
@@ -103,6 +121,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return true;
     }),
   ];
+  const filteredNavItems = user?.restrictedRecovery
+    ? allNavItems.filter((item) => item.path === "/admin/settings")
+    : allNavItems;
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -246,60 +267,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <header className="hidden md:flex h-14 bg-white border-b border-gray-200 items-center px-4 gap-4 shrink-0">
             <div className="flex-1 min-w-0" />
 
-            <Button
-              variant="outline"
-              className="w-64 justify-start text-gray-400 text-sm h-8 px-3"
-              onClick={() => setSearchOpen(true)}
-            >
-              <Search className="w-4 h-4 mr-2" />
-              搜索项目、任务...
-              <kbd className="ml-auto text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-400">
-                ⌘K
-              </kbd>
-            </Button>
-
-            {isSupervisor() && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" className="h-8 px-3">
-                    <Plus className="w-4 h-4 mr-1" />
-                    新建
+            {!user?.restrictedRecovery && <>
+              <Button
+                variant="outline"
+                className="w-64 justify-start text-gray-400 text-sm h-8 px-3"
+                onClick={() => setSearchOpen(true)}
+              >
+                <Search className="w-4 h-4 mr-2" />
+                搜索项目、任务...
+                <kbd className="ml-auto text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-400">⌘K</kbd>
+              </Button>
+              {isSupervisor() && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild><Button size="sm" className="h-8 px-3"><Plus className="w-4 h-4 mr-1" />新建</Button></DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => navigate("/projects/new")}><FolderKanban className="w-4 h-4 mr-2" />新建项目</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate("/templates")}><Layers className="w-4 h-4 mr-2" />从模板创建</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 relative" onClick={() => navigate("/notifications")}>
+                    <Bell className="w-5 h-5 text-gray-500" />
+                    {unreadCount > 0 && <><span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-primary-500 rounded-full flex items-center justify-center"><span className="text-[10px] text-white font-medium">{unreadCount}</span></span><span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-primary-500 rounded-full animate-pulse-ring opacity-50" /></>}
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => navigate("/projects/new")}>
-                    <FolderKanban className="w-4 h-4 mr-2" />
-                    新建项目
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/templates")}>
-                    <Layers className="w-4 h-4 mr-2" />
-                    从模板创建
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 p-0 relative"
-                  onClick={() => navigate("/notifications")}
-                >
-                  <Bell className="w-5 h-5 text-gray-500" />
-                  {unreadCount > 0 && (
-                    <>
-                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-primary-500 rounded-full flex items-center justify-center">
-                        <span className="text-[10px] text-white font-medium">{unreadCount}</span>
-                      </span>
-                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-primary-500 rounded-full animate-pulse-ring opacity-50" />
-                    </>
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>通知</TooltipContent>
-            </Tooltip>
+                </TooltipTrigger>
+                <TooltipContent>通知</TooltipContent>
+              </Tooltip>
+            </>}
           </header>
 
           {/* Mobile Top Bar */}
@@ -319,14 +315,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="font-semibold text-gray-800 text-sm">{branding.appName}</span>
             </Link>
 
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 relative" onClick={() => navigate("/notifications")}>
+            {!user?.restrictedRecovery && <Button variant="ghost" size="sm" className="h-8 w-8 p-0 relative" onClick={() => navigate("/notifications")}>
               <Bell className="w-5 h-5 text-gray-500" />
               {unreadCount > 0 && (
                 <span className="absolute -top-0 -right-0 w-3.5 h-3.5 bg-primary-500 rounded-full flex items-center justify-center">
                   <span className="text-[8px] text-white font-medium">{unreadCount}</span>
                 </span>
               )}
-            </Button>
+            </Button>}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -335,16 +331,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onClick={() => navigate("/profile")}>
+                {!user?.restrictedRecovery && <DropdownMenuItem onClick={() => navigate("/profile")}>
                   <UserCircle className="w-4 h-4 mr-2" />个人设置
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
+                </DropdownMenuItem>}
+                {!user?.restrictedRecovery && <DropdownMenuSeparator />}
                 <DropdownMenuItem onClick={handleLogout} className="text-red-600">
                   <LogOut className="w-4 h-4 mr-2" />退出
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </header>
+
+          {(user?.restrictedRecovery || (location.pathname.startsWith("/admin") && captchaDisabled)) && (
+            <div className={`flex shrink-0 items-center gap-2 border-b px-4 py-2 text-sm font-medium ${user?.restrictedRecovery ? "border-amber-300 bg-amber-100 text-amber-950" : "border-red-300 bg-red-100 text-red-900"}`}>
+              {user?.restrictedRecovery ? <ShieldAlert className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+              {user?.restrictedRecovery ? "受限恢复会话：仅可修复登录验证配置" : "安全警告：登录验证码当前已关闭"}
+            </div>
+          )}
 
           {/* Page content */}
           <main className="flex-1 overflow-y-auto scrollbar-thin p-4 md:p-6 pb-20 md:pb-6">
@@ -353,7 +356,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Mobile Bottom Tab Bar */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-200 flex items-center justify-around z-40 px-2 safe-area-pb">
+        {!user?.restrictedRecovery && <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-200 flex items-center justify-around z-40 px-2 safe-area-pb">
           {mainNavItems.map((item) => (
             <Link
               key={item.path}
@@ -385,7 +388,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Menu className="w-5 h-5" />
             <span className="text-[10px] font-medium">更多</span>
           </Button>
-        </nav>
+        </nav>}
 
         {/* Mobile "More" Menu Overlay */}
         {mobileMenuOpen && (

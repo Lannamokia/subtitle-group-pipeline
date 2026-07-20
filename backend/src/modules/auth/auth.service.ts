@@ -6,6 +6,7 @@ import { AppError } from "../../utils/response";
 import { sendEmail } from "../notification/adapters/email.adapter";
 import { sendPrivateMessage } from "../notification/adapters/qq.adapter";
 import { deleteAvatarByUrl } from "../storage/storage.service";
+import { recordCredentialFailure, requireVerification } from "../captcha/captcha.service";
 import type {
   RegisterInput,
   LoginInput,
@@ -327,16 +328,19 @@ export async function registerUser(data: RegisterInput) {
 }
 
 export async function loginUser(data: LoginInput) {
+  const captchaAttemptId = await requireVerification(data.username, data.verificationToken);
   const user = await prisma.user.findUnique({
     where: { username: data.username },
   });
 
   if (!user) {
+    await recordCredentialFailure(captchaAttemptId);
     throw new AppError("Invalid credentials", "UNAUTHORIZED", 401);
   }
 
   const valid = await comparePassword(data.password, user.password_hash);
   if (!valid) {
+    await recordCredentialFailure(captchaAttemptId);
     throw new AppError("Invalid credentials", "UNAUTHORIZED", 401);
   }
 
@@ -517,6 +521,9 @@ export async function updateRegistrationPolicy(
 export async function refreshToken(data: RefreshTokenInput) {
   try {
     const payload = verifyRefreshToken(data.refreshToken);
+    if (payload.sessionType === "recovery") {
+      throw new AppError("Recovery sessions cannot be refreshed", "RECOVERY_SESSION_RESTRICTED", 403);
+    }
     await assertTokenNotRevoked(payload);
 
     const user = await prisma.user.findUnique({

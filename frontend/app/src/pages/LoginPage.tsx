@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PasswordRuleHint } from "@/components/PasswordRuleHint";
+import { CaptchaControl } from "@/components/CaptchaControl";
 import { PASSWORD_RULE_MESSAGE, validatePassword } from "@/lib/passwordPolicy";
 import type { RoleTagDefinition } from "@/types";
 import { toast } from "sonner";
@@ -144,10 +145,10 @@ export function LoginPage() {
       .catch(() => setAvailableTags([]));
   }, []);
 
-  const handleLogin = async (data: LoginFormData) => {
+  const handleLogin = async (data: LoginFormData, verificationToken?: string) => {
     setIsLoading(true);
     try {
-      const result = await authApi.login(data);
+      const result = await authApi.login({ ...data, verificationToken });
       if (result.status === "pending_verification" || result.requiresVerification) {
         setVerificationInfo(
           result.verification ?? {
@@ -171,6 +172,20 @@ export function LoginPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleRecoveryLogin = (result: Awaited<ReturnType<typeof authApi.login>>) => {
+    if (!result.user || !result.token) {
+      toast.error("恢复登录响应缺少会话信息");
+      return;
+    }
+    login({
+      ...result.user,
+      token: result.token,
+      refreshToken: undefined,
+      restrictedRecovery: true,
+    });
+    navigate("/admin/settings?section=captcha");
   };
 
   const handleRegister = async (data: RegisterFormData) => {
@@ -392,7 +407,7 @@ export function LoginPage() {
 
               <TabsContent value="login" className="space-y-4">
                 <Form {...loginForm}>
-                  <form onSubmit={loginForm.handleSubmit(handleLogin)} className="space-y-4">
+                  <form onSubmit={(event) => event.preventDefault()} className="space-y-4">
                     <FormField
                       control={loginForm.control}
                       name="username"
@@ -443,16 +458,16 @@ export function LoginPage() {
                       )}
                     />
 
-                    <Button type="submit" className="w-full" disabled={isLoading}>
-                      {isLoading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          登录中...
-                        </>
-                      ) : (
-                        "登录"
-                      )}
-                    </Button>
+                    <CaptchaControl
+                      username={loginForm.watch("username")}
+                      password={loginForm.watch("password")}
+                      beforeStart={() => loginForm.trigger()}
+                      onVerified={async (verificationToken) => {
+                        await loginForm.handleSubmit((data) => handleLogin(data, verificationToken))();
+                      }}
+                      onRecovery={handleRecoveryLogin}
+                      disabled={isLoading}
+                    />
                     <Button
                       type="button"
                       variant="link"

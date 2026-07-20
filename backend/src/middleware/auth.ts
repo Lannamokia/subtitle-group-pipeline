@@ -8,7 +8,24 @@ export interface AuthenticatedRequest extends Request {
     id: string;
     username: string;
     role: string;
+    sessionType: "normal" | "recovery";
+    jti: string;
+    expiresAt?: Date;
   };
+}
+
+function recoverySessionMayAccess(req: Request): boolean {
+  const path = req.originalUrl.split("?")[0];
+  if (req.method === "POST" && path.endsWith("/auth/logout")) return true;
+  if (req.method === "GET" && path.endsWith("/auth/me")) return true;
+  if (path.includes("/system/captcha/providers")) {
+    if (req.method === "GET") return true;
+    return req.method === "POST" && (/\/test$/.test(path) || /\/activate$/.test(path));
+  }
+  if (path.endsWith("/system/captcha/policy")) {
+    return req.method === "GET" || req.method === "PUT";
+  }
+  return false;
 }
 
 export async function authenticate(
@@ -62,10 +79,19 @@ export async function authenticate(
       return;
     }
 
+    const sessionType = payload.sessionType === "recovery" ? "recovery" : "normal";
+    if (sessionType === "recovery" && !recoverySessionMayAccess(req)) {
+      errorResponse(res, "Recovery session is restricted", "RECOVERY_SESSION_RESTRICTED", 403);
+      return;
+    }
+
     req.user = {
       id: user.id,
       username: user.username,
       role: user.role,
+      sessionType,
+      jti: payload.jti,
+      expiresAt: payload.exp ? new Date(payload.exp * 1000) : undefined,
     };
 
     next();
@@ -80,6 +106,18 @@ export async function authenticate(
     }
     errorResponse(res, "Authentication failed", "UNAUTHORIZED", 401);
   }
+}
+
+export function requireFullSession(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (req.user?.sessionType === "recovery") {
+    errorResponse(res, "Recovery session is restricted", "RECOVERY_SESSION_RESTRICTED", 403);
+    return;
+  }
+  next();
 }
 
 export function requireRole(...allowedRoles: string[]) {

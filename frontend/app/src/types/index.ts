@@ -19,6 +19,7 @@ export interface User {
   roleTags?: RoleTagDefinition[];
   token?: string;
   refreshToken?: string;
+  restrictedRecovery?: boolean;
   createdAt: string;
 }
 
@@ -32,6 +33,7 @@ export interface RoleTag {
 export interface LoginCredentials {
   username: string;
   password: string;
+  verificationToken?: string;
 }
 
 export interface RegisterData {
@@ -754,6 +756,49 @@ export interface LoginResponse {
   };
   qqGroup?: string;
   verifyCommand?: string;
+  restrictedRecovery?: boolean;
+}
+
+export type CaptchaProviderType = 'custom' | 'turnstile' | 'recaptcha_v2_invisible';
+export type CaptchaPolicyLevel = 'low' | 'medium' | 'high';
+
+export type CaptchaPresentation =
+  | { kind: 'custom_embed'; iframeUrl: string; allowedOrigin: string; sessionRef: string }
+  | { kind: 'turnstile'; siteKey: string; action: string; appearance: 'interaction-only' }
+  | { kind: 'recaptcha_v2_invisible'; siteKey: string; badge: 'bottomright' }
+  | { kind: 'disabled' };
+
+export interface CaptchaPublicConfig {
+  enabled: boolean;
+  level: CaptchaPolicyLevel;
+  configVersion: number;
+  provider: { type: CaptchaProviderType } | null;
+}
+
+export interface CaptchaProviderProfile {
+  id: string;
+  name: string;
+  type: CaptchaProviderType;
+  config: {
+    baseUrl?: string;
+    siteId?: string;
+    siteKey?: string;
+    allowedHostnames?: string[];
+    action?: string;
+    secretConfigured: boolean;
+  };
+  isActive: boolean;
+  configVersion: number;
+  health: { status: string; errorCode?: string | null; checkedAt?: string | null };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CaptchaPolicyConfig {
+  enabled: boolean;
+  level: CaptchaPolicyLevel;
+  activeProviderId: string | null;
+  configVersion: number;
 }
 
 export interface RegisterResponse {

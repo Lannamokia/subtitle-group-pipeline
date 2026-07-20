@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, Outlet } from "react-router";
+import { Routes, Route, Navigate, Outlet, useLocation } from "react-router";
 import { useEffect } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrandingStore } from "@/stores/brandingStore";
@@ -24,7 +24,13 @@ import { SystemSettingsPage } from "@/pages/SystemSettingsPage";
 // Protected route wrapper
 function ProtectedRoute() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  return isAuthenticated ? <AppShell><Outlet /></AppShell> : <Navigate to="/login" replace />;
+  const restrictedRecovery = useAuthStore((s) => s.user?.restrictedRecovery);
+  const location = useLocation();
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (restrictedRecovery && location.pathname !== "/admin/settings") {
+    return <Navigate to="/admin/settings?section=captcha" replace />;
+  }
+  return <AppShell><Outlet /></AppShell>;
 }
 
 // Admin route wrapper

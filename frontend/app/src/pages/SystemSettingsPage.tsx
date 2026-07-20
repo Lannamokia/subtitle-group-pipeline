@@ -14,6 +14,7 @@ import {
   MonitorCheck,
   Settings,
   ShieldCheck,
+  ShieldEllipsis,
 } from "lucide-react";
 import { NotificationSettingsPage } from "@/pages/NotificationSettingsPage";
 import { TemplatePage } from "@/pages/TemplatePage";
@@ -24,6 +25,7 @@ import { StorageBackendPage } from "@/pages/admin/StorageBackendPage";
 import { BrandingSettingsPage } from "@/pages/admin/BrandingSettingsPage";
 import { SmtpSettingsPage } from "@/pages/admin/SmtpSettingsPage";
 import { GlobalHealthPage } from "@/pages/admin/GlobalHealthPage";
+import { CaptchaSettingsPage } from "@/pages/admin/CaptchaSettingsPage";
 
 type SettingsSection =
   | "branding"
@@ -34,7 +36,8 @@ type SettingsSection =
   | "announcements"
   | "smtp"
   | "health"
-  | "notifications";
+  | "notifications"
+  | "captcha";
 
 interface SettingsCardConfig {
   id: SettingsSection;
@@ -60,6 +63,13 @@ const SETTINGS_SECTIONS: SettingsCardConfig[] = [
     description: "注册策略、QQ 验证和岗位标签",
     icon: ShieldCheck,
     adminOnly: true,
+  },
+  {
+    id: "captcha",
+    title: "登录验证",
+    description: "Provider、验证强度与故障恢复",
+    icon: ShieldEllipsis,
+    superAdminOnly: true,
   },
   {
     id: "storage",
@@ -120,12 +130,13 @@ export function SystemSettingsPage() {
   const sections = useMemo(
     () =>
       SETTINGS_SECTIONS.filter((section) => {
+        if (user?.restrictedRecovery) return section.id === "captcha";
         if (section.superAdminOnly) return user?.role === "super_admin";
         if (section.adminOnly) return isAdmin;
         if (section.supervisorPlus) return isSupervisor;
         return true;
       }),
-    [isAdmin, isSupervisor, user?.role]
+    [isAdmin, isSupervisor, user?.restrictedRecovery, user?.role]
   );
 
   const requestedSection = searchParams.get("section") as SettingsSection | null;
@@ -203,6 +214,7 @@ export function SystemSettingsPage() {
           {activeSection === "notifications" && <NotificationSettingsPage />}
           {activeSection === "smtp" && <SmtpSettingsPage />}
           {activeSection === "health" && <GlobalHealthPage />}
+          {activeSection === "captcha" && <CaptchaSettingsPage />}
         </div>
       </div>
     </div>

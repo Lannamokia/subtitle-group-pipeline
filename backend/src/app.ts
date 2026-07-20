@@ -25,6 +25,8 @@ import timelineRoutes from "./modules/timeline/timeline.routes";
 import qqRoutes from "./modules/qq/qq.routes";
 import { ensureBridgeToken } from "./modules/qq/qq.bridge";
 import systemRoutes from "./modules/system/system.routes";
+import captchaPublicRoutes from "./modules/captcha/captcha.public.routes";
+import captchaAdminRoutes from "./modules/captcha/captcha.admin.routes";
 import setupRoutes from "./modules/setup/setup.routes";
 import { setupState } from "./modules/setup/setup.state";
 import { downloadByToken } from "./modules/file/file.controller";
@@ -160,6 +162,7 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
   });
 
   app.use(`${apiPrefix}/auth`, authRoutes);
+  app.use(`${apiPrefix}/auth/captcha`, captchaPublicRoutes);
   app.use(`${apiPrefix}/projects`, projectRoutes);
   app.use(`${apiPrefix}/templates`, templateRoutes);
   app.use(`${apiPrefix}/tasks`, taskRoutes);
@@ -172,6 +175,7 @@ export function createApp(options: { databaseReady?: boolean } = {}): Applicatio
   app.use(`${apiPrefix}/timeline`, timelineRoutes);
   app.use(`${apiPrefix}/qq`, qqRouteRateLimit, qqRoutes);
   app.use(`${apiPrefix}/system`, systemRoutes);
+  app.use(`${apiPrefix}/system/captcha`, captchaAdminRoutes);
 
   // Compatibility aliases for frontend callers that use root-level member URLs.
   app.get(`${apiPrefix}/members`, authenticate, authController.getAllUsers);

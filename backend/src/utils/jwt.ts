@@ -14,6 +14,7 @@ export interface JWTPayload {
   username: string;
   role: string;
   jti: string;
+  sessionType?: "normal" | "recovery";
   exp?: number;
 }
 
@@ -57,6 +58,18 @@ export function signRefreshToken(claims: SignableJWTClaims): string {
   return jwt.sign(payload, getJwtRefreshSecret(), {
     algorithm: JWT_ALGORITHM,
     expiresIn: env.JWT_REFRESH_EXPIRES_IN as jwt.SignOptions["expiresIn"],
+  });
+}
+
+export function signRecoveryToken(claims: Omit<SignableJWTClaims, "sessionType">): string {
+  const payload: JWTPayload = {
+    ...claims,
+    sessionType: "recovery",
+    jti: crypto.randomUUID(),
+  };
+  return jwt.sign(payload, getJwtSecret(), {
+    algorithm: JWT_ALGORITHM,
+    expiresIn: "10m",
   });
 }
 

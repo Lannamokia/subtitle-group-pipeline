@@ -82,6 +82,18 @@ frontend/app/
   dist/                # 构建产物
 ```
 
+### 登录验证码服务
+
+`captcha-service/` 是独立发布的 Git 子模块，包含自研验证码的 Express API、React iframe widget、初始化后台、Prisma 数据库和独立容器配置。主项目只保存 Provider 配置、登录验证策略、一次性本地证明和子模块引用；验证码服务可以使用单独域名与发布周期。
+
+克隆主项目后初始化子模块：
+
+```bash
+git submodule update --init --recursive
+```
+
+自研服务在 `captcha-service/` 内独立配置和部署，并强制使用 PostgreSQL 持久化、Redis 保存短期 nonce 防重放状态。先在其 `/admin` 初始化管理员并创建接入站点，再将一次性显示的 `siteId + secret` 和服务地址填入主项目“系统设置 -> 登录验证”。Turnstile 与 reCAPTCHA 配置由主项目直接连接厂商，不经过自研服务。
+
 ### QQ 机器人桥接器
 
 - Python 3.10+

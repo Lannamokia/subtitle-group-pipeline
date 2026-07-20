@@ -221,6 +221,26 @@ enum BackendType {
   s3_compatible
 }
 
+enum CaptchaProviderType {
+  custom
+  turnstile
+  recaptcha_v2_invisible
+}
+
+enum CaptchaPolicyLevel {
+  low
+  medium
+  high
+}
+
+enum CaptchaAttemptStatus {
+  pending
+  verified
+  failed
+  expired
+  consumed
+}
+
 // ==================== CORE TABLES ====================
 
 model User {
@@ -1081,4 +1101,90 @@ model RevokedToken {
   revoked_at DateTime @default(now())
 
   @@index([expires_at])
+}
+
+// ==================== CAPTCHA SECURITY ====================
+
+model CaptchaProviderProfile {
+  id                    String              @id @default(uuid())
+  name                  String
+  type                  CaptchaProviderType
+  encrypted_config      String
+  is_active             Boolean             @default(false)
+  config_version        Int                 @default(1)
+  recovery_key_salt     String
+  recovery_key_hash     String
+  health_status         String?
+  health_error_code     String?
+  last_health_check_at  DateTime?
+  created_at            DateTime            @default(now())
+  updated_at            DateTime            @updatedAt
+
+  attempts CaptchaAttempt[]
+
+  @@index([type])
+  @@index([is_active])
+}
+
+model CaptchaPolicy {
+  id                 String             @id @default("default")
+  enabled            Boolean            @default(false)
+  level              CaptchaPolicyLevel @default(medium)
+  active_provider_id String?
+  config_version     Int                @default(1)
+  updated_by         String?
+  created_at         DateTime           @default(now())
+  updated_at         DateTime           @updatedAt
+}
+
+model CaptchaAttempt {
+  id                     String               @id @default(uuid())
+  provider_id            String
+  provider_type          CaptchaProviderType
+  username_digest        String
+  ip_digest              String
+  action                 String               @default("login")
+  config_version         Int
+  status                 CaptchaAttemptStatus @default(pending)
+  provider_session_ref   String?
+  verification_digest    String?              @unique
+  verification_expires_at DateTime?
+  failure_code           String?
+  credentials_failed_at  DateTime?
+  expires_at             DateTime
+  completed_at           DateTime?
+  consumed_at            DateTime?
+  created_at             DateTime             @default(now())
+
+  provider CaptchaProviderProfile @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+
+  @@index([username_digest, created_at])
+  @@index([status, expires_at])
+  @@index([provider_id])
+}
+
+model CaptchaOutageTicket {
+  id                  String   @id @default(uuid())
+  ticket_digest       String   @unique
+  username_digest     String
+  ip_digest           String
+  provider_id         String
+  config_version      Int
+  expires_at          DateTime
+  used_at             DateTime?
+  created_at          DateTime @default(now())
+
+  @@index([username_digest, ip_digest, created_at])
+  @@index([expires_at])
+}
+
+model CaptchaRecoveryAttempt {
+  id              String   @id @default(uuid())
+  username_digest String
+  ip_digest       String
+  success         Boolean  @default(false)
+  reason_code     String
+  created_at      DateTime @default(now())
+
+  @@index([username_digest, ip_digest, created_at])
 }

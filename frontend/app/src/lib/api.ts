@@ -46,6 +46,12 @@ import type {
   SmtpSettings,
   QqBridgeSettings,
   GlobalHealthStatus,
+  CaptchaPresentation,
+  CaptchaProviderProfile,
+  CaptchaProviderType,
+  CaptchaPolicyLevel,
+  CaptchaPolicyConfig,
+  CaptchaPublicConfig,
   ApiResponse,
   PaginatedResponse,
 } from '@/types';
@@ -63,6 +69,10 @@ const PUBLIC_AUTH_PATHS = new Set([
   "/auth/verify-qq",
   "/auth/request-password-reset",
   "/auth/confirm-password-reset",
+  "/auth/captcha/public-config",
+  "/auth/captcha/attempts",
+  "/auth/captcha/outage-ticket",
+  "/auth/captcha/recovery-login",
 ]);
 
 function shouldForceLogoutOnUnauthorized(error: AxiosError) {
@@ -286,6 +296,7 @@ export function normalizeUser(raw: AnyRecord): User {
         : undefined,
     token: raw.token,
     refreshToken: raw.refreshToken,
+    restrictedRecovery: raw.restrictedRecovery ?? raw.restricted_recovery,
     createdAt: raw.createdAt ?? raw.created_at ?? "",
   };
 }
@@ -1119,6 +1130,52 @@ export const authApi = {
     const refreshToken = parsed?.state?.user?.refreshToken;
     return api.post<ApiResponse<{ token: string; refreshToken: string }>>('/auth/refresh', { refreshToken }).then(extractData);
   },
+};
+
+// ========== Captcha API ==========
+
+export const captchaApi = {
+  getPublicConfig: () =>
+    api.get<ApiResponse<CaptchaPublicConfig>>('/auth/captcha/public-config').then(extractData),
+
+  createAttempt: (data: { username: string; theme?: 'light' | 'dark'; brandColor?: string }) =>
+    api.post<ApiResponse<{ attemptId: string | null; expiresAt?: string; presentation: CaptchaPresentation }>>('/auth/captcha/attempts', data).then(extractData),
+
+  completeAttempt: (attemptId: string, providerToken: string) =>
+    api.post<ApiResponse<{ verificationToken: string; expiresAt: string }>>(`/auth/captcha/attempts/${attemptId}/complete`, { providerToken }).then(extractData),
+
+  requestOutageTicket: (username: string) =>
+    api.post<ApiResponse<{ outageTicket: string; expiresAt: string }>>('/auth/captcha/outage-ticket', { username }).then(extractData),
+
+  recoveryLogin: (data: { username: string; password: string; recoveryKey: string; outageTicket: string }) =>
+    api.post<ApiResponse<LoginResponse>>('/auth/captcha/recovery-login', data).then((response) => {
+      const result = extractData(response);
+      return result.user ? { ...result, user: normalizeUser(result.user as unknown as AnyRecord) } : result;
+    }),
+
+  listProviders: () =>
+    api.get<ApiResponse<CaptchaProviderProfile[]>>('/system/captcha/providers').then(extractData),
+
+  createProvider: (data: { name: string; type: CaptchaProviderType; config: Record<string, unknown> }) =>
+    api.post<ApiResponse<{ profile: CaptchaProviderProfile; recoveryKey: string }>>('/system/captcha/providers', data).then(extractData),
+
+  updateProvider: (id: string, data: { name?: string; config?: Record<string, unknown> }) =>
+    api.put<ApiResponse<{ profile: CaptchaProviderProfile; recoveryKey?: string }>>(`/system/captcha/providers/${id}`, data).then(extractData),
+
+  testProvider: (id: string) =>
+    api.post<ApiResponse<{ status: string; errorCode?: string; checkedAt: string }>>(`/system/captcha/providers/${id}/test`).then(extractData),
+
+  activateProvider: (id: string) =>
+    api.post<ApiResponse<{ activeProviderId: string; recoverySessionTerminated?: boolean }>>(`/system/captcha/providers/${id}/activate`).then(extractData),
+
+  rotateRecoveryKey: (id: string) =>
+    api.post<ApiResponse<{ recoveryKey: string }>>(`/system/captcha/providers/${id}/rotate-recovery-key`).then(extractData),
+
+  getPolicy: () =>
+    api.get<ApiResponse<CaptchaPolicyConfig>>('/system/captcha/policy').then(extractData),
+
+  updatePolicy: (data: { enabled?: boolean; level?: CaptchaPolicyLevel }) =>
+    api.put<ApiResponse<CaptchaPolicyConfig & { recoverySessionTerminated?: boolean }>>('/system/captcha/policy', data).then(extractData),
 };
 
 // ========== Role Tag API ==========

@@ -48,6 +48,7 @@ export const useAuthStore = create<AuthState>()(
             role: user.role ?? state.user.role,
             status: user.status ?? state.user.status,
             createdAt: user.createdAt ?? state.user.createdAt,
+            restrictedRecovery: user.restrictedRecovery ?? state.user.restrictedRecovery,
           };
 
           return {

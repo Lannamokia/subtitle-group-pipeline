@@ -52,6 +52,7 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   username: z.string().trim().min(1, "Username is required"),
   password: z.string().min(1, "Password is required"),
+  verificationToken: z.string().min(20).max(256).optional(),
 });
 
 export const refreshTokenSchema = z.object({

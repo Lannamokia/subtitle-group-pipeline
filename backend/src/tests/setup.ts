@@ -454,6 +454,11 @@ export async function createTestTranslationClaim(data: TestTranslationClaimData)
 // ==================== Database Cleanup ====================
 
 const tableNames = [
+  "captchaRecoveryAttempt",
+  "captchaOutageTicket",
+  "captchaAttempt",
+  "captchaPolicy",
+  "captchaProviderProfile",
   "auditLog",
   "revokedToken",
   "timelineEvent",
