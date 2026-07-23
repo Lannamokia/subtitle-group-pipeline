@@ -15,7 +15,7 @@ import {
 } from "./captcha.crypto";
 import { createProvider } from "./captcha.providers";
 import { parseProviderConfig } from "./captcha.schema";
-import type { CaptchaPolicyLevel, CaptchaProviderType, CaptchaResult } from "./captcha.types";
+import type { CaptchaPolicyLevel, CaptchaProviderHealth, CaptchaProviderType, CaptchaResult } from "./captcha.types";
 
 const ATTEMPT_TTL_MS = 5 * 60 * 1000;
 const VERIFICATION_TTL_MS = 5 * 60 * 1000;
@@ -24,6 +24,13 @@ const RECOVERY_RATE_WINDOW_MS = 30 * 60 * 1000;
 const RECOVERY_RATE_LIMIT = 3;
 
 type ProviderConfig = Record<string, unknown>;
+
+const UNREADABLE_CONFIG_ERROR = "PROVIDER_CONFIG_UNREADABLE";
+
+function readProviderConfig(profile: { type: string; encrypted_config: string }): ProviderConfig {
+  const decrypted = decryptConfig<ProviderConfig>(profile.encrypted_config);
+  return parseProviderConfig(profile.type as CaptchaProviderType, decrypted) as ProviderConfig;
+}
 
 function usernameDigest(username: string): string {
   return secureDigest(`username:${username.trim().toLowerCase()}`);
@@ -46,25 +53,40 @@ function publicProfile(profile: {
   created_at: Date;
   updated_at: Date;
 }) {
-  const config = decryptConfig<ProviderConfig>(profile.encrypted_config);
-  const safeConfig = profile.type === "custom"
-    ? { baseUrl: config.baseUrl, siteId: config.siteId, secretConfigured: Boolean(config.secret) }
-    : {
-        siteKey: config.siteKey,
-        allowedHostnames: config.allowedHostnames,
-        action: config.action,
-        secretConfigured: Boolean(config.secretKey),
-      };
+  let configurationValid = true;
+  let safeConfig: {
+    baseUrl?: unknown;
+    siteId?: unknown;
+    siteKey?: unknown;
+    allowedHostnames?: unknown;
+    action?: unknown;
+    secretConfigured: boolean;
+  };
+  try {
+    const config = readProviderConfig(profile);
+    safeConfig = profile.type === "custom"
+      ? { baseUrl: config.baseUrl, siteId: config.siteId, secretConfigured: Boolean(config.secret) }
+      : {
+          siteKey: config.siteKey,
+          allowedHostnames: config.allowedHostnames,
+          action: config.action,
+          secretConfigured: Boolean(config.secretKey),
+        };
+  } catch {
+    configurationValid = false;
+    safeConfig = { secretConfigured: false };
+  }
   return {
     id: profile.id,
     name: profile.name,
     type: profile.type,
     config: safeConfig,
+    configurationValid,
     isActive: profile.is_active,
     configVersion: profile.config_version,
     health: {
-      status: profile.health_status || "unknown",
-      errorCode: profile.health_error_code,
+      status: configurationValid ? profile.health_status || "unknown" : "misconfigured",
+      errorCode: configurationValid ? profile.health_error_code : UNREADABLE_CONFIG_ERROR,
       checkedAt: profile.last_health_check_at,
     },
     createdAt: profile.created_at,
@@ -300,7 +322,16 @@ export async function recordCredentialFailure(attemptId: string | null) {
 }
 
 async function checkHealth(profile: { id: string; type: string; encrypted_config: string }) {
-  const health = await createProvider(profile.type, decryptConfig(profile.encrypted_config)).healthCheck();
+  let health: CaptchaProviderHealth;
+  try {
+    health = await createProvider(profile.type, readProviderConfig(profile)).healthCheck();
+  } catch {
+    health = {
+      status: "misconfigured",
+      errorCode: UNREADABLE_CONFIG_ERROR,
+      checkedAt: new Date().toISOString(),
+    };
+  }
   await prisma.captchaProviderProfile.update({
     where: { id: profile.id },
     data: {

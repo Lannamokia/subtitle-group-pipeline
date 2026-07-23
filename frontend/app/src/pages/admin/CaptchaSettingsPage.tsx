@@ -36,6 +36,7 @@ type EditorState = {
   hostnames: string;
   action: string;
   replaceCredentials: boolean;
+  configurationValid: boolean;
 };
 
 const EMPTY_EDITOR: EditorState = {
@@ -48,6 +49,7 @@ const EMPTY_EDITOR: EditorState = {
   hostnames: "",
   action: "login",
   replaceCredentials: true,
+  configurationValid: true,
 };
 
 export function CaptchaSettingsPage() {
@@ -166,7 +168,8 @@ export function CaptchaSettingsPage() {
       siteKey: profile.config.siteKey || "",
       hostnames: profile.config.allowedHostnames?.join("\n") || "",
       action: profile.config.action || "login",
-      replaceCredentials: false,
+      replaceCredentials: !profile.configurationValid,
+      configurationValid: profile.configurationValid,
     });
   }
 
@@ -220,16 +223,18 @@ export function CaptchaSettingsPage() {
                   <strong className="text-sm text-gray-800">{profile.name}</strong>
                   <Badge variant="outline">{TYPE_LABELS[profile.type]}</Badge>
                   {profile.isActive && <Badge className="bg-emerald-600">当前</Badge>}
+                  {!profile.configurationValid && <Badge variant="destructive">凭据不可读</Badge>}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
                   <span className="flex items-center gap-1"><Activity className="h-3.5 w-3.5" />{profile.health.status}</span>
                   {profile.config.baseUrl && <span className="truncate">{profile.config.baseUrl}</span>}
                   {profile.config.allowedHostnames?.length ? <span>{profile.config.allowedHostnames.join(", ")}</span> : null}
+                  {!profile.configurationValid && <span className="text-red-600">请编辑并重新填写接入凭据</span>}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="outline" disabled={working === `test:${profile.id}`} onClick={() => void testProvider(profile.id)}>{working === `test:${profile.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}测试</Button>
-                {!profile.isActive && <Button size="sm" variant="outline" disabled={working === `activate:${profile.id}`} onClick={() => void activate(profile.id)}><Check className="h-4 w-4" />激活</Button>}
+                <Button size="sm" variant="outline" disabled={!profile.configurationValid || working === `test:${profile.id}`} onClick={() => void testProvider(profile.id)}>{working === `test:${profile.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}测试</Button>
+                {!profile.isActive && <Button size="sm" variant="outline" disabled={!profile.configurationValid || working === `activate:${profile.id}`} onClick={() => void activate(profile.id)}><Check className="h-4 w-4" />激活</Button>}
                 {!restricted && <Button size="sm" variant="ghost" onClick={() => edit(profile)}><Pencil className="h-4 w-4" />编辑</Button>}
                 {!restricted && <Button size="sm" variant="ghost" disabled={working === `rotate:${profile.id}`} onClick={() => void rotate(profile.id)}><KeyRound className="h-4 w-4" />轮换</Button>}
               </div>
@@ -245,7 +250,8 @@ export function CaptchaSettingsPage() {
             <div className="space-y-4">
               <div className="space-y-1.5"><Label>名称</Label><Input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} /></div>
               {!editor.id && <div className="space-y-1.5"><Label>类型</Label><select className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm" value={editor.type} onChange={(event) => setEditor({ ...editor, type: event.target.value as CaptchaProviderType })}>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>}
-              {editor.id && <label className="flex items-center gap-2 text-sm"><Switch checked={editor.replaceCredentials} onCheckedChange={(replaceCredentials) => setEditor({ ...editor, replaceCredentials })} />替换接入凭据</label>}
+              {editor.id && <label className="flex items-center gap-2 text-sm"><Switch checked={editor.replaceCredentials} disabled={!editor.configurationValid} onCheckedChange={(replaceCredentials) => setEditor({ ...editor, replaceCredentials })} />替换接入凭据</label>}
+              {!editor.configurationValid && <Alert variant="destructive"><ShieldAlert className="h-4 w-4" /><AlertTitle>旧凭据无法读取</AlertTitle><AlertDescription>必须填写一组完整的新凭据才能保存此 Provider。</AlertDescription></Alert>}
               {editor.replaceCredentials && editor.type === "custom" && <>
                 <div className="space-y-1.5"><Label>服务地址</Label><Input placeholder="https://captcha.example.com" value={editor.baseUrl} onChange={(event) => setEditor({ ...editor, baseUrl: event.target.value })} /></div>
                 <div className="space-y-1.5"><Label>Site ID</Label><Input value={editor.siteId} onChange={(event) => setEditor({ ...editor, siteId: event.target.value })} /></div>

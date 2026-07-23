@@ -390,6 +390,41 @@ describe("captcha platform", () => {
       expect(stored?.recovery_key_hash).not.toContain(created.body.data.recoveryKey);
     });
 
+    it("keeps the settings API available when legacy provider credentials cannot be decrypted", async () => {
+      const admin = await createTestUser({ role: "super_admin" });
+      const recovery = await hashRecoveryKey(generateRecoveryKey());
+      const legacy = await prisma.captchaProviderProfile.create({
+        data: {
+          name: "Legacy provider",
+          type: "custom",
+          encrypted_config: "legacy-unreadable-ciphertext",
+          recovery_key_salt: recovery.salt,
+          recovery_key_hash: recovery.hash,
+        },
+      });
+
+      const list = await get(app, "/api/v1/system/captcha/providers", admin.token);
+      expectSuccess(list);
+      const profile = list.body.data.find((item: { id: string }) => item.id === legacy.id);
+      expect(profile).toMatchObject({
+        id: legacy.id,
+        configurationValid: false,
+        config: { secretConfigured: false },
+        health: { status: "misconfigured", errorCode: "PROVIDER_CONFIG_UNREADABLE" },
+      });
+      expect(JSON.stringify(profile)).not.toContain(legacy.encrypted_config);
+
+      const health = await post(app, `/api/v1/system/captcha/providers/${legacy.id}/test`, {}, admin.token);
+      expectSuccess(health);
+      expect(health.body.data).toMatchObject({ status: "misconfigured", errorCode: "PROVIDER_CONFIG_UNREADABLE" });
+
+      const repaired = await put(app, `/api/v1/system/captcha/providers/${legacy.id}`, {
+        config: { baseUrl: "https://captcha.example.com", siteId: "site", secret: "s".repeat(32) },
+      }, admin.token);
+      expectSuccess(repaired);
+      expect(repaired.body.data.profile.configurationValid).toBe(true);
+    });
+
     it("rotates the recovery key whenever credentials change and on explicit rotation", async () => {
       const admin = await createTestUser({ role: "super_admin" });
       const created = await post(app, "/api/v1/system/captcha/providers", {

@@ -793,6 +793,7 @@ export interface CaptchaProviderProfile {
     action?: string;
     secretConfigured: boolean;
   };
+  configurationValid: boolean;
   isActive: boolean;
   configVersion: number;
   health: { status: string; errorCode?: string | null; checkedAt?: string | null };
