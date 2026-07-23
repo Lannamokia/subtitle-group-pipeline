@@ -49,6 +49,7 @@ router.post("/change-password", authenticate, validateBody(changePasswordSchema)
 router.post("/verify-qq", validateBody(verifyQQSchema), controller.verifyQQ);
 router.post("/request-password-reset", rateLimitMiddleware, validateBody(requestPasswordResetSchema), controller.requestPasswordReset);
 router.post("/confirm-password-reset", rateLimitMiddleware, validateBody(confirmPasswordResetSchema), controller.confirmPasswordReset);
+router.get("/password-reset-status", rateLimitMiddleware, controller.getPasswordResetStatus);
 router.get("/registration-policy", controller.getRegistrationPolicy);
 router.put(
   "/registration-policy",

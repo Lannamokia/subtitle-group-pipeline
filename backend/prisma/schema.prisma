@@ -303,17 +303,22 @@ model RegistrationPolicy {
 }
 
 model VerificationChallenge {
-  id         String    @id @default(uuid())
-  code       String    @unique
-  qq_number  String
-  expires_at DateTime
-  used_at    DateTime?
-  used_by    String?
-  created_at DateTime  @default(now())
+  id             String    @id @default(uuid())
+  code           String    @unique
+  qq_number      String
+  expires_at     DateTime
+  used_at        DateTime?
+  used_by        String?
+  poll_token     String?   @unique
+  qq_verified_at DateTime?
+  reset_token    String?   @unique
+  created_at     DateTime  @default(now())
 
   @@index([code])
   @@index([qq_number])
   @@index([expires_at])
+  @@index([poll_token])
+  @@index([reset_token])
 }
 
 model RoleTag {

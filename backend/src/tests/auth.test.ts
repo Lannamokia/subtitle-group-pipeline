@@ -952,6 +952,252 @@ describe("Auth & Registration Tests", () => {
       expectSuccess(res, 200);
       expect(res.body.data.success).toBe(true);
     });
+
+    it("should return pollToken for existing user", async () => {
+      const { user } = await createTestUser();
+
+      const res = await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+
+      expectSuccess(res, 200);
+      expect(res.body.data.pollToken).toBeDefined();
+      expect(typeof res.body.data.pollToken).toBe("string");
+
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: { used_by: user.id, code: { startsWith: "PWD:" }, used_at: null },
+      });
+      expect(challenge.poll_token).toBe(res.body.data.pollToken);
+    });
+
+    it("should not return pollToken for non-existent user", async () => {
+      const res = await post(app, "/api/v1/auth/request-password-reset", {
+        username: "nonexistentuser12345",
+      });
+
+      expectSuccess(res, 200);
+      expect(res.body.data.pollToken).toBeUndefined();
+    });
+
+    it("should poll password reset status from pending to verified", async () => {
+      const { user } = await createTestUser({ qq_number: "123123999" });
+
+      const requestRes = await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+      expectSuccess(requestRes, 200);
+      const pollToken = requestRes.body.data.pollToken;
+
+      const pendingRes = await get(app, `/api/v1/auth/password-reset-status?token=${pollToken}`);
+      expectSuccess(pendingRes, 200);
+      expect(pendingRes.body.data.status).toBe("pending");
+      expect(pendingRes.body.data.resetToken).toBeUndefined();
+
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: { used_by: user.id, code: { startsWith: "PWD:" }, used_at: null },
+      });
+      const code = challenge.code.replace("PWD:", "");
+
+      await post(app, "/api/v1/qq/verify", {
+        message: `/resetpass ${code}`,
+        qq_number: "123123999",
+      });
+
+      const verifiedRes = await get(app, `/api/v1/auth/password-reset-status?token=${pollToken}`);
+      expectSuccess(verifiedRes, 200);
+      expect(verifiedRes.body.data.status).toBe("verified");
+      expect(verifiedRes.body.data.resetToken).toBeDefined();
+    });
+
+    it("should reset password with resetToken after QQ verification", async () => {
+      const { user } = await createTestUser({
+        qq_number: "123123999",
+        password: "OldPass123!",
+      });
+
+      const requestRes = await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+      expectSuccess(requestRes, 200);
+      const pollToken = requestRes.body.data.pollToken;
+
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: { used_by: user.id, code: { startsWith: "PWD:" }, used_at: null },
+      });
+      const code = challenge.code.replace("PWD:", "");
+
+      await post(app, "/api/v1/qq/verify", {
+        message: `/resetpass ${code}`,
+        qq_number: "123123999",
+      });
+
+      const statusRes = await get(app, `/api/v1/auth/password-reset-status?token=${pollToken}`);
+      expectSuccess(statusRes, 200);
+      const resetToken = statusRes.body.data.resetToken;
+
+      const confirmRes = await post(app, "/api/v1/auth/confirm-password-reset", {
+        resetToken,
+        password: "NewPass123!",
+      });
+      expectSuccess(confirmRes, 200);
+
+      const loginRes = await post(app, "/api/v1/auth/login", {
+        username: user.username,
+        password: "NewPass123!",
+      });
+      expectSuccess(loginRes, 200);
+    });
+
+    it("should reject resetToken after it has been consumed", async () => {
+      const { user } = await createTestUser({
+        qq_number: "123123999",
+        password: "OldPass123!",
+      });
+
+      const requestRes = await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+      expectSuccess(requestRes, 200);
+      const pollToken = requestRes.body.data.pollToken;
+
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: { used_by: user.id, code: { startsWith: "PWD:" }, used_at: null },
+      });
+      const code = challenge.code.replace("PWD:", "");
+
+      await post(app, "/api/v1/qq/verify", {
+        message: `/resetpass ${code}`,
+        qq_number: "123123999",
+      });
+
+      const statusRes = await get(app, `/api/v1/auth/password-reset-status?token=${pollToken}`);
+      expectSuccess(statusRes, 200);
+      const resetToken = statusRes.body.data.resetToken;
+
+      await post(app, "/api/v1/auth/confirm-password-reset", {
+        resetToken,
+        password: "NewPass123!",
+      });
+
+      const secondConfirmRes = await post(app, "/api/v1/auth/confirm-password-reset", {
+        resetToken,
+        password: "AnotherPass123!",
+      });
+      expectError(secondConfirmRes, 400, "INVALID_RESET_CODE");
+    });
+
+    it("should reject resetToken if QQ verification has expired", async () => {
+      const { user } = await createTestUser({
+        qq_number: "123123999",
+        password: "OldPass123!",
+      });
+
+      const requestRes = await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+      expectSuccess(requestRes, 200);
+      const pollToken = requestRes.body.data.pollToken;
+
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: { used_by: user.id, code: { startsWith: "PWD:" }, used_at: null },
+      });
+      const code = challenge.code.replace("PWD:", "");
+
+      await post(app, "/api/v1/qq/verify", {
+        message: `/resetpass ${code}`,
+        qq_number: "123123999",
+      });
+
+      await prisma.verificationChallenge.update({
+        where: { id: challenge.id },
+        data: { qq_verified_at: new Date(Date.now() - 11 * 60 * 1000) },
+      });
+
+      const statusRes = await get(app, `/api/v1/auth/password-reset-status?token=${pollToken}`);
+      expectSuccess(statusRes, 200);
+      expect(statusRes.body.data.status).toBe("pending");
+
+      const expiredChallenge = await prisma.verificationChallenge.findUniqueOrThrow({
+        where: { id: challenge.id },
+      });
+
+      const confirmRes = await post(app, "/api/v1/auth/confirm-password-reset", {
+        resetToken: expiredChallenge.reset_token,
+        password: "NewPass123!",
+      });
+      expectError(confirmRes, 400, "INVALID_RESET_CODE");
+    });
+
+    it("should reject resetToken if challenge itself has expired", async () => {
+      const { user } = await createTestUser({
+        qq_number: "123123999",
+        password: "OldPass123!",
+      });
+
+      const requestRes = await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+      expectSuccess(requestRes, 200);
+
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: { used_by: user.id, code: { startsWith: "PWD:" }, used_at: null },
+      });
+      const code = challenge.code.replace("PWD:", "");
+
+      await post(app, "/api/v1/qq/verify", {
+        message: `/resetpass ${code}`,
+        qq_number: "123123999",
+      });
+
+      await prisma.verificationChallenge.update({
+        where: { id: challenge.id },
+        data: { expires_at: new Date(Date.now() - 1000) },
+      });
+
+      const statusRes = await get(app, `/api/v1/auth/password-reset-status?token=${requestRes.body.data.pollToken}`);
+      expectSuccess(statusRes, 200);
+      expect(statusRes.body.data.status).toBe("pending");
+    });
+
+    it("should keep status pending for invalid poll token", async () => {
+      const res = await get(app, "/api/v1/auth/password-reset-status?token=invalid-token");
+      expectSuccess(res, 200);
+      expect(res.body.data.status).toBe("pending");
+    });
+
+    it("should reject confirm without both resetToken and username+code", async () => {
+      const res = await post(app, "/api/v1/auth/confirm-password-reset", {
+        password: "NewPass123!",
+      });
+      expectError(res, 400, "VALIDATION_ERROR");
+    });
+
+    it("should be idempotent when verifying password reset code repeatedly via QQ", async () => {
+      const { user } = await createTestUser({ qq_number: "123123999" });
+
+      await post(app, "/api/v1/auth/request-password-reset", {
+        username: user.username,
+      });
+
+      const challenge = await prisma.verificationChallenge.findFirstOrThrow({
+        where: { used_by: user.id, code: { startsWith: "PWD:" }, used_at: null },
+      });
+      const code = challenge.code.replace("PWD:", "");
+
+      const verifyRes1 = await post(app, "/api/v1/qq/verify", {
+        message: `/resetpass ${code}`,
+        qq_number: "123123999",
+      });
+      expectSuccess(verifyRes1, 200);
+      expect(verifyRes1.body.data.resetTokenIssued).toBe(true);
+
+      const verifyRes2 = await post(app, "/api/v1/qq/verify", {
+        message: `/resetpass ${code}`,
+        qq_number: "123123999",
+      });
+      expectSuccess(verifyRes2, 200);
+      expect(verifyRes2.body.data.resetTokenIssued).toBe(true);
+    });
   });
 
   describe("Member Management", () => {
