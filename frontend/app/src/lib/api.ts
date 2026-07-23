@@ -13,6 +13,7 @@ import type {
   LoginResponse,
   RegisterResponse,
   PasswordResetRequestResponse,
+  PasswordResetStatus,
   QQRebindRequestResponse,
   RegistrationSettings,
   RoleTagDefinition,
@@ -1110,7 +1111,10 @@ export const authApi = {
   requestPasswordReset: (data: { username: string }) =>
     api.post<ApiResponse<PasswordResetRequestResponse>>('/auth/request-password-reset', data).then(extractData),
 
-  confirmPasswordReset: (data: { username: string; code: string; password: string }) =>
+  getPasswordResetStatus: (token: string) =>
+    api.get<ApiResponse<PasswordResetStatus>>('/auth/password-reset-status', { params: { token } }).then(extractData),
+
+  confirmPasswordReset: (data: { username: string; code: string; password: string } | { resetToken: string; password: string }) =>
     api.post<ApiResponse<{ success: boolean }>>('/auth/confirm-password-reset', data).then(extractData),
 
   requestQQRebind: (data: { qq?: string; qqNumber?: string }) =>
