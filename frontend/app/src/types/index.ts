@@ -52,6 +52,12 @@ export interface PasswordResetRequestResponse {
   resetCommandFormat?: string;
   emailSent?: boolean;
   qqSent?: boolean;
+  pollToken?: string;
+}
+
+export interface PasswordResetStatus {
+  status: 'pending' | 'verified';
+  resetToken?: string;
 }
 
 export interface QQRebindRequestResponse {
