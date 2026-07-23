@@ -83,7 +83,7 @@ async def handle_resetpass(event: MessageEvent, args: Message = CommandArg()):
         logger.exception(f"QQ password reset bridge error: {exc}")
         await resetpass.finish("验证服务暂时不可用，请稍后重试。")
 
-    await resetpass.finish("密码重置验证成功，请回到页面设置新密码。")
+    await resetpass.finish("密码重置验证成功，网页已解锁，请直接设置新密码（无需再次输入验证码）。")
 
 
 async def handle_rebind_command(
