@@ -46,6 +46,10 @@ function generateVerificationCode(): string {
   return result;
 }
 
+function generateSecureToken(): string {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
 function toPasswordResetChallengeCode(code: string): string {
   return `${PASSWORD_RESET_PREFIX}${code}`;
 }
@@ -774,6 +778,7 @@ export async function requestPasswordReset(username: string) {
   }
 
   const resetCode = generateVerificationCode();
+  const pollToken = generateSecureToken();
   const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRES_MS);
 
   await prisma.verificationChallenge.updateMany({
@@ -791,6 +796,7 @@ export async function requestPasswordReset(username: string) {
       qq_number: user.qq_number || "",
       expires_at: expiresAt,
       used_by: user.id,
+      poll_token: pollToken,
     },
   });
 
@@ -819,10 +825,55 @@ export async function requestPasswordReset(username: string) {
     resetCommand: "/resetpass 验证码",
     emailSent: Boolean(user.email),
     qqSent: Boolean(user.qq_number),
+    pollToken,
   };
 }
 
 export async function confirmPasswordReset(data: ConfirmPasswordResetInput) {
+  // resetToken path: QQ-verified password reset flow
+  if (data.resetToken) {
+    const RESET_TOKEN_EXPIRES_MS = 10 * 60 * 1000;
+    const now = new Date();
+
+    const challenge = await prisma.verificationChallenge.findUnique({
+      where: { reset_token: data.resetToken },
+    });
+
+    if (
+      !challenge ||
+      !challenge.qq_verified_at ||
+      challenge.used_at ||
+      challenge.expires_at < now ||
+      now.getTime() - challenge.qq_verified_at.getTime() > RESET_TOKEN_EXPIRES_MS
+    ) {
+      throw new AppError("Invalid or expired reset token", "INVALID_RESET_CODE", 400);
+    }
+
+    const user = challenge.used_by
+      ? await prisma.user.findUnique({ where: { id: challenge.used_by } })
+      : null;
+
+    if (!user) {
+      throw new AppError("Invalid or expired reset token", "INVALID_RESET_CODE", 400);
+    }
+
+    const passwordHash = await hashPassword(data.password);
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: { password_hash: passwordHash },
+      }),
+      prisma.verificationChallenge.update({
+        where: { id: challenge.id },
+        data: { used_at: new Date() },
+      }),
+    ]);
+
+    return { success: true };
+  }
+
+  // Legacy username + code path
   const user = await prisma.user.findUnique({
     where: { username: data.username },
   });
@@ -831,7 +882,7 @@ export async function confirmPasswordReset(data: ConfirmPasswordResetInput) {
     throw new AppError("Invalid or expired reset code", "INVALID_RESET_CODE", 400);
   }
 
-  const resetCode = toPasswordResetChallengeCode(data.code.trim());
+  const resetCode = toPasswordResetChallengeCode(data.code!.trim());
   const challenge = await prisma.verificationChallenge.findUnique({
     where: { code: resetCode },
   });
@@ -859,6 +910,34 @@ export async function confirmPasswordReset(data: ConfirmPasswordResetInput) {
   ]);
 
   return { success: true };
+}
+
+export async function getPasswordResetStatus(pollToken: string) {
+  const RESET_TOKEN_EXPIRES_MS = 10 * 60 * 1000;
+  const challenge = await prisma.verificationChallenge.findUnique({
+    where: { poll_token: pollToken },
+  });
+
+  const now = new Date();
+  if (
+    !challenge ||
+    challenge.used_at ||
+    challenge.expires_at < now ||
+    (challenge.qq_verified_at &&
+      now.getTime() - challenge.qq_verified_at.getTime() > RESET_TOKEN_EXPIRES_MS)
+  ) {
+    // Never reveal whether the token exists, was consumed, or expired.
+    return { status: "pending" as const };
+  }
+
+  if (challenge.qq_verified_at) {
+    return {
+      status: "verified" as const,
+      resetToken: challenge.reset_token!,
+    };
+  }
+
+  return { status: "pending" as const };
 }
 
 export async function verifyPasswordResetByQQ(data: VerifyQQInput) {
@@ -897,11 +976,25 @@ export async function verifyPasswordResetByQQ(data: VerifyQQInput) {
     throw new AppError("QQ number does not match this account", "FORBIDDEN", 403);
   }
 
+  // Idempotent: if already QQ-verified, keep the existing reset token.
+  // Otherwise stamp the verification time and issue a fresh reset token.
+  if (!challenge.qq_verified_at || !challenge.reset_token) {
+    const resetToken = generateSecureToken();
+    await prisma.verificationChallenge.update({
+      where: { id: challenge.id },
+      data: {
+        qq_verified_at: new Date(),
+        reset_token: resetToken,
+      },
+    });
+  }
+
   return {
     success: true,
     username: user.username,
     code: fromPasswordResetChallengeCode(challenge.code),
     expires_at: challenge.expires_at,
+    resetTokenIssued: true,
   };
 }
 

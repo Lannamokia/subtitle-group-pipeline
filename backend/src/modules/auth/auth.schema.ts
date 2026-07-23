@@ -98,11 +98,31 @@ export const requestPasswordResetSchema = z.object({
   username: z.string().trim().min(1, "Username is required"),
 });
 
-export const confirmPasswordResetSchema = z.object({
-  username: z.string().trim().min(1, "Username is required"),
-  code: z.string().min(1, "Reset code is required"),
-  password: strongPasswordSchema,
-});
+export const confirmPasswordResetSchema = z
+  .object({
+    username: z.string().trim().min(1, "Username is required").optional(),
+    code: z.string().min(1, "Reset code is required").optional(),
+    resetToken: z.string().min(1, "Reset token is required").optional(),
+    password: strongPasswordSchema,
+  })
+  .superRefine((data, ctx) => {
+    const hasCode = Boolean(data.username && data.code);
+    const hasResetToken = Boolean(data.resetToken);
+    if (hasCode && hasResetToken) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide either resetToken or username+code, not both",
+        path: ["resetToken"],
+      });
+    }
+    if (!hasCode && !hasResetToken) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide either resetToken or username+code",
+        path: ["resetToken"],
+      });
+    }
+  });
 
 export const createRoleTagSchema = z.object({
   name: z.string().min(1, "Tag name is required").max(50),

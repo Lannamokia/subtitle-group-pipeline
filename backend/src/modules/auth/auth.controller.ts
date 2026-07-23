@@ -153,6 +153,20 @@ export async function confirmPasswordReset(
   }
 }
 
+export async function getPasswordResetStatus(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    const result = await authService.getPasswordResetStatus(token);
+    successResponse(res, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getRegistrationPolicy(
   _req: Request,
   res: Response,

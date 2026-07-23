@@ -82,7 +82,7 @@ const resetRequestSchema = z.object({
 
 const resetConfirmSchema = z
   .object({
-    code: z.string().min(1, "验证码不能为空").max(16, "验证码过长"),
+    code: z.string().max(16, "验证码过长").optional(),
     password: z.string().refine((value) => validatePassword(value).valid, PASSWORD_RULE_MESSAGE),
     confirmPassword: z.string(),
   })
@@ -110,6 +110,8 @@ export function LoginPage() {
   const [resetStep, setResetStep] = useState<"request" | "confirm">("request");
   const [resetUsername, setResetUsername] = useState("");
   const [resetInfo, setResetInfo] = useState<{ commandFormat?: string; emailSent?: boolean; qqSent?: boolean } | null>(null);
+  const [pollToken, setPollToken] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [verificationInfo, setVerificationInfo] = useState<{
     qqGroup: string;
     command: string;
@@ -144,6 +146,25 @@ export function LoginPage() {
       .then(setAvailableTags)
       .catch(() => setAvailableTags([]));
   }, []);
+
+  useEffect(() => {
+    if (resetStep !== "confirm" || !pollToken || resetToken) return;
+
+    const checkStatus = async () => {
+      try {
+        const status = await authApi.getPasswordResetStatus(pollToken);
+        if (status.status === "verified" && status.resetToken) {
+          setResetToken(status.resetToken);
+        }
+      } catch {
+        // 静默继续轮询，避免打扰用户
+      }
+    };
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 2500);
+    return () => clearInterval(interval);
+  }, [resetStep, pollToken, resetToken]);
 
   const handleLogin = async (data: LoginFormData, verificationToken?: string) => {
     setIsLoading(true);
@@ -230,6 +251,8 @@ export function LoginPage() {
     resetConfirmForm.reset({ code: "", password: "", confirmPassword: "" });
     setResetUsername(username);
     setResetInfo(null);
+    setPollToken(null);
+    setResetToken(null);
     setResetStep("request");
     setResetDialogOpen(true);
   };
@@ -244,6 +267,8 @@ export function LoginPage() {
         emailSent: result.emailSent,
         qqSent: result.qqSent,
       });
+      setPollToken(result.pollToken ?? null);
+      setResetToken(null);
       setResetStep("confirm");
       toast.success(result.message || "验证码已发送");
     } catch (error) {
@@ -254,16 +279,30 @@ export function LoginPage() {
   };
 
   const handleConfirmReset = async (data: ResetConfirmFormData) => {
+    if (!resetToken && !data.code) {
+      resetConfirmForm.setError("code", { message: "验证码不能为空" });
+      return;
+    }
+
     setIsLoading(true);
     try {
-      await authApi.confirmPasswordReset({
-        username: resetUsername,
-        code: data.code,
-        password: data.password,
-      });
+      if (resetToken) {
+        await authApi.confirmPasswordReset({ resetToken, password: data.password });
+      } else {
+        await authApi.confirmPasswordReset({
+          username: resetUsername,
+          code: data.code!,
+          password: data.password,
+        });
+      }
       toast.success("密码已重置，请使用新密码登录");
       setResetDialogOpen(false);
       setResetStep("request");
+      setResetUsername("");
+      setPollToken(null);
+      setResetToken(null);
+      setResetInfo(null);
+      resetConfirmForm.reset({ code: "", password: "", confirmPassword: "" });
       loginForm.setValue("username", resetUsername);
       loginForm.setValue("password", "");
       setView("login");
@@ -271,6 +310,19 @@ export function LoginPage() {
       toast.error(getErrorMessage(error));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleResetDialogOpenChange = (open: boolean) => {
+    setResetDialogOpen(open);
+    if (!open) {
+      setResetStep("request");
+      setResetUsername("");
+      setPollToken(null);
+      setResetToken(null);
+      setResetInfo(null);
+      resetRequestForm.reset({ username: "" });
+      resetConfirmForm.reset({ code: "", password: "", confirmPassword: "" });
     }
   };
 
@@ -611,7 +663,7 @@ export function LoginPage() {
           )}
         </div>
       </div>
-      <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+      <Dialog open={resetDialogOpen} onOpenChange={handleResetDialogOpenChange}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>重置密码</DialogTitle>
@@ -657,19 +709,26 @@ export function LoginPage() {
                   )}
                   <p className="mt-2 text-xs text-gray-500">验证码 15 分钟内有效。</p>
                 </div>
-                <FormField
-                  control={resetConfirmForm.control}
-                  name="code"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>验证码</FormLabel>
-                      <FormControl>
-                        <Input placeholder="输入 8 位验证码" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                {resetToken ? (
+                  <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800 flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>QQ 验证已通过，请直接设置新密码</span>
+                  </div>
+                ) : (
+                  <FormField
+                    control={resetConfirmForm.control}
+                    name="code"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>验证码</FormLabel>
+                        <FormControl>
+                          <Input placeholder="输入 8 位验证码" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={resetConfirmForm.control}
                   name="password"
