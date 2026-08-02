@@ -964,9 +964,41 @@ function TasksTab({
     "frozen",
   ];
   const selectedTaskAssigneeId = selectedTask?.assigneeId ?? selectedTask?.assignee?.id;
+  // 翻译分段是竞争式认领：谁都可以先占下一段时间，只是实际翻译按段串行推进。
+  // assignee_id 表示「当前轮到谁翻译」，不能拿它当认领资格用，
+  // 否则第一位译者认领之后其他译者就再也看不到认领表单了。
+  // 这里镜像后端 hasTaskClaimRoleTagAccess 的判断：优先看项目工作流里配置的资格标签，
+  // 没配置就看用户是否持有该岗位类型的标签。最终仍由后端校验。
+  const hasTranslationClaimEligibility = useMemo(() => {
+    const ownedTags = currentUser?.roleTags;
+    // 标签信息未知（老的持久化会话、接口没返回）时不要在前端拦人，
+    // 交给后端 assertTaskClaimRoleTagAccess 给出准确结果。
+    if (!ownedTags) return true;
+
+    const requiredTagIds =
+      (project.workflowConfig ?? []).find((entry) => entry.role === "translation")
+        ?.requiredTagIds ?? [];
+
+    if (requiredTagIds.length > 0) {
+      return ownedTags.some((tag) => requiredTagIds.includes(tag.id));
+    }
+
+    return ownedTags.some((tag) => tag.roleType === "translation");
+  }, [currentUser?.roleTags, project.workflowConfig]);
+
+  const hasOwnClaimOnSelectedTask = Boolean(
+    currentUser &&
+      (selectedTask?.claims ?? []).some(
+        (claim) => claim.userId === currentUser.id || claim.user?.id === currentUser.id
+      )
+  );
+
   const canClaimSelectedTranslationSegment = Boolean(
     selectedTask?.role === "translation" &&
-      (canManageTasks || selectedTaskAssigneeId === currentUser?.id)
+      (canManageTasks ||
+        selectedTaskAssigneeId === currentUser?.id ||
+        hasOwnClaimOnSelectedTask ||
+        hasTranslationClaimEligibility)
   );
   const selectedTaskUnit = selectedTask?.unitId
     ? units.find((unit) => unit.id === selectedTask.unitId) ?? null
@@ -2026,7 +2058,7 @@ function TasksTab({
                     )}
                     {!canClaimSelectedTranslationSegment && (
                       <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
-                        只有被分发到该翻译任务的成员可以在这里认领时间段。
+                        需要具备翻译岗位资格标签才能认领时间段，可先到「我的标签」申请。
                       </div>
                     )}
                     {canClaimSelectedTranslationSegment && ["claimable", "assigned", "in_progress", "submitted", "review_approved"].includes(selectedTask.status) && (

@@ -342,7 +342,11 @@ export async function resetMemberTagStatuses(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = await authService.resetMemberTagStatuses(String(req.params.id), req.body);
+    const result = await authService.resetMemberTagStatuses(
+      String(req.params.id),
+      req.body,
+      req.user?.id
+    );
     successResponse(res, { items: result });
   } catch (error) {
     next(error);
