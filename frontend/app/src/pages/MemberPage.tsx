@@ -153,6 +153,16 @@ export function MemberPage() {
   const isProtectedOwnSuperAdmin = (user: User) =>
     currentUser?.id === user.id && currentUser.role === "super_admin";
 
+  // 超级管理员账号只有超级管理员本人能操作。后端已经拦截，这里同步收敛 UI，
+  // 避免组管理员看到一个点得下去、却必然失败的操作入口。
+  const isLockedSuperAdmin = (user: User) =>
+    user.role === "super_admin" && currentUser?.role !== "super_admin";
+
+  const cannotEditAccount = (user: User) =>
+    isProtectedOwnSuperAdmin(user) || isLockedSuperAdmin(user);
+
+  const lockedAccountHint = "超级管理员账号只能由超级管理员本人修改";
+
   const openCreateDialog = () => {
     setMemberForm(initialMemberForm);
     setIsCreateOpen(true);
@@ -480,17 +490,27 @@ export function MemberPage() {
                     <Select
                       value={user.role}
                       onValueChange={(value) => handleRoleChange(user, value as UserRole)}
-                      disabled={busyUserId === user.id || isProtectedOwnSuperAdmin(user)}
+                      disabled={busyUserId === user.id || cannotEditAccount(user)}
                     >
-                      <SelectTrigger className="h-8 w-[132px]">
+                      <SelectTrigger
+                        className="h-8 w-[132px]"
+                        title={isLockedSuperAdmin(user) ? lockedAccountHint : undefined}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {(Object.keys(roleLabels) as UserRole[]).map((role) => (
-                          <SelectItem key={role} value={role}>
-                            {roleLabels[role]}
-                          </SelectItem>
-                        ))}
+                        {(Object.keys(roleLabels) as UserRole[])
+                          .filter(
+                            (role) =>
+                              role !== "super_admin" ||
+                              currentUser?.role === "super_admin" ||
+                              user.role === "super_admin"
+                          )
+                          .map((role) => (
+                            <SelectItem key={role} value={role}>
+                              {roleLabels[role]}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                     <Badge
@@ -503,7 +523,8 @@ export function MemberPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={busyUserId === user.id}
+                        disabled={busyUserId === user.id || isLockedSuperAdmin(user)}
+                        title={isLockedSuperAdmin(user) ? lockedAccountHint : undefined}
                         onClick={() => handleApproveVerification(user)}
                       >
                         通过验证
@@ -512,7 +533,8 @@ export function MemberPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={busyUserId === user.id}
+                        disabled={busyUserId === user.id || cannotEditAccount(user)}
+                        title={isLockedSuperAdmin(user) ? lockedAccountHint : undefined}
                         onClick={() => handleStatusToggle(user)}
                       >
                         {user.status === "disabled" ? "启用" : "禁用"}
@@ -522,8 +544,9 @@ export function MemberPage() {
                       size="sm"
                       variant="ghost"
                       className="h-8 w-8 p-0"
+                      disabled={isLockedSuperAdmin(user)}
                       onClick={() => openProfileDialog(user)}
-                      title="编辑资料"
+                      title={isLockedSuperAdmin(user) ? lockedAccountHint : "编辑资料"}
                     >
                       <Pencil className="h-4 w-4 text-gray-500" />
                     </Button>
@@ -531,8 +554,9 @@ export function MemberPage() {
                       size="sm"
                       variant="ghost"
                       className="h-8 w-8 p-0"
+                      disabled={isLockedSuperAdmin(user)}
                       onClick={() => openTagResetDialog(user)}
-                      title="管理标签状态"
+                      title={isLockedSuperAdmin(user) ? lockedAccountHint : "管理标签状态"}
                     >
                       <Tags className="h-4 w-4 text-gray-500" />
                     </Button>
@@ -540,6 +564,8 @@ export function MemberPage() {
                       size="sm"
                       variant="ghost"
                       className="h-8 w-8 p-0"
+                      disabled={isLockedSuperAdmin(user)}
+                      title={isLockedSuperAdmin(user) ? lockedAccountHint : "重置密码"}
                       onClick={() => {
                         setPasswordTarget(user);
                         setNewPassword("");
@@ -579,7 +605,11 @@ export function MemberPage() {
                     </AlertDialog>
                   </div>
                   {user.role === "super_admin" && (
-                    <p className="text-xs text-gray-400 sm:text-right">受保护账号，不能删除</p>
+                    <p className="text-xs text-gray-400 sm:text-right">
+                      {isLockedSuperAdmin(user)
+                        ? "受保护账号，只有超级管理员本人可以修改"
+                        : "受保护账号，不能删除"}
+                    </p>
                   )}
                   </div>
                 </div>
@@ -643,11 +673,15 @@ export function MemberPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(roleLabels) as UserRole[]).map((role) => (
-                      <SelectItem key={role} value={role}>
-                        {roleLabels[role]}
-                      </SelectItem>
-                    ))}
+                    {(Object.keys(roleLabels) as UserRole[])
+                      .filter(
+                        (role) => role !== "super_admin" || currentUser?.role === "super_admin"
+                      )
+                      .map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {roleLabels[role]}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>

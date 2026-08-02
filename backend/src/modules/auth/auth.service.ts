@@ -393,6 +393,25 @@ export async function loginUser(data: LoginInput) {
     role: user.role,
   });
 
+  // 登录时一并返回已通过的岗位标签，前端才能在不额外请求 /auth/me 的情况下
+  // 正确判断认领资格（例如翻译分段的认领入口）。
+  const approvedTags = await prisma.tagApplication.findMany({
+    where: { user_id: user.id, approved: true },
+    select: {
+      tag: {
+        select: {
+          id: true,
+          name: true,
+          role_type: true,
+          description: true,
+          color: true,
+          created_at: true,
+        },
+      },
+    },
+    orderBy: { created_at: "asc" },
+  });
+
   return {
     user: {
       id: user.id,
@@ -404,6 +423,7 @@ export async function loginUser(data: LoginInput) {
       avatar_url: user.avatar_url,
       qq_number: user.qq_number,
       created_at: user.created_at,
+      roleTags: approvedTags.map((application) => application.tag),
     },
     token,
     refreshToken,
@@ -1327,15 +1347,47 @@ export async function resetUserTagStatuses(userId: string, data: ResetTagStatusI
   };
 }
 
-export async function resetMemberTagStatuses(userId: string, data: ResetTagStatusInput) {
+/**
+ * 超级管理员账号只能由超级管理员本人操作。
+ * 任何会改动目标账号权限、状态或凭据的管理端点都必须先过这道闸。
+ */
+async function assertCanManageTargetAccount(
+  target: { role: string },
+  actorId?: string
+): Promise<{ id: string; role: string }> {
+  const actor = actorId
+    ? await prisma.user.findUnique({
+        where: { id: actorId },
+        select: { id: true, role: true },
+      })
+    : null;
+
+  if (!actor) {
+    throw new AppError("Actor not found", "NOT_FOUND", 404);
+  }
+
+  if (target.role === "super_admin" && actor.role !== "super_admin") {
+    throw new AppError("Only the super administrator can modify that account", "FORBIDDEN", 403);
+  }
+
+  return actor;
+}
+
+export async function resetMemberTagStatuses(
+  userId: string,
+  data: ResetTagStatusInput,
+  actorId?: string
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true },
+    select: { id: true, role: true },
   });
 
   if (!user) {
     throw new AppError("User not found", "NOT_FOUND", 404);
   }
+
+  await assertCanManageTargetAccount(user, actorId);
 
   await prisma.tagApplication.deleteMany({
     where: {
@@ -1550,17 +1602,16 @@ export async function grantMemberTagStatuses(
   actorId: string,
   data: GrantTagStatusInput
 ) {
-  const [target, actor] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { id: true } }),
-    prisma.user.findUnique({ where: { id: actorId }, select: { id: true } }),
-  ]);
+  const target = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true },
+  });
 
   if (!target) {
     throw new AppError("User not found", "NOT_FOUND", 404);
   }
-  if (!actor) {
-    throw new AppError("Actor not found", "NOT_FOUND", 404);
-  }
+
+  const actor = await assertCanManageTargetAccount(target, actorId);
 
   const uniqueTagIds = [...new Set(data.tagIds)];
   const tags = await prisma.roleTag.findMany({
@@ -1686,6 +1737,11 @@ export async function approveUserVerification(userId: string, actorId?: string) 
   if (!actor) {
     throw new AppError("Actor not found", "NOT_FOUND", 404);
   }
+
+  if (user.role === "super_admin" && actor.role !== "super_admin") {
+    throw new AppError("Only the super administrator can modify that account", "FORBIDDEN", 403);
+  }
+
   if (user.status !== "pending_verification") {
     throw new AppError("User is not pending verification", "VALIDATION_ERROR", 400);
   }
